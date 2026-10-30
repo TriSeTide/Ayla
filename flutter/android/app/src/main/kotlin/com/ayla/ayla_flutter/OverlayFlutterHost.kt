@@ -58,13 +58,20 @@ import kotlin.math.roundToInt
  *   把「屏幕坐标」映射进这个小窗口。
  * 于是**球的屏幕位置恒等于组件的 top**，1:1 跟随，窗口只是它的取景框。
  *
- * ### 拖动时为什么要临时把窗口撑到整屏（[BallWindowRootView]）
- * 窗口若跟着球一起移动，手指坐标会随窗口移动而「自己抵消」⇒ 球只走一半距离
- * （增量被吃掉 50%，这是移动窗口 + 组件自身 top 变化的双重计数变体）。
- * ⇒ 手指按下那一刻把窗口**原地撑到整屏高、原点归 0**（此时「组件坐标 == 屏幕坐标」，
- * 拖动天然 1:1，与 Windows 的 `fill_work_area_height` 同构），抬起后再缩回贴合窗口。
- * 撑开时窗口原点从 `oldY` 变成 0 ⇒ 必须把**这一条 DOWN 事件**平移 `+oldY`，
- * 否则组件记下的 `_dragStartY` 与后续 MOVE 不在同一个坐标系里、球会跳一下。
+ * ### 窗口贴合球体，且窗口自身不参与拖动（2026-11-01 重做）
+ *
+ * 上一版让「按下时把窗口临时撑到整屏、抬起缩回」，用来换取拖动 1:1。
+ * 用户实报「交互存在严重问题和截断」，根因就在这套补偿：
+ *  · 撑开瞬间窗口原点从 oldY 变 0，只要有一条 MOVE/UP 没走到 offsetLocation
+ *    补偿分支，球就跳一大截；
+ *  · 抬起缩回按「最后一次上报的 top」重算几何，与组件内部 `_topPx` 存在竞态
+ *    ⇒ 球被裁掉 / 显示错位；
+ *  · 撑开期间整屏高窗口短暂存在，一旦 UP 被系统吞掉就整屏吃触摸。
+ *
+ * 现在**窗口始终 60dp 高、始终贴合球体，自身完全不参与拖动**：
+ * Dart 侧把 MediaQuery 报成屏幕尺寸 ⇒ 组件在「屏幕坐标系」里自己算 top
+ * （clamp 覆盖全屏，不会饱和）⇒ 原生只做一件事：把窗口摆到组件算出的 top 上。
+ * 组件坐标恒等于屏幕坐标，因此**不需要任何偏移补偿**，也就没有跳动与裁切的来源。
  *
  * ## 引擎组而不是裸 engine
  * [FlutterEngineGroup] 复用主引擎已加载的 AOT 快照与 VM 资源，冷启动快得多，
@@ -98,7 +105,7 @@ class AylaOverlayFlutterHost(
     private val onBringToFront: () -> Unit,
 ) {
     private var windowManager: WindowManager? = null
-    private var rootView: BallWindowRootView? = null
+    private var rootView: FrameLayout? = null
     private var flutterView: FlutterView? = null
     private var params: WindowManager.LayoutParams? = null
 
@@ -116,7 +123,6 @@ class AylaOverlayFlutterHost(
     private var groupTopDp: Double = DEFAULT_GROUP_TOP_DP
 
     /** 窗口此刻是不是被临时撑到整屏（拖动会话中）。 */
-    private var expanded = false
 
     /** 是否有窗口（幂等判据）。 */
     val isShowing: Boolean
@@ -167,7 +173,6 @@ class AylaOverlayFlutterHost(
         val wm = windowManager
         windowManager = null
         params = null
-        expanded = false
         if (view != null && wm != null) {
             try {
                 wm.removeView(view)
@@ -214,7 +219,7 @@ class AylaOverlayFlutterHost(
         view.attachToFlutterEngine(flutter)
 
         // 窗口根 = 触摸闸门（见文件头「拖动时为什么要把窗口撑到整屏」）。
-        val root = BallWindowRootView(context)
+        val root = FrameLayout(context)
         root.addView(
             view,
             FrameLayout.LayoutParams(
@@ -222,8 +227,21 @@ class AylaOverlayFlutterHost(
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
-        root.onTouchDown = { expandForDrag() }
-        root.onTouchUp = { collapseAfterDrag() }
+        // ⚠️ 2026-11-01 重做：**不再挂 expandForDrag / collapseAfterDrag**。
+        //
+        // 那套「按下把窗口撑到整屏 + 给 DOWN 补 offsetLocation + 抬起缩回」是
+        // 上一版「交互严重问题 + 截断」的直接来源：
+        //   · 撑开瞬间窗口原点从 oldY 变 0；只要有一条 MOVE/UP 没走到补偿分支，
+        //     球就跳一大截；
+        //   · 抬起缩回按「最后一次上报的 top」重算几何，与组件内部 _topPx 存在
+        //     竞态 ⇒ 球被裁掉或错位；
+        //   · 撑开期间整屏高窗口短暂存在，一旦 UP 被系统吞掉就整屏吃触摸
+        //     （虽有 3s 兜底，仍是隐患）。
+        //
+        // 现在窗口**始终贴合球体、自身不参与拖动**：Dart 侧 MediaQuery 报屏幕尺寸
+        // ⇒ 组件在「屏幕坐标系」里自己算 top（clamp 覆盖全屏）⇒ 原生只把窗口摆到
+        // 那个 top 上。组件坐标 == 屏幕坐标，无需任何 offset 补偿，
+        // 也就没有跳动与裁切的来源。
 
         val widthPx = dp(WINDOW_WIDTH_DP)
         val layout = WindowManager.LayoutParams(
@@ -318,11 +336,8 @@ class AylaOverlayFlutterHost(
                     val top = readDouble(call.arguments, "top")
                     if (top != null && top.isFinite()) {
                         groupTopDp = currentGroupTop(top)
-                        // 拖动中窗口已撑到整屏（原点 0），**不要**在这里动窗口。
-                        if (!expanded) {
-                            applyTightGeometry()
-                            notifyWindowRect()
-                        }
+                        applyTightGeometry()
+                        notifyWindowRect()
                     }
                     result.success(true)
                 }
@@ -369,50 +384,6 @@ class AylaOverlayFlutterHost(
         }
     }
 
-    // ------------------------------------------------------- 拖动会话（撑开/缩回）
-
-    /**
-     * 手指按下：把窗口**原地**撑成整屏高、原点归 0。
-     *
-     * @return 需要给这条 DOWN 事件加的 y 平移量（px）——撑开后原点从 `oldY` 变成 0，
-     *   旧坐标 + oldY = 新坐标；不加这一下，组件记下的 `_dragStartY` 与后续 MOVE
-     *   不在同一坐标系里，球会跳一大截。
-     */
-    private fun expandForDrag(): Int {
-        val p = params ?: return 0
-        if (expanded) return 0
-        val oldY = p.y
-        expanded = true
-        p.y = 0
-        p.height = screenHeight()
-        p.width = dp(WINDOW_WIDTH_DP)
-        p.x = screenWidth() - p.width
-        applyLayout()
-        notifyWindowRect()
-        // 兜底：万一 Dart 侧没在拖动后回 `setBallGroupTop`（异常路径），
-        // 最多 SPURIOUS_EXPAND_MS 后主动缩回，不能让整屏一直吞触摸。
-        mainHandler.removeCallbacks(collapseGuard)
-        mainHandler.postDelayed(collapseGuard, SPURIOUS_EXPAND_MS)
-        return oldY
-    }
-
-    /** 手指抬起：缩回贴合窗口（几何用最后一次上报的 top）。 */
-    private fun collapseAfterDrag() {
-        mainHandler.removeCallbacks(collapseGuard)
-        if (!expanded) return
-        expanded = false
-        applyTightGeometry()
-        notifyWindowRect()
-    }
-
-    private val collapseGuard = Runnable {
-        if (expanded) {
-            Log.w(TAG, "drag session did not report a new top; collapsing window")
-            expanded = false
-            applyTightGeometry()
-            notifyWindowRect()
-        }
-    }
 
     /** 贴合窗口：`y = top - PAD_TOP`，高度 = 球组 + 上下余量。 */
     private fun applyTightGeometry() {
@@ -499,38 +470,7 @@ class AylaOverlayFlutterHost(
         const val DEFAULT_GROUP_TOP_DP = 80.0
 
         /** 撑开后若一直没有新的 top 上报，最多等这么久就缩回（防止整屏长期吞触摸）。 */
-        private const val SPURIOUS_EXPAND_MS = 1500L
 
         private val mainHandler = Handler(Looper.getMainLooper())
-    }
-}
-
-/**
- * 悬浮球窗口的根视图 —— **触摸闸门**。
- *
- * 存在的唯一理由：窗口贴合球组（60dp 高）时，组件自己的拖动会被这个小窗口夹死；
- * 而「窗口跟着球移动」会让手指坐标随窗口一起漂移 ⇒ 球只走一半距离。
- * ⇒ 按下时把窗口原地点撑到整屏（坐标系变成屏幕坐标系，拖动 1:1），抬起再缩回。
- *
- * 撑开要让原点从 `oldY` 变成 0，所以**这条 DOWN 事件必须平移 `+oldY`**，
- * 否则组件记下的拖动起点与后续 MOVE 不在同一坐标系（球会突然跳一段）。
- */
-private class BallWindowRootView(context: Context) : FrameLayout(context) {
-    /** 返回需要给 DOWN 事件加的 y 平移量（px）。 */
-    var onTouchDown: (() -> Int)? = null
-    var onTouchUp: (() -> Unit)? = null
-
-    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
-            val shift = onTouchDown?.invoke() ?: 0
-            if (shift != 0) ev.offsetLocation(0f, shift.toFloat())
-        }
-        val handled = super.dispatchTouchEvent(ev)
-        if (ev.actionMasked == MotionEvent.ACTION_UP ||
-            ev.actionMasked == MotionEvent.ACTION_CANCEL
-        ) {
-            onTouchUp?.invoke()
-        }
-        return handled
     }
 }

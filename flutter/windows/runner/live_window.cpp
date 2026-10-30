@@ -68,26 +68,17 @@ constexpr int kBallWindowWidth = 176;
 // vertical space: the clamp becomes `[8, workAreaHeight - 52]`, dragging is a
 // plain 1:1 follow, and nothing ever leaves the window.
 //
-// The cost is a large transparent window, which is why WM_NCHITTEST below is
-// load-bearing: every pixel that is not the ball/handle group is reported as
-// HTTRANSPARENT so clicks reach the app underneath.
+// The window is deliberately large + see-through; clicks pass through it via the
+// layered colour key (EnableColorKeyPassThrough), which works per pixel and for
+// other processes as well.
 constexpr int kBallWindowMinHeight = 132;
 
-// ---- Hit-test geometry of the ball group (Flutter LOGICAL pixels) ----------
+// ---- Ball geometry is no longer needed here -------------------------------
 //
-// The group is 132 x 44 (two 44px balls + 28px handle + two 8px gaps, no detach
-// key). The hit band is that rectangle plus a little tolerance for the hover
-// glow (scale 1.08 => ~3.5px) and the focus ring (2px outline + 2px offset),
-// rounded up generously - a too-small band makes the ball feel "sticky".
-constexpr double kBallGroupWidth = 132.0;
-constexpr double kBallGroupHeight = 44.0;
-constexpr double kBallHitTestPadTop = 12.0;
-constexpr double kBallHitTestPadBottom = 12.0;
-constexpr double kBallHitTestPadLeft = 12.0;
-
-/// `.session-activity-group { right: 24px }` (shell.css:461) in the wide档 the
-/// overlay always uses (see hostViewportWidth on the Dart side).
-constexpr double kBallRightInset = 24.0;
+// The floating ball used to keep its hit band as explicit constants (group
+// size + hover-glow/focus-ring padding) and feed them to SetWindowRgn and
+// WM_NCHITTEST. Both are gone: the layered colour key makes Windows decide per
+// pixel, so there is nothing to compute. See EnableColorKeyPassThrough.
 
 /// Distance from the work-area right/bottom edge.
 constexpr int kLiveWindowMargin = 24;
@@ -176,28 +167,6 @@ struct LiveWindowContext {
   int pending_synthetic_clicks = 0;
 };
 
-/// Returns |rect| as a region, or nullptr when it is empty (an empty region would
-/// make the whole window disappear - SetWindowRgn(nullptr) means "no region at
-/// all", which is the safe fallback when a band would collapse).
-HRGN RegionOfRect(const RECT& rect) {
-  if (rect.right <= rect.left || rect.bottom <= rect.top) {
-    return nullptr;
-  }
-  return ::CreateRectRgn(rect.left, rect.top, rect.right, rect.bottom);
-}
-
-/// Client -> screen conversion for a client RECT.
-void ClientToScreenRect(HWND window, RECT* rect) {
-  POINT origin = {rect->left, rect->top};
-  POINT corner = {rect->right, rect->bottom};
-  ::ClientToScreen(window, &origin);
-  ::ClientToScreen(window, &corner);
-  rect->left = origin.x;
-  rect->top = origin.y;
-  rect->right = corner.x;
-  rect->bottom = corner.y;
-}
-
 /// Device pixels per Flutter logical pixel for |window|.
 double ScaleForWindow(HWND window) {
   const UINT dpi = FlutterDesktopGetDpiForHWND(window);
@@ -222,42 +191,6 @@ double ScaleForWindow(HWND window) {
 //
 // The vertical extent is a parameter (not derived inside) so the region and the
 // hit test can be given the exact same numbers by their single shared caller.
-RECT BallBandClientRect(HWND window,
-                        double band_top_logical,
-                        double band_bottom_logical) {
-  const double scale = ScaleForWindow(window);
-  RECT client = {};
-  ::GetClientRect(window, &client);
-  RECT band = {};
-  // [client.right] is already in PHYSICAL pixels, so the logical constants are
-  // converted and subtracted from it (multiplying the whole expression by the
-  // scale factor would square the DPI factor on a 125% display).
-  //
-  // The band deliberately starts at the EXPANDED group edge minus the pad:
-  //     expanded  : [W - 24 - 132 - 12, W]   <- the widest state
-  //     collapsed : [W - 132 - 12,      W]   (subset -> covered as well)
-  // so one band covers both states and a collapse in flight cannot lose a click.
-  const double pad_left_px =
-      (kBallGroupWidth + kBallHitTestPadLeft + kBallRightInset) * scale;
-  band.left = static_cast<LONG>(static_cast<double>(client.right) - pad_left_px);
-  band.top = static_cast<LONG>(band_top_logical * scale);
-  band.bottom = static_cast<LONG>(band_bottom_logical * scale);
-  band.right = client.right;
-
-  // Never hand back a collapsed rectangle: an empty region would hide the whole
-  // window (and SetWindowRgn(nullptr) would restore "no region" = the window eats
-  // the entire work area again). One physical row is enough to stay harmless.
-  if (band.bottom <= band.top) {
-    band.bottom = band.top + static_cast<LONG>(scale) + 1;
-  }
-  if (band.left < 0) {
-    band.left = 0;
-  }
-  if (band.left >= client.right) {
-    band.left = client.right - 1;
-  }
-  return band;
-}
 
 /// DWMWA_WINDOW_CORNER_PREFERENCE (Win11). See win32_window.cpp.
 #ifndef DWMWA_WINDOW_CORNER_PREFERENCE
@@ -373,36 +306,55 @@ void EnablePerPixelTransparency(HWND window) {
   set_window_composition_attribute(window, &data);
 }
 
+// ---- Colour-key pass-through (Windows) --------------------------------------
+//
+// THIS is the mechanism that genuinely makes "only the ball itself is
+// clickable", for OTHER PROCESSES too. Why the two alternatives fall short:
+//
+//   * SetWindowRgn crops the window to a REGION. A region is a set of
+//     rectangles, so it can never follow a round ball + its glow, and any
+//     rectangle big enough to contain the ball also swallows its empty corners.
+//     That is exactly the user's complaint: "it just collapsed the floating
+//     window into a box". It also forces the window (and therefore the whole
+//     Flutter view) to be re-shaped on every drag step.
+//   * WM_NCHITTEST -> HTTRANSPARENT only hands the click to the next window on
+//     the SAME THREAD. When the window underneath belongs to another process
+//     (browser, Explorer, ...) the click is still eaten by us.
+//
+// With WS_EX_LAYERED + SetLayeredWindowAttributes(LWA_COLORKEY) Windows treats
+// every pixel painted in |kColorKey| as *not part of this window*: it is not
+// drawn, and hit testing skips it - per pixel, for any process below. The
+// window keeps its full size and the Flutter view keeps its own layout, so
+// nothing has to be re-shaped or re-laid-out while dragging.
+//
+// The colour itself is deliberately absurd (near-black with a distinctive
+// green bias) so the rounded corners / glow fall-off can never accidentally
+// quantise onto it, and the widget tree leaves those pixels fully transparent
+// (TransparencyMode.transparent + no background) instead of painting them.
+namespace {
+constexpr COLORREF kOverlayColorKey = RGB(1, 2, 3);
 }  // namespace
 
-RECT AylaLiveWindowHost::BallBand(HWND window) const {
-  // Vertical extent: the group's resting band plus the pad that covers the
-  // hover glow and the focus ring.
-  //
-  // Deliberately NOT widened for the collapse transition: the only transform
-  // the widget animates there is TRANSLEX X (session_activity.dart:350-359,
-  // mirroring `.is-collapsed { transform: translateX(24px) }`), so the painted
-  // group never leaves its resting vertical band.
-  const double top = ball_group_top_ - kBallHitTestPadTop;
-  const double bottom =
-      ball_group_top_ + kBallGroupHeight + kBallHitTestPadBottom;
-  return BallBandClientRect(window, top, bottom);
+void EnableColorKeyPassThrough(HWND window) {
+  // A layered window ignores WM_PAINT and composites from its own surface.
+  // LWA_COLORKEY says: "the pixels of exactly this colour are holes".
+  ::SetLayeredWindowAttributes(window, kOverlayColorKey, 0, LWA_COLORKEY);
+  // Fill the window background with the key colour so the areas the Flutter
+  // view leaves untouched (its own transparency) become holes instead of the
+  // default white/black brush - CreateWindowEx registered the class with
+  // hbrBackground = nullptr, so those pixels would otherwise stay undefined.
+  HBRUSH key_brush = ::CreateSolidBrush(kOverlayColorKey);
+  if (key_brush != nullptr) {
+    ::SetClassLongPtrW(window, GCLP_HBRBACKGROUND,
+                       reinterpret_cast<LONG_PTR>(key_brush));
+    // Repaint so the new background brush takes effect immediately.
+    ::InvalidateRect(window, nullptr, TRUE);
+  }
 }
 
-void AylaLiveWindowHost::ApplyBallWindowRegion(HWND window) {
-  // Region coordinates are CLIENT-relative (the same space WM_NCHITTEST lands in
-  // after ScreenToClient), so the geometry comes from the one shared definition.
-  const RECT band = BallBand(window);
-  HRGN region = ::CreateRectRgn(band.left, band.top, band.right, band.bottom);
-  if (region == nullptr) {
-    return;
-  }
-  // SetWindowRgn takes ownership of |region| on success - do NOT DeleteObject it
-  // afterwards, and do not touch the handle either way.
-  if (::SetWindowRgn(window, region, TRUE) == 0) {
-    ::DeleteObject(region);
-  }
-}
+}  // namespace
+
+
 
 AylaLiveWindowHost::AylaLiveWindowHost(HWND owner_window, AylaOverlayKind kind)
     : owner_window_(owner_window), kind_(kind) {}
@@ -491,9 +443,13 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   // WS_EX_TOOLWINDOW    : keeps it out of Alt-Tab and the taskbar.
   // WS_EX_NOACTIVATE    : (ball only) clicking the overlay must not steal focus
   //                       from whatever the user is typing in.
+  // WS_EX_LAYERED       : (ball only) REQUIRED for the colour-key pass-through.
+  //                       See EnableColorKeyPassThrough below - this is what
+  //                       actually makes "only the ball itself is clickable"
+  //                       hold for OTHER PROCESSES as well.
   DWORD ex_style = WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
   if (kind_ == AylaOverlayKind::kActivityBall) {
-    ex_style |= WS_EX_NOACTIVATE;
+    ex_style |= WS_EX_NOACTIVATE | WS_EX_LAYERED;
   }
   // The live mini window is created as a RESIZABLE popup (see kResizablePopupStyle):
   // WS_THICKFRAME gives the user a real grab band for edge-resizing while WS_POPUP
@@ -517,17 +473,24 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   ::DwmSetWindowAttribute(window_handle_, DWMWA_WINDOW_CORNER_PREFERENCE,
                           &corner_preference, sizeof(corner_preference));
 
-  if (transparent) {
-    EnablePerPixelTransparency(window_handle_);
-  }
-
   if (kind_ == AylaOverlayKind::kActivityBall) {
-    // Cut the window down to the ball band BEFORE the engine starts: the second
-    // engine's first frames then already live in a click-through window, and the
-    // region is what makes "only the ball itself is clickable" true for OTHER
-    // PROCESSES too (see ApplyBallWindowRegion).
-    ApplyBallWindowRegion(window_handle_);
+    // Colour-key pass-through: every pixel in this exact colour becomes
+    // transparent AND click-through, per pixel, for every process underneath.
+    // This replaces the old SetWindowRgn approach, which only cropped the
+    // window to a rectangle - the user's "it just collapses the window into a
+    // box" complaint. A region can never cut around a round ball plus its
+    // glow, and a rectangular region also swallows the empty corners.
+    //
+    // Deliberately NOT combined with EnablePerPixelTransparency: that one makes
+    // the whole window per-pixel-alpha through DWM, and DWM compositing wins
+    // over LWA_COLORKEY - the key colour would be drawn instead of becoming a
+    // hole and nothing would pass through. A layered colour-key window must
+    // keep plain GDI composition.
+    EnableColorKeyPassThrough(window_handle_);
   } else {
+    if (transparent) {
+      EnablePerPixelTransparency(window_handle_);
+    }
     // WS_THICKFRAME changes how the requested width/height map to the CLIENT area
     // (CreateWindowEx sizes the WINDOW rect, and the resize frame now eats a few px
     // per side), but the hosted widget was laid out for exactly
@@ -804,7 +767,6 @@ void AylaLiveWindowHost::CreateChannel() {
               }
             }
           }
-          ApplyBallWindowRegion(window_handle_);
           result->Success(flutter::EncodableValue(true));
           return;
         }
@@ -953,21 +915,12 @@ LRESULT AylaLiveWindowHost::HandleMessage(HWND window,
     case WM_NCHITTEST: {
       POINT point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
       if (kind_ == AylaOverlayKind::kActivityBall) {
-        // Belt and braces: ApplyBallWindowRegion already cut everything outside
-        // the ball band away (that is what really makes the rest of the work
-        // area click-through for OTHER PROCESSES - HTTRANSPARENT only skips to
-        // the next window of the SAME thread, which is why the first version
-        // "swallowed a whole block of the screen").
-        const LRESULT base = ::DefWindowProcW(window, message, wparam, lparam);
-        if (base != HTCLIENT) {
-          return base;
-        }
-        ::ScreenToClient(window, &point);
-        const RECT band = BallBand(window);
-        const bool in_band = point.y >= band.top && point.y < band.bottom &&
-                             point.x >= band.left &&
-                             point.x < band.right;
-        return in_band ? HTCLIENT : HTTRANSPARENT;
+        // The floating ball relies ENTIRELY on the colour-key pass-through
+        // (see EnableColorKeyPassThrough): Windows skips every pixel painted in
+        // the key colour, per pixel, for other processes too, so WM_NCHITTEST
+        // never runs for those points. No band arithmetic left - that was the
+        // "it just collapses into a box" implementation.
+        break;
       }
 
       // ---- live mini window: fake non-client area -> OS drag / resize --------
@@ -1137,11 +1090,6 @@ LRESULT AylaLiveWindowHost::HandleMessage(HWND window,
         ::MoveWindow(controller_->view()->GetNativeWindow(), rect.left,
                      rect.top, rect.right - rect.left, rect.bottom - rect.top,
                      TRUE);
-      }
-      if (kind_ == AylaOverlayKind::kActivityBall) {
-        // A DPI change or a work-area change resizes this window; the region is
-        // stored in client pixels, so it has to be recomputed.
-        ApplyBallWindowRegion(window);
       }
       if (kind_ != AylaOverlayKind::kActivityBall && channel_ != nullptr &&
           wparam != SIZE_MINIMIZED) {
