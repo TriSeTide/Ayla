@@ -51,29 +51,17 @@ constexpr int kLiveWindowHeight = 120;
 // and a little breathing room for the hover glow (scale 1.08) => 176 wide.
 constexpr int kBallWindowWidth = 176;
 
-// The ball window is EXACTLY the size of the ball group: 176 x 132 logical px.
-//
-// Why the window is this small (and why that IS the click-through story):
-//   * the Flutter Windows embedder has NO transparent-background mode - its DXGI
-//     swapchain carries no alpha - so a large "transparent" window shows PURE BLACK
-//     wherever Flutter did not paint;
-//   * Microsoft Layered-Windows docs make LWA_COLORKEY a per-pixel match against
-//     one exact colour, which black can never satisfy => that black slab eats clicks;
-//   * SetWindowRgn crops to rectangles only, so a round ball plus its glow can never
-//     fit and the empty corners still swallow clicks ("collapsed into a box").
-//
-// A window only as big as the group needs none of that: outside it there is no
-// window of ours, so input reaches whatever is underneath - for ANY process.
-//
-// The window travels with the group while dragging (MoveBallWindowToGroupTop), so
-// the group always sits at the same spot INSIDE the window.
-constexpr int kBallWindowMinHeight = 132;
-
 /// Slack above the ball group inside the ball-sized window (hover glow at scale
 /// 1.08 plus the 2px focus ring). The widget positions the group with
 /// `Positioned(top: 0)` inside this window, so the window's top edge is the
 /// group's top edge minus this pad.
-constexpr int kBallWindowPadTop = 8;
+constexpr int kBallWindowPadTop = 16;
+
+// Height: the group is 44 tall plus its shadow on BOTH sides.
+// _kActivityShadow is BoxShadow(blurRadius: 12, offset.dy: 2), so the painted
+// extent reaches ~14px past the circle; the old fixed 132 left only 8px of
+// slack above the group and clipped the top of the glow (the truncated look).
+constexpr int kBallWindowMinHeight = 44 + 2 * kBallWindowPadTop;
 
 /// Design resting position of the ball group: `top: 80px` (shell.css:462) in the
 /// wide档 the overlay always uses. Only used for the window's INITIAL placement;
@@ -345,9 +333,16 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   window_class.hCursor = ::LoadCursorW(nullptr, IDC_ARROW);
   // A transparent window must NOT paint a background brush at all; the opaque
   // live window keeps the black brush so its very first frames are not garbage.
+  // The ball window must NEVER paint a background brush: its pixels are meant to
+  // be transparent (see EnablePerPixelTransparency), and a brush would put opaque
+  // black behind everything Flutter leaves unpainted — the black slab the user
+  // screenshotted. `transparent` is therefore the right predicate for the OPAQUE
+  // live window only; the ball window is forced to nullptr regardless of the flag
+  // so a future caller cannot reintroduce the black slab by passing false.
   window_class.hbrBackground =
-      transparent ? nullptr
-                  : static_cast<HBRUSH>(::GetStockObject(BLACK_BRUSH));
+      (kind_ == AylaOverlayKind::kActivityBall || transparent)
+          ? nullptr
+          : static_cast<HBRUSH>(::GetStockObject(BLACK_BRUSH));
   window_class.lpszClassName = class_name;
   // Fails with ERROR_CLASS_ALREADY_EXISTS on re-open; that is fine.
   ::RegisterClassExW(&window_class);
@@ -430,6 +425,14 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
     return false;
   }
 
+  // The window class is registered ONCE and reused (RegisterClassEx fails with
+  // ERROR_CLASS_ALREADY_EXISTS on the second open), so the hbrBackground picked
+  // above is not necessarily what is in effect for THIS window. Force it: the
+  // ball must have no background brush at all, otherwise every pixel Flutter
+  // leaves unpainted is filled opaque black.
+  ::SetClassLongPtrW(window_handle_, GCLP_HBRBACKGROUND,
+                     reinterpret_cast<LONG_PTR>(nullptr));
+
   // Square corners: a borderless always-on-top window with Win11 rounding shows
   // the desktop colour in the four corner notches.
   const int corner_preference = DWMWCP_DONOTROUND;
@@ -437,27 +440,26 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
                           &corner_preference, sizeof(corner_preference));
 
   if (kind_ == AylaOverlayKind::kActivityBall) {
-    // The ball window is EXACTLY the size of the ball group, so there is nothing
-    // to make transparent and nothing to punch through: outside this window
-    // there is simply no window of ours at all, and Windows routes the click
-    // straight to whatever application is underneath - including other
-    // processes. No colour key, no DWM alpha, no window region.
+    // Click-through comes from GEOMETRY, not from any transparency trick: this
+    // window is exactly the size of the ball group, so outside it there is no
+    // window of ours at all and input reaches whatever is underneath - for ANY
+    // process. That part is settled.
     //
-    // This replaces three failed attempts, all of which the user rejected:
-    //   * WM_NCHITTEST -> HTTRANSPARENT: only skips to the next window on the
-    //     SAME thread, so a click over another process was still eaten;
-    //   * SetWindowRgn: crops the window to a RECTANGLE - a round ball plus its
-    //     glow can never fit, so it looked like "the window just collapsed into
-    //     a box" and the empty corners still swallowed clicks;
-    //   * WS_EX_LAYERED + LWA_COLORKEY over a full-work-area window: the Flutter
-    //     Windows embedder has NO transparent-background mode (its DXGI swapchain
-    //     has no alpha), so every unpainted pixel is pure BLACK, and black can
-    //     never equal the colour key => the black slab ate every click. That black
-    //     slab is exactly what the user saw.
+    // But the ball is ROUND and it has a glow, so the window's own corners are
+    // still not painted by Flutter. Without DWM compositing those pixels show up
+    // as a BLACK slab - exactly the regression the user screenshotted. So the
+    // window still needs `EnablePerPixelTransparency`: it is what turns the
+    // Flutter surface's transparent pixels into "see the desktop", including the
+    // area outside the circle and the glow fall-off.
     //
-    // The window keeps a plain opaque backdrop, but it is fully covered by the
-    // Flutter surface (the widget paints the whole 176x132 area), so nothing of
-    // it is ever visible.
+    // NOTE the two are NOT interchangeable and must not be confused:
+    //   * DWM per-pixel alpha  -> makes unpainted pixels see-through (visual),
+    //   * window geometry      -> decides where clicks go (input).
+    // An earlier revision used a layered colour key over a FULL-SCREEN window:
+    //   * Flutter's Windows swapchain has no alpha, so unpainted pixels were pure
+    //     black, and black never matches a colour key => the black slab ate every
+    //     click. Both symptoms, one cause.
+    EnablePerPixelTransparency(window_handle_);
   } else {
     if (transparent) {
       EnablePerPixelTransparency(window_handle_);

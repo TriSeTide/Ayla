@@ -454,17 +454,41 @@ class AylaOverlayFlutterHost(
         const val INNER_CHANNEL = "ayla/overlay_android"
 
         /**
-         * 窗口逻辑宽度（dp）：球组最大宽 132 + 组件自身 `right: 24` ⇒ 需要 156，
-         * 再加辉光/焦点环余量 ⇒ 160。**这是「窗口之外根本不存在」的关键**：
+         * 球组四周为「阴影/辉光外溢」预留的逻辑像素。
+         *
+         * 取自 `_kActivityShadow`：`blurRadius: 12` + `offset.dy: 2` ⇒ 14，向上取整到 16。
+         * 这是**纯视觉留白**，不是点击区域（点击区域仍是窗口矩形，而窗口只有这么大）。
+         *
+         * 必须声明在 [WINDOW_WIDTH_DP] / [WINDOW_HEIGHT_DP] **之前**
+         * （Kotlin 的 const 初始化顺序按声明位置求值）。
+         */
+        const val BALL_GLOW_PAD_DP = 16
+
+        /**
+         * 窗口逻辑宽度（dp）。
+         *
+         * 球组最大宽 = 44(语音球) + 8(gap) + 44(直播球) + 8(gap) + 28(把手) = 132；
+         * 组件自带 `right: 24` 内缩 ⇒ 需要 156；左右再各留 [BALL_GLOW_PAD_DP] 的
+         * 阴影外溢 ⇒ 160 + 2*[BALL_GLOW_PAD_DP]。
+         *
+         * ⚠️ **窗口外根本不存在矩形** —— 这是「只有球可点」的实现方式，
          * 上一版是 176 × 整屏高，用户实报「一大片点不了」。
          */
-        const val WINDOW_WIDTH_DP = 160
+        const val WINDOW_WIDTH_DP = 160 + 2 * BALL_GLOW_PAD_DP
 
-        /** 窗口逻辑高度（dp）= PAD_TOP 6 + 球组 44 + 焦点环 4 + PAD_BOTTOM 6。 */
-        const val WINDOW_HEIGHT_DP = 60
+        /**
+         * 窗口逻辑高度（dp）：球组 44 + 上下阴影外溢。
+         *
+         * ⚠️ 2026-11-01 修正「球被截断锁死」：球本身带
+         * `BoxShadow(blurRadius: 12, offset: (0,2))`（session_activity.dart:88–94），
+         * 视觉上向外溢出约 `blurRadius + |offsetY|` ≈ 14dp。
+         * 旧值 60 只留了 8dp ⇒ 上下各有约 6dp 被窗口边缘切掉，看起来就是「截断」。
+         * 现在按真实外溢量留白。
+         */
+        const val WINDOW_HEIGHT_DP = 44 + 2 * BALL_GLOW_PAD_DP
 
-        /** 球组上方的余量（辉光 scale 1.08 ≈ 1.8px + 焦点环 4px）。 */
-        const val PAD_TOP_DP = 6
+        /** 球组上方的余量（与 [BALL_GLOW_PAD_DP] 同一口径）。 */
+        const val PAD_TOP_DP = BALL_GLOW_PAD_DP
 
         /** 组件在**宽屏档**下的默认 top（`shell.css:462` 的 `top: 80px`）⇒ 首帧落点。 */
         const val DEFAULT_GROUP_TOP_DP = 80.0
