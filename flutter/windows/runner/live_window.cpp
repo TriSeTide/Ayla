@@ -51,34 +51,41 @@ constexpr int kLiveWindowHeight = 120;
 // and a little breathing room for the hover glow (scale 1.08) => 176 wide.
 constexpr int kBallWindowWidth = 176;
 
-// The ball window is as TALL AS THE WHOLE WORK AREA on purpose.
+// The ball window is EXACTLY the size of the ball group: 176 x 132 logical px.
 //
-// Why not a snug 176x132 box (the first attempt):
-//   * the widget positions itself with `Positioned(top: <px>)` and CLAMPS the
-//     drag to `[8, viewportHeight - 44 - 8]`. In a 132-tall viewport that is
-//     `[8, 80]` - and on a 176-wide viewport the widget is in its NARROW档
-//     (breakpoint is 768) whose default top is 104, i.e. ALREADY outside the
-//     clamp range and 16px past the window's bottom edge => the balls get
-//     clipped and dragging does nothing at all.
-//   * moving the WINDOW on drag does not fix it either: the widget still
-//     applies the same clamp to its own coordinate, so the window offset and
-//     the in-window offset double-count and the ball runs away from the
-//     cursor.
-// With a full-height window the widget's own coordinate space IS the screen's
-// vertical space: the clamp becomes `[8, workAreaHeight - 52]`, dragging is a
-// plain 1:1 follow, and nothing ever leaves the window.
+// Why the window is this small (and why that IS the click-through story):
+//   * the Flutter Windows embedder has NO transparent-background mode - its DXGI
+//     swapchain carries no alpha - so a large "transparent" window shows PURE BLACK
+//     wherever Flutter did not paint;
+//   * Microsoft Layered-Windows docs make LWA_COLORKEY a per-pixel match against
+//     one exact colour, which black can never satisfy => that black slab eats clicks;
+//   * SetWindowRgn crops to rectangles only, so a round ball plus its glow can never
+//     fit and the empty corners still swallow clicks ("collapsed into a box").
 //
-// The window is deliberately large + see-through; clicks pass through it via the
-// layered colour key (EnableColorKeyPassThrough), which works per pixel and for
-// other processes as well.
+// A window only as big as the group needs none of that: outside it there is no
+// window of ours, so input reaches whatever is underneath - for ANY process.
+//
+// The window travels with the group while dragging (MoveBallWindowToGroupTop), so
+// the group always sits at the same spot INSIDE the window.
 constexpr int kBallWindowMinHeight = 132;
 
-// ---- Ball geometry is no longer needed here -------------------------------
+/// Slack above the ball group inside the ball-sized window (hover glow at scale
+/// 1.08 plus the 2px focus ring). The widget positions the group with
+/// `Positioned(top: 0)` inside this window, so the window's top edge is the
+/// group's top edge minus this pad.
+constexpr int kBallWindowPadTop = 8;
+
+/// Design resting position of the ball group: `top: 80px` (shell.css:462) in the
+/// wide档 the overlay always uses. Only used for the window's INITIAL placement;
+/// after that Dart reports the real top on every drag (setBallGroupTop).
+constexpr int kBallDefaultGroupTop = 80;
+
+// ---- Ball geometry constants are gone on purpose ---------------------------
 //
-// The floating ball used to keep its hit band as explicit constants (group
-// size + hover-glow/focus-ring padding) and feed them to SetWindowRgn and
-// WM_NCHITTEST. Both are gone: the layered colour key makes Windows decide per
-// pixel, so there is nothing to compute. See EnableColorKeyPassThrough.
+// Earlier revisions kept the group size plus hover-glow/focus-ring padding as
+// explicit constants and fed them to SetWindowRgn / WM_NCHITTEST / a colour key.
+// None of that exists any more: the window IS the group, so there is nothing to
+// compute and no hit test to fake.
 
 /// Distance from the work-area right/bottom edge.
 constexpr int kLiveWindowMargin = 24;
@@ -306,55 +313,7 @@ void EnablePerPixelTransparency(HWND window) {
   set_window_composition_attribute(window, &data);
 }
 
-// ---- Colour-key pass-through (Windows) --------------------------------------
-//
-// THIS is the mechanism that genuinely makes "only the ball itself is
-// clickable", for OTHER PROCESSES too. Why the two alternatives fall short:
-//
-//   * SetWindowRgn crops the window to a REGION. A region is a set of
-//     rectangles, so it can never follow a round ball + its glow, and any
-//     rectangle big enough to contain the ball also swallows its empty corners.
-//     That is exactly the user's complaint: "it just collapsed the floating
-//     window into a box". It also forces the window (and therefore the whole
-//     Flutter view) to be re-shaped on every drag step.
-//   * WM_NCHITTEST -> HTTRANSPARENT only hands the click to the next window on
-//     the SAME THREAD. When the window underneath belongs to another process
-//     (browser, Explorer, ...) the click is still eaten by us.
-//
-// With WS_EX_LAYERED + SetLayeredWindowAttributes(LWA_COLORKEY) Windows treats
-// every pixel painted in |kColorKey| as *not part of this window*: it is not
-// drawn, and hit testing skips it - per pixel, for any process below. The
-// window keeps its full size and the Flutter view keeps its own layout, so
-// nothing has to be re-shaped or re-laid-out while dragging.
-//
-// The colour itself is deliberately absurd (near-black with a distinctive
-// green bias) so the rounded corners / glow fall-off can never accidentally
-// quantise onto it, and the widget tree leaves those pixels fully transparent
-// (TransparencyMode.transparent + no background) instead of painting them.
-namespace {
-constexpr COLORREF kOverlayColorKey = RGB(1, 2, 3);
 }  // namespace
-
-void EnableColorKeyPassThrough(HWND window) {
-  // A layered window ignores WM_PAINT and composites from its own surface.
-  // LWA_COLORKEY says: "the pixels of exactly this colour are holes".
-  ::SetLayeredWindowAttributes(window, kOverlayColorKey, 0, LWA_COLORKEY);
-  // Fill the window background with the key colour so the areas the Flutter
-  // view leaves untouched (its own transparency) become holes instead of the
-  // default white/black brush - CreateWindowEx registered the class with
-  // hbrBackground = nullptr, so those pixels would otherwise stay undefined.
-  HBRUSH key_brush = ::CreateSolidBrush(kOverlayColorKey);
-  if (key_brush != nullptr) {
-    ::SetClassLongPtrW(window, GCLP_HBRBACKGROUND,
-                       reinterpret_cast<LONG_PTR>(key_brush));
-    // Repaint so the new background brush takes effect immediately.
-    ::InvalidateRect(window, nullptr, TRUE);
-  }
-}
-
-}  // namespace
-
-
 
 AylaLiveWindowHost::AylaLiveWindowHost(HWND owner_window, AylaOverlayKind kind)
     : owner_window_(owner_window), kind_(kind) {}
@@ -424,12 +383,17 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   }
 
   if (align_top_right) {
-    // The floating ball lives at the top-right corner of the work area. Its
-    // right edge coincides with the work-area right edge because the widget
-    // itself keeps a 24px inset and slides the last 24px right when collapsed
-    // (that is what "the handle sticks to the screen edge" means in-app).
+    // The floating ball hugs the right edge of the work area (the widget keeps
+    // its own 24px inset inside the window).
     window_x = work_area.right - window_width;
-    window_y = work_area.top;
+    // Vertically the window must start where the widget will PAINT the group:
+    // the design default is `top: 80px` (shell.css:462) measured from the top of
+    // the work area, and the widget leaves kBallWindowPadTop of glow slack above
+    // it inside the window. Landing on work_area.top would put the group 80px too
+    // high until the first drag reports its real position.
+    window_y =
+        work_area.top + static_cast<int>(kBallDefaultGroupTop * scale) -
+        static_cast<int>(kBallWindowPadTop * scale);
   } else {
     const int margin = static_cast<int>(kLiveWindowMargin * scale);
     window_x = work_area.right - window_width - margin;
@@ -443,13 +407,12 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   // WS_EX_TOOLWINDOW    : keeps it out of Alt-Tab and the taskbar.
   // WS_EX_NOACTIVATE    : (ball only) clicking the overlay must not steal focus
   //                       from whatever the user is typing in.
-  // WS_EX_LAYERED       : (ball only) REQUIRED for the colour-key pass-through.
-  //                       See EnableColorKeyPassThrough below - this is what
-  //                       actually makes "only the ball itself is clickable"
-  //                       hold for OTHER PROCESSES as well.
+  // NOTE: no WS_EX_LAYERED. The ball window is exactly the size of the ball
+  // group, so there is nothing to make transparent: outside it there is no
+  // window of ours, and clicks reach the app underneath by definition.
   DWORD ex_style = WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
   if (kind_ == AylaOverlayKind::kActivityBall) {
-    ex_style |= WS_EX_NOACTIVATE | WS_EX_LAYERED;
+    ex_style |= WS_EX_NOACTIVATE;
   }
   // The live mini window is created as a RESIZABLE popup (see kResizablePopupStyle):
   // WS_THICKFRAME gives the user a real grab band for edge-resizing while WS_POPUP
@@ -474,19 +437,27 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
                           &corner_preference, sizeof(corner_preference));
 
   if (kind_ == AylaOverlayKind::kActivityBall) {
-    // Colour-key pass-through: every pixel in this exact colour becomes
-    // transparent AND click-through, per pixel, for every process underneath.
-    // This replaces the old SetWindowRgn approach, which only cropped the
-    // window to a rectangle - the user's "it just collapses the window into a
-    // box" complaint. A region can never cut around a round ball plus its
-    // glow, and a rectangular region also swallows the empty corners.
+    // The ball window is EXACTLY the size of the ball group, so there is nothing
+    // to make transparent and nothing to punch through: outside this window
+    // there is simply no window of ours at all, and Windows routes the click
+    // straight to whatever application is underneath - including other
+    // processes. No colour key, no DWM alpha, no window region.
     //
-    // Deliberately NOT combined with EnablePerPixelTransparency: that one makes
-    // the whole window per-pixel-alpha through DWM, and DWM compositing wins
-    // over LWA_COLORKEY - the key colour would be drawn instead of becoming a
-    // hole and nothing would pass through. A layered colour-key window must
-    // keep plain GDI composition.
-    EnableColorKeyPassThrough(window_handle_);
+    // This replaces three failed attempts, all of which the user rejected:
+    //   * WM_NCHITTEST -> HTTRANSPARENT: only skips to the next window on the
+    //     SAME thread, so a click over another process was still eaten;
+    //   * SetWindowRgn: crops the window to a RECTANGLE - a round ball plus its
+    //     glow can never fit, so it looked like "the window just collapsed into
+    //     a box" and the empty corners still swallowed clicks;
+    //   * WS_EX_LAYERED + LWA_COLORKEY over a full-work-area window: the Flutter
+    //     Windows embedder has NO transparent-background mode (its DXGI swapchain
+    //     has no alpha), so every unpainted pixel is pure BLACK, and black can
+    //     never equal the colour key => the black slab ate every click. That black
+    //     slab is exactly what the user saw.
+    //
+    // The window keeps a plain opaque backdrop, but it is fully covered by the
+    // Flutter surface (the widget paints the whole 176x132 area), so nothing of
+    // it is ever visible.
   } else {
     if (transparent) {
       EnablePerPixelTransparency(window_handle_);
@@ -597,17 +568,61 @@ bool AylaLiveWindowHost::ShowBall(const std::string& payload_json) {
     Close(false);
   }
 
+  // Geometry the Dart host needs: the widget lays itself out in SCREEN
+  // coordinates (so its own drag clamp covers the whole screen) and then a
+  // Transform maps that into this small window.
+  HMONITOR monitor = ::MonitorFromWindow(
+      owner_window_ != nullptr ? owner_window_ : ::GetActiveWindow(),
+      MONITOR_DEFAULTTONEAREST);
+  MONITORINFO monitor_info = {};
+  monitor_info.cbSize = sizeof(MONITORINFO);
+  RECT work_area = {};
+  if (::GetMonitorInfoW(monitor, &monitor_info)) {
+    work_area = monitor_info.rcWork;
+  } else {
+    ::SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0);
+  }
+  const UINT monitor_dpi = FlutterDesktopGetDpiForMonitor(monitor);
+  const double monitor_scale =
+      monitor_dpi > 0 ? (static_cast<double>(monitor_dpi) / 96.0) : 1.0;
+  const double work_w =
+      static_cast<double>(work_area.right - work_area.left) / monitor_scale;
+  const double work_h =
+      static_cast<double>(work_area.bottom - work_area.top) / monitor_scale;
+  // Window origin in SCREEN logical px (the window hugs the right edge and the
+  // group's first resting position is the design default top: 80px, shell.css:462).
+  const double win_x = work_w - static_cast<double>(kBallWindowWidth);
+  const double win_y = 0.0;
+
   std::ostringstream entrypoint;
   entrypoint << "{\"kind\":\"activityBall\",\"payload\":"
-             << (payload_json.empty() ? "{}" : payload_json) << "}";
+             << (payload_json.empty() ? "{}" : payload_json) << ","
+             << "\"viewportWidth\":" << work_w << ","
+             << "\"viewportHeight\":" << work_h << ","
+             << "\"windowRect\":{\"left\":" << win_x
+             << ",\"top\":" << win_y
+             << ",\"width\":" << kBallWindowWidth
+             << ",\"height\":" << kBallWindowMinHeight << "}}";
 
-  // The window is as tall as the work area (see kBallWindowMinHeight) so the
-  // widget's own drag clamp covers the whole screen and no window movement is
-  // needed while dragging.
+  // ⚠️ 2026-11-01 重做（用户：「为什么人家是一个按钮能直接丢出来，
+  // 你却要创建一个透明窗口？」）—— 窗口**只包住球组**。
+  //
+  // 为什么这条路才是对的（微软文档 + Flutter embedder 事实）：
+  //   1. Flutter Windows embedder 的 DXGI swapchain **没有 alpha 模式**
+  //      （flutter_windows.h 没有任何透明度开关），所以「大透明窗口」里
+  //      凡是 Flutter 没画到的像素必然是**纯黑**——这就是用户截图里的黑底。
+  //   2. 微软文档（Window Features / Layered Windows）说明：SetLayeredWindowAttributes
+  //      的 LWA_COLORKEY 只在像素**精确等于** key 色时才穿孔，黑(0,0,0) 与
+  //      key(1,2,3) 永不相等 ⇒ 整块黑底吃掉所有点击。
+  //   3. 两者的前提（要透明 vs 要穿透）互相排斥，无论怎么调参数都是错的。
+  //
+  // 正解：**窗口本身就只有球组那么大**。窗口之外根本不存在矩形 ⇒ 天然穿透；
+  // 没有黑底（窗口内只有球组被 Flutter 画满）；也不需要颜色键或 DWM 透明。
+  // 拖动由原生跟随（`setBallGroupTop` → 移动窗口），组件坐标经 Transform 映射。
   return CreateWindowAndEngine(entrypoint.str(), kBallWindowWidth,
-                               kBallWindowMinHeight, /*transparent=*/true,
+                               kBallWindowMinHeight, /*transparent=*/false,
                                /*align_top_right=*/true,
-                               /*fill_work_area_height=*/true);
+                               /*fill_work_area_height=*/false);
 }
 
 bool AylaLiveWindowHost::UpdateBall(const std::string& payload_json) {
@@ -743,14 +758,12 @@ void AylaLiveWindowHost::CreateChannel() {
           return;
         }
         if (method == "setBallGroupTop") {
-          // The Dart side reports where the ball group currently sits inside
-          // this (full-height) window, in logical pixels from the top. The
-          // window itself never moves while dragging, because the widget's own
-          // coordinate space already covers the whole screen (see
-          // kBallWindowMinHeight); what changes is the WINDOW REGION - the
-          // click-through band has to follow the balls, otherwise the band stays
-          // where the ball was when the window opened (and the clickable strip
-          // ends up over an unrelated part of the desktop).
+          // The Dart side reports the ball group's new top (SCREEN logical px).
+          //
+          // The window is now exactly the size of the ball group, so this is what
+          // MOVES THE WINDOW: the ball stays at a fixed place *inside* the window
+          // and the window travels with it. That is the whole trick - no
+          // transparent backdrop, no hit-test region, no colour key.
           const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
           if (args != nullptr) {
             auto it = args->find(flutter::EncodableValue("top"));
@@ -765,6 +778,7 @@ void AylaLiveWindowHost::CreateChannel() {
               } else if (as_long != nullptr) {
                 ball_group_top_ = static_cast<double>(*as_long);
               }
+              MoveBallWindowToGroupTop();
             }
           }
           result->Success(flutter::EncodableValue(true));
@@ -772,6 +786,48 @@ void AylaLiveWindowHost::CreateChannel() {
         }
         result->NotImplemented();
       });
+}
+
+void AylaLiveWindowHost::MoveBallWindowToGroupTop() {
+  if (window_handle_ == nullptr) {
+    return;
+  }
+  if (kind_ != AylaOverlayKind::kActivityBall) {
+    return;
+  }
+
+  // Work area of whatever monitor the window is currently on (multi-monitor safe).
+  HMONITOR monitor = ::MonitorFromWindow(window_handle_, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO monitor_info = {};
+  monitor_info.cbSize = sizeof(MONITORINFO);
+  RECT work_area = {};
+  if (::GetMonitorInfoW(monitor, &monitor_info)) {
+    work_area = monitor_info.rcWork;
+  } else {
+    ::SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0);
+  }
+  const UINT dpi = FlutterDesktopGetDpiForHWND(window_handle_);
+  const double scale = dpi > 0 ? (static_cast<double>(dpi) / 96.0) : 1.0;
+
+  // The widget keeps a small pad above the group (hover glow + focus ring), so
+  // the window's top edge is the group's top minus that pad - the value Dart
+  // reports is the GROUP's top, not the window's.
+  const double group_top_px = ball_group_top_ * scale - kBallWindowPadTop * scale;
+  int y = work_area.top + static_cast<int>(group_top_px);
+  const int max_y = work_area.bottom - kBallWindowMinHeight;
+  if (y > max_y) {
+    y = max_y;
+  }
+  if (y < work_area.top) {
+    y = work_area.top;
+  }
+  const int x = work_area.right - kBallWindowWidth;
+
+  // SWP_NOSIZE keeps the client geometry the Flutter view was laid out for;
+  // SWP_NOACTIVATE so dragging the ball never steals focus from the app the user
+  // is typing in.
+  ::SetWindowPos(window_handle_, nullptr, x, y, 0, 0,
+                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void AylaLiveWindowHost::TearDown() {
@@ -915,11 +971,10 @@ LRESULT AylaLiveWindowHost::HandleMessage(HWND window,
     case WM_NCHITTEST: {
       POINT point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
       if (kind_ == AylaOverlayKind::kActivityBall) {
-        // The floating ball relies ENTIRELY on the colour-key pass-through
-        // (see EnableColorKeyPassThrough): Windows skips every pixel painted in
-        // the key colour, per pixel, for other processes too, so WM_NCHITTEST
-        // never runs for those points. No band arithmetic left - that was the
-        // "it just collapses into a box" implementation.
+        // The whole window IS the ball group, so every point inside it belongs
+        // to us - there is no empty area to pass through. Click-through happens
+        // at a much simpler level: the window is only as big as the group, so
+        // the desktop outside it is not ours at all.
         break;
       }
 

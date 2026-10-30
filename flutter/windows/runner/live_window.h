@@ -199,20 +199,26 @@ class AylaLiveWindowHost {
   /// Latest floating-ball payload (sent to the engine on "ready").
   std::string overlay_payload_;
 
-  /// Client width of the window in Flutter LOGICAL pixels (WM_NCHITTEST needs
-  /// it to compute the group's left edge).
+  /// Client width of the window in Flutter LOGICAL pixels.
   int logical_width_ = 0;
 
-  /// Where the ball/handle group currently sits inside the (full-height)
-  /// floating-ball window, in Flutter LOGICAL pixels from the window's top.
+  /// Moves the (ball-sized) window so that the ball group's top edge sits at
+  /// [ball_group_top_] on screen, clamped to the monitor's work area.
+  ///
+  /// Called on every drag step reported through "setBallGroupTop". Cheap by
+  /// design: one SetWindowPos with SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE.
+  void MoveBallWindowToGroupTop();
+
+  /// Where the ball/handle group currently sits on screen, in Flutter LOGICAL
+  /// pixels measured from the TOP OF THE WORK AREA.
   ///
   /// The Dart side reports it on every drag via the "setBallGroupTop" channel
-  /// call.
+  /// call, and [MoveBallWindowToGroupTop] turns it into the window position.
   ///
-  /// NOTE: since the colour-key pass-through landed this is BOOKKEEPING ONLY -
-  /// it no longer drives hit testing. Windows decides per pixel via the layered
-  /// colour key (see EnableColorKeyPassThrough in live_window.cpp), so no band
-  /// arithmetic is needed and nothing is recomputed while the user drags.
+  /// The ball window is exactly the size of the ball group (see kBallWindowWidth
+  /// / kBallWindowMinHeight in live_window.cpp), so "where the group is" and
+  /// "where the window is" are the same question - that is what makes the
+  /// overlay click-through without any transparency trickery.
   ///
   /// 80 = the widget's WIDE档 default top (shell.css:462 `top: 80px`). The Dart
   /// side forces the wide档 on the overlay (see hostViewportWidth), so this is

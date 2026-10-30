@@ -473,7 +473,36 @@ void aylaLiveWindowMain(List<String> args) {
     }
   }
   if (kind == 'activityBall') {
-    // 窗口外悬浮球：**同一份** AylaSessionActivityIndicator（见 overlay_window_app.dart）。
+    // 窗口外悬浮球：**同一份** AylaSessionActivityIndicator。
+    //
+    // ⚠️ 2026-11-01 重做。用户原话：「为什么人家是一个按钮能直接丢出来，
+    // 你却要创建一个透明窗口？」
+    //
+    // 旧做法 = 「窗口 176 × 整屏高 + 透明背景 + 颜色键穿透」，三个后果都是用户实报：
+    //   · Flutter Windows embedder **没有背景透明开关**（swapchain 无 alpha 模式），
+    //     那个大窗口里凡是 Flutter 没画到的像素都是**纯黑**；
+    //   · 颜色键要求像素精确等于 key 色才穿透，而黑是 (0,0,0)、key 是 (1,2,3)
+    //     ⇒ 整块黑底**吃掉了所有点击**；
+    //   · 去掉 DWM 透明就露出黑底 —— 两条路互斥，怎么调都是错的。
+    //
+    // 正解（与 Android 同构，见 overlay_android_host.dart 文件头）：
+    // **窗口本身就只有球组那么大**。窗口之外根本不存在矩形 ⇒ 天然穿透，
+    // 不需要颜色键、不需要透明背景、也不需要把窗口铺满整屏。
+    // 拖动时原生把窗口跟着球移（`setBallGroupTop`），组件坐标由
+    // `Transform.translate` 映射进这个小窗口。
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      runApp(
+        _aylaAndroidOverlayRoot(
+          AylaAndroidOverlayBallApp(
+            initialPayload: overlayPayload,
+            initialViewportWidth: viewportWidth,
+            initialViewportHeight: viewportHeight,
+            initialWindowRect: windowRect,
+          ),
+        ),
+      );
+      return;
+    }
     runApp(_aylaOverlayWindowRoot(initialPayload: overlayPayload));
     return;
   }
