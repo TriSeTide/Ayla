@@ -135,6 +135,47 @@ void main() {
     expect(byLabel('退出全屏'), findsNothing, reason: 'ESC 必须退出全屏');
   });
 
+  testWidgets('全屏时**不得**用 AspectRatio 限死比例（2026-11-01 画面拉伸根因）', (
+    WidgetTester tester,
+  ) async {
+    // 用户实报：「手机端全屏有画面异常比例拉伸，不要拉伸画面」。
+    // 旧写法 `aspectRatio: fullscreen ? 1 : 16/9` 把全屏容器套成 1:1
+    // ⇒ 16:9 的画面被强制拉成正方形。
+    //
+    // 正确语义（对齐 web `.live-player:fullscreen { width/height:100% }` +
+    // `<video object-fit: contain>`）：**全屏时容器铺满、不设 AspectRatio**，
+    // 等比由 video 元素自己 contain（留黑边）。
+    const Size portrait = Size(390, 844);
+    tester.view.physicalSize = portrait;
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(_host(const _PageShape(), portrait));
+    await settle(tester);
+
+    // inline 档：16:9 的 AspectRatio 必须在。
+    expect(
+      find.byType(AspectRatio),
+      findsWidgets,
+      reason: 'inline 播放器必须保持 16:9（`.live-player { aspect-ratio: 16/9 }`）',
+    );
+
+    await openFullscreen(tester);
+    expect(byLabel('退出全屏'), findsOneWidget);
+
+    // 全屏档：1:1 的 AspectRatio 绝不能出现（那是拉伸根源）。
+    final Iterable<AspectRatio> ratios = tester.widgetList<AspectRatio>(
+      find.byType(AspectRatio),
+    );
+    for (final AspectRatio ratio in ratios) {
+      expect(
+        ratio.aspectRatio,
+        isNot(1.0),
+        reason: '全屏容器不得被套成 1:1 —— 那会把 16:9 画面拉伸成正方形。'
+            '应改为容器铺满 + video 自身 BoxFit.contain。',
+      );
+    }
+  });
   testWidgets('AylaFullScreenSwipeBack 在 enabled 两档返回同一 widget 类型（根因 ②）', (
     WidgetTester tester,
   ) async {

@@ -208,6 +208,15 @@ class MainActivity : FlutterActivity() {
                                     overlayBall.hide()
                                     result.success(null)
                                 }
+                                // ===== 直播小窗（用「原来那个」AylaLiveMiniPlayer）=====
+                                // 返回字符串语义与悬浮球同一套字面量（Dart 侧
+                                // `aylaEnterDetachedLive` 的 Android 分支据此判断回落）。
+                                "showLiveWindow" -> result.success(showLiveWindow(call))
+                                "updateLiveWindow" -> result.success(updateLiveWindow(call))
+                                "closeLiveWindow" -> {
+                                    liveOverlay.hide(notify = false)
+                                    result.success(null)
+                                }
                                 else -> result.notImplemented()
                             }
                         } catch (error: Exception) {
@@ -217,10 +226,10 @@ class MainActivity : FlutterActivity() {
                             when (call.method) {
                                 "isSupported", "isInPip", "enterPip", "openOverlaySettings" ->
                                     result.success(false)
-                                "showBall" -> result.success(
+                                "showBall", "showLiveWindow" -> result.success(
                                     AylaFloatingBallController.RESULT_FAILED,
                                 )
-                                "updateBall" -> result.success(false)
+                                "updateBall", "updateLiveWindow" -> result.success(false)
                                 else -> result.success(null)
                             }
                         }
@@ -741,6 +750,34 @@ class MainActivity : FlutterActivity() {
                     )
                 }
             },
+            // 点球**先**把 App 拉到前台，再转发导航（用户实报「App 在后台时点球唤不醒」）。
+            onBringToFront = { bringAppToFront() },
+        )
+    }
+
+    /**
+     * 系统层**直播小窗**宿主（懒创建；单实例，重复 `showLiveWindow` 复用同一个窗口 + 引擎）。
+     *
+     * ## 它是什么
+     * 第二 FlutterEngine + FlutterView 塞进 `TYPE_APPLICATION_OVERLAY` 窗口，里面 build
+     * **同一份** `AylaLiveMiniPlayer`（App 内那张 168×94 卡片本身）。
+     * 与悬浮球宿主的关键差别：这里**要**注册 video_player 插件（否则放不了视频），
+     * 但**只注册它一个**（不重复起 livekit / record 那套媒体栈）。
+     *
+     * ## 为什么不用 media_kit
+     * 工程只打包了 `media_kit_libs_windows_video`（pubspec.yaml：「Android/iOS 上没有 libmpv」）
+     * ⇒ 在 Android 上必然黑屏。Android 侧与主引擎同一条路径：video_player / ExoPlayer。
+     */
+    private val liveOverlay: AylaLiveOverlayFlutterHost by lazy {
+        AylaLiveOverlayFlutterHost(
+            applicationContext,
+            onBringToFront = { bringAppToFront() },
+            // 用户点小窗上的关闭键 ⇒ 告诉主引擎「窗口没了」，它据此把 App 内播放器重新接上。
+            onClosed = {
+                mainHandler.post {
+                    livePipChannel?.invokeMethod("onLiveWindowClosed", null)
+                }
+            },
         )
     }
 
@@ -763,6 +800,65 @@ class MainActivity : FlutterActivity() {
      */
     private fun updateBall(call: MethodCall): Boolean =
         overlayBall.update(call.argument<String>("payload"))
+
+    /**
+     * 通道 `showLiveWindow`：把直播小窗放到系统层（压在其他 App 之上）。
+     *
+     * 参数 `{playUrl, title}`。返回值与悬浮球同一套字面量
+     * （"shown" / "permissionRequired" / "unsupported" / "failed"）。
+     * 幂等：已有窗口时只更新地址，不重复 addView / 不重建引擎。
+     */
+    private fun showLiveWindow(call: MethodCall): String =
+        liveOverlay.show(
+            call.argument<String>("playUrl"),
+            call.argument<String>("title"),
+        )
+
+    /** 通道 `updateLiveWindow`：只更新地址/标题（切台）。返回 false = 当前没有窗口。 */
+    private fun updateLiveWindow(call: MethodCall): Boolean =
+        liveOverlay.update(
+            call.argument<String>("playUrl"),
+            call.argument<String>("title"),
+        )
+
+    /**
+     * 把主 Activity 拉到前台。
+     *
+     * ## 为什么必须原生做（用户实报「Ayla 在后台时点悬浮球叫不出 App」）
+     * 点球时球窗是**另一个 engine、另一个窗口**，主 Activity 可能已经 STOPPED；
+     * Dart 侧收到通道回调只会在**自己的引擎**里执行 `context.go` —— 那不会把
+     * 已经退到后台的进程/任务切到前台（也不该由 UI 层做这件事）。
+     * ⇒ 原生用 `FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_REORDER_TO_FRONT` 重新唤起，
+     * 已存在任务时**复用**它（`launchMode="singleTop"` + `onNewIntent`），不新建。
+     *
+     * 幂等：Activity 已在前台时该调用只是把任务重新置前，无副作用。
+     */
+    private fun bringAppToFront() {
+        try {
+            val intent = Intent(this, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                )
+            }
+            startActivity(intent)
+        } catch (error: Exception) {
+            Log.w(TAG, "bringAppToFront failed: ${error.message}", error)
+        }
+    }
+
+    /**
+     * 复用到已存在的任务（`singleTop` + `REORDER_TO_FRONT` 会走这里）。
+     *
+     * 目前没有额外动作：`onResume` 会照常触发，Dart 侧的路由跳转由
+     * `onBallTap` 通道承担。显式覆写是为了留下**契约位置** ——
+     * 将来若需要携带深链（例如从通知点进某个会话），入口就在这里。
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+    }
 
     /**
      * PiP 形态变化（系统回调）。

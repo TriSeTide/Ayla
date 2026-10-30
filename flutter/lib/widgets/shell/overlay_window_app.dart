@@ -278,6 +278,18 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
       if (_disposed) return;
       unawaited(_ready());
     });
+    // ⚠️ 再把**静止态**的组 top 主动报一次 —— 原生用它算 SetWindowRgn 的可见/可点区域。
+    //
+    // 组件只在「手动手势拖动」时回调 onTopChanged（session_activity.dart:272），
+    // 所以不拖的时候这次通道调用**永远不会发生**。而窗口一打开 region 就按默认 top
+    // 设好了；一旦组件因重建/收起落在别处，region 就停在旧位置
+    // （表现：球在那里却点不到，或者球上方一块空白吃掉点击）。
+    //
+    // 取值依据：组件是 `Positioned(top: _topPx ?? _defaultTop(context))`
+    // （session_activity.dart:342）。未拖动时 = 宽屏档 wideTop（shell.css:462
+    // `top: 80px`）——浮层宿主的视口宽度被固定成宽屏档（见 hostViewportWidth），
+    // 所以这里恒为 80，与原生 ball_group_top_ 的初值同源。
+    unawaited(_reportGroupTop(AylaSessionActivityIndicator.wideTop));
   }
 
   Future<Object?> _handleHostCall(MethodCall call) async {
@@ -294,7 +306,9 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
     return null;
   }
 
-  /// 拖动把手 ⇒ 把组的**新 top** 告诉原生（**不移动窗口**）。
+  /// 把组的**当前 top** 告诉原生（拖动时更新；首帧后再报一次静止值）。
+  ///
+  /// **不移动窗口**：窗口恒为整个工作区高，组件的 top 坐标空间 = 屏幕垂直空间。
   ///
   /// ## 为什么是「报告位置」而不是「移动窗口」（2026-10-31 实测订正）
   /// 第一版设计是「原生按 `新top - 旧top` 平移窗口」。那是**错的**，两个缺陷：

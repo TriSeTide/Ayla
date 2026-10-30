@@ -51,6 +51,11 @@ import 'state/room_providers.dart';
 import 'theme/app_theme.dart';
 import 'widgets/live/live_player.dart' show aylaUsesDesktopFullscreen;
 import 'widgets/live/live_window_surface.dart' show AylaDetachedLiveWindowApp;
+import 'widgets/shell/overlay_android_host.dart'
+    show
+        AylaAndroidLiveOverlayApp,
+        AylaAndroidOverlayBallApp,
+        AylaOverlayWindowRect;
 import 'widgets/shell/overlay_window_app.dart'
     show AylaOverlayBallWindowApp, AylaOverlayPayload;
 import 'widgets/shell/overlay_scrollbar.dart';
@@ -435,6 +440,10 @@ void aylaLiveWindowMain(List<String> args) {
   // "liveMini"（默认）| "activityBall" —— 见 live_window.cpp 的 AylaOverlayKind。
   String kind = 'liveMini';
   AylaOverlayPayload? overlayPayload;
+  // Android 叠加层需要的屏幕几何（逻辑 px）。Windows 侧不传 ⇒ 保持 0 / null。
+  double viewportHeight = 0;
+  double viewportWidth = 0;
+  AylaOverlayWindowRect? windowRect;
   if (args.isNotEmpty) {
     try {
       final Object? decoded = jsonDecode(args.first);
@@ -445,6 +454,12 @@ void aylaLiveWindowMain(List<String> args) {
         final Object? rawTitle = decoded['title'];
         if (rawUrl is String && rawUrl.isNotEmpty) playUrl = rawUrl;
         if (rawTitle is String && rawTitle.isNotEmpty) title = rawTitle;
+        viewportHeight = _entrypointViewportHeight(decoded);
+        viewportWidth = _entrypointViewportHeight(
+          decoded,
+          key: 'viewportWidth',
+        );
+        windowRect = AylaOverlayWindowRect.tryParse(decoded['windowRect']);
         // activityBall：payload 是**已经解析过的对象**（不是字符串），
         // 因为原生侧是把它拼进同一条 JSON 里的（见 live_window.cpp 的 ShowBall）。
         final Object? rawPayload = decoded['payload'];
@@ -460,6 +475,28 @@ void aylaLiveWindowMain(List<String> args) {
   if (kind == 'activityBall') {
     // 窗口外悬浮球：**同一份** AylaSessionActivityIndicator（见 overlay_window_app.dart）。
     runApp(_aylaOverlayWindowRoot(initialPayload: overlayPayload));
+    return;
+  }
+  // ===== Android：直播小窗也走「叠加层里 build 同一份 AylaLiveMiniPlayer」=====
+  //
+  // 用户 2026-11-01 逐字：「手机端直播小窗重做……**新的删掉，用我原来的窗口**」。
+  // Android 与 Windows 的差别只在**播放内核**：
+  // Windows 的 `AylaDetachedLiveWindowApp` 用 media_kit（mpv），而本工程
+  // 只打包了 `media_kit_libs_windows_video`（`pubspec.yaml`：「Android/iOS 上没有 libmpv」）
+  // ⇒ 在 Android 上必然黑屏。所以这里按平台分流：Android 走 video_player
+  // （原生注册的插件见 `LiveOverlayFlutterHost.kt`），其余平台保持原样。
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    runApp(
+      _aylaAndroidOverlayRoot(
+        AylaAndroidLiveOverlayApp(
+          initialUrl: playUrl,
+          initialTitle: title,
+          initialViewportWidth: viewportWidth,
+          initialViewportHeight: viewportHeight,
+          initialWindowRect: windowRect,
+        ),
+      ),
+    );
     return;
   }
   runApp(
@@ -497,27 +534,86 @@ void aylaLiveWindowMain(List<String> args) {
 @pragma('vm:entry-point')
 void aylaOverlayWindowMain(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
+  // 原始 JSON 同时给两个平台用：Windows 的 `AylaOverlayPayload` 与 Android 的
+  // `AylaAndroidOverlayBallApp`（后者自己解析，只取它用到的字段）。
+  Object? rawPayloadArg;
   AylaOverlayPayload? payload;
+  double viewportHeight = 0;
+  double viewportWidth = 0;
+  AylaOverlayWindowRect? windowRect;
   if (args.isNotEmpty) {
     try {
       final Object? decoded = jsonDecode(args.first);
       if (decoded is Map<String, dynamic>) {
         // 两种参数形态都接受（与 Windows 侧 `aylaLiveWindowMain` 同一套解析）：
         // ① `{"kind":"activityBall","payload":{...}}` —— Windows 原生拼好的整条；
-        // ② `{"payload":"{...}"}` —— payload 本身是**字符串**时（原生只做透传）。
+        // ② `{"payload":"{...}"}` —— payload 本身是**字符串**时（Android 原生只做透传）。
         final Object? rawPayload = decoded['payload'];
+        rawPayloadArg = rawPayload;
         if (rawPayload is Map<String, dynamic>) {
           payload = AylaOverlayPayload.fromJson(rawPayload);
         } else if (rawPayload is String) {
           payload = AylaOverlayPayload.tryDecode(rawPayload);
         }
+        viewportHeight = _entrypointViewportHeight(decoded);
+        viewportWidth = _entrypointViewportHeight(
+          decoded,
+          key: 'viewportWidth',
+        );
+        windowRect = AylaOverlayWindowRect.tryParse(decoded['windowRect']);
       }
     } catch (error) {
       // 参数不是合法 JSON（手工调试）：退化成「无会话」的浮层，不崩。
       debugPrint('[AYLA-OVERLAY-WINDOW] entrypoint 参数解析失败：$error');
     }
   }
+  // Android 的叠加层走自己的宿主树（坐标映射 + 几何回推，机制与 Windows 不同）。
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    runApp(
+      _aylaAndroidOverlayRoot(
+        AylaAndroidOverlayBallApp(
+          initialPayload: rawPayloadArg,
+          initialViewportWidth: viewportWidth,
+          initialViewportHeight: viewportHeight,
+          initialWindowRect: windowRect,
+        ),
+      ),
+    );
+    return;
+  }
   runApp(_aylaOverlayWindowRoot(initialPayload: payload));
+}
+
+/// 从 entrypoint 参数里读一个正的几何值（逻辑 px）。
+///
+/// Android 的原生宿主会把 `viewportHeight` / `viewportWidth` 塞进同一条 JSON
+/// （见 `OverlayFlutterHost.kt` / `LiveOverlayFlutterHost.kt`）。
+/// 读不到返回 0 = 未知（此时 Dart 侧回落到 `MediaQuery` 的对应值）。
+double _entrypointViewportHeight(
+  Map<Object?, Object?> decoded, {
+  String key = 'viewportHeight',
+}) {
+  final Object? raw = decoded[key];
+  if (raw is num) {
+    final double value = raw.toDouble();
+    if (value.isFinite && value > 0) return value;
+  }
+  return 0;
+}
+
+/// Android 叠加层那棵树的根（球窗 / 小窗共用）。
+///
+/// 与 [_aylaOverlayWindowRoot] 的差别只有一处：**平台固定的 Android 宿主**。
+/// `MaterialApp` 仍然是必须的（Directionality / MediaQuery / Overlay / Navigator
+/// 四样缺一不可，理由见 [_aylaOverlayWindowRoot] 的文档）。
+Widget _aylaAndroidOverlayRoot(Widget home) {
+  return MaterialApp(
+    debugShowCheckedModeBanner: false,
+    // 透明底：叠加层窗口是 TRANSLUCENT 的，背景必须让出来。
+    color: Colors.transparent,
+    theme: buildAylaTheme(),
+    home: home,
+  );
 }
 
 /// 第二引擎里**浮层**那棵树的根（Windows 的 activityBall 与 Android 叠加层共用）。

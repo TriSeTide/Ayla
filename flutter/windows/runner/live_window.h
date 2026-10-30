@@ -159,6 +159,26 @@ class AylaLiveWindowHost {
   /// the Dart -> engine commands of the overlay itself.
   void CreateChannel();
 
+  /// Recomputes + applies the click-through window REGION of the floating-ball
+  /// window (no-op for the live mini window).
+  ///
+  /// ## Why a region and not WM_NCHITTEST/HTTRANSPARENT
+  /// HTTRANSPARENT only forwards the hit test to the next window of the SAME
+  /// thread; a click over another process's window is still eaten by ours.
+  /// SetWindowRgn makes Windows treat the pixels OUTSIDE the region as "there
+  /// is no window here", which is the only mechanism that really passes input
+  /// through to arbitrary processes.
+  ///
+  /// The region is the ball group's band (see BallBand in the .cpp): one band
+  /// wide enough to cover BOTH the expanded and the collapsed state, so the
+  /// collapse animation can never lose a click mid-way.
+  void ApplyBallWindowRegion(HWND window);
+
+  /// The ball band in CLIENT pixels - the single definition shared by
+  /// [ApplyBallWindowRegion] and WM_NCHITTEST so the region and the hit test
+  /// can never disagree.
+  RECT BallBand(HWND window) const;
+
   /// Creates the top-level popup window + the second engine + the view.
   ///
   /// [entrypoint_args] is the single JSON string handed to
@@ -197,9 +217,17 @@ class AylaLiveWindowHost {
   /// floating-ball window, in Flutter LOGICAL pixels from the window's top.
   ///
   /// The Dart side reports it on every drag via the "setBallGroupTop" channel
-  /// call; WM_NCHITTEST uses it to decide which pixels are the group (real,
-  /// clickable) and which are the empty transparent rest of the window
-  /// (HTTRANSPARENT => clicks fall through to whatever is underneath).
+  /// call. It drives TWO things, and the second one is what actually makes the
+  /// window click-through:
+  ///
+  ///   1. the window REGION (see [ApplyBallWindowRegion]): everything outside
+  ///      the group band is cut away by SetWindowRgn, so Windows does not
+  ///      consider that pixel to belong to this window at all => the click
+  ///      reaches whatever is underneath, EVEN IF IT IS ANOTHER PROCESS;
+  ///   2. WM_NCHITTEST, which still answers HTTRANSPARENT for the leftovers
+  ///      (belt and braces; HTTRANSPARENT alone is NOT enough - it only skips
+  ///      to the next window of the SAME thread, so with the region missing the
+  ///      window swallows every click of the whole work area).
   ///
   /// 80 = the widget's WIDE档 default top (shell.css:462 `top: 80px`). The Dart
   /// side forces the wide档 on the overlay (see hostViewportWidth), so this is

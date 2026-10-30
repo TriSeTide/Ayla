@@ -473,10 +473,26 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
 
   /// 播放器内容（inline 与全屏共用；全屏时外层是黑底铺满）。
   Widget _content({required bool fullscreen}) {
+    // ⚠️⚠️ **全屏时不要用 AspectRatio 限死比例**（2026-11-01 用户实报「画面异常比例拉伸」）。
+    //
+    // 旧写法 `aspectRatio: fullscreen ? 1 : 16/9` 把全屏容器套成 **1:1** ⇒
+    // 16:9 的直播画面被强制拉成正方形 —— **这就是拉伸的根因**。
+    //
+    // 正确做法（对齐 web）：web 的 `.live-player` 在 `:fullscreen` 下是 `width/height:100%`，
+    // 等比由 `<video object-fit: contain>` 在**元素内部**做 letterbox（容器铺满、画面留黑边）。
+    // ⇒ 全屏时容器**铺满**（不设 AspectRatio），画面由 video 元素自己 contain。
+    final Widget surface = _playerSurface(fullscreen: fullscreen);
+    if (fullscreen) return surface;
     return AspectRatio(
-      // `.live-player { aspect-ratio: 16 / 9 }`（全屏时由宿主铺满，不再受 16:9 限制）
-      aspectRatio: fullscreen ? 1 : 16 / 9,
-      child: DecoratedBox(
+      // `.live-player { aspect-ratio: 16 / 9 }`（inline 档保持 16:9）
+      aspectRatio: 16 / 9,
+      child: surface,
+    );
+  }
+
+  /// 播放器**表面**（材质 + 视频 + 叠加层）；全屏时被撑满，inline 时被 16:9 包住。
+  Widget _playerSurface({required bool fullscreen}) {
+    return DecoratedBox(
         decoration: BoxDecoration(
           color: const Color(0x1F465B92), // rgba(70,91,146,.12)
           borderRadius: (fullscreen || widget.flat)
@@ -530,8 +546,7 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
             ],
           ),
         ),
-      ),
-    );
+      );
   }
 
   /// `.live-player-controls`（opacity 0/1 + 隐藏时整层穿透）。
