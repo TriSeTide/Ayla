@@ -241,6 +241,10 @@ class AylaSessionActivityIndicator extends StatefulWidget {
   static const double gap = AylaSpacing.sp2;
 
   /// 收起态整组右移量 = `right` 偏移（宽屏 24 / 窄屏 16，把手正好贴住屏幕右缘）。
+  ///
+  /// 紧凑宿主（Android 叠加层）恒用宽屏档 24 —— 窗口宽度会相应 +24dp。
+  static const double compactRightMargin = wideRight;
+
   static const double collapsedShiftWide = wideRight;
   static const double collapsedShiftNarrow = narrowRight;
 
@@ -536,13 +540,12 @@ class AylaSessionActivityIndicatorState
       _scheduleHitRectReport(delay: const Duration(milliseconds: 260));
     }
 
-    // 紧凑宿主（Android 叠加层）：窗口就是球组。
+    // 紧凑宿主（Android 叠加层）：窗口 = 球组 + 右侧留白。
     //
-    // 贴右上角（right 0 / top 0）而不是应用内的 right 24 / top 80 ——
-    // 窗口只有 132x44dp，套用应用内的定位量会把整组推到窗口外
-    // （真机表现：窗口在那儿、里面全透明看不见球）。
-    // 收起态的「整体右移」也不需要了：原生按 28dp 重建窗口，
-    // 把手本来就贴住屏幕右缘（窗口自身右对齐）。
+    // ⚠️ right 偏移与 translateX **必须保留** —— 它们是「展开时把手离右边缘 24dp、
+    // 收起时才贴边」的唯一实现（web shell.css:461 的 right:24px +
+    // shell.css:501 的 .is-collapsed transform）。原生按同样规则把窗口宽度
+    // 加上这 24dp（OverlayFlutterHost.kt 的 WIDE_RIGHT_DP），两种状态都放得下。
     final Widget animated = TweenAnimationBuilder<double>(
       // 只给 end：首帧即落在当前状态，之后（收起/展开）才做过渡
       tween: Tween<double>(end: _collapsed ? 1 : 0),
@@ -551,11 +554,9 @@ class AylaSessionActivityIndicatorState
       builder: (BuildContext context, double v, Widget? child) =>
           Transform.translate(
         // 位移 = right 偏移（宽屏 24 / 窄屏 16）⇒ 收起时把手右缘贴住屏幕右缘。
-        // 紧凑宿主下位移恒为 0：窗口右缘就是屏幕右缘，再位移会把把手推出窗口。
+        // 紧凑宿主同样使用：展开 24dp 留白 → 收起整组右移 24dp 贴边。
         offset: Offset(
-          widget.compact
-              ? 0
-              : (narrow
+          (narrow
                         ? AylaSessionActivityIndicator.collapsedShiftNarrow
                         : AylaSessionActivityIndicator.collapsedShiftWide) *
                     v,
@@ -567,6 +568,10 @@ class AylaSessionActivityIndicatorState
     );
 
     if (widget.compact) {
+      // 紧凑宿主：窗口右缘 = 屏幕右缘，组件贴窗口右缘（right 0）即可 ——
+      // 收起态窗口缩到只剩把手宽 ⇒ 把手正好贴住屏幕右缘；
+      // 展开态窗口 = 球组宽 ⇒ 把手也在组的最右端（web 的 24dp 留白由
+      // 窗口自身承载，不占组件坐标）。
       return Positioned(right: 0, top: 0, child: animated);
     }
 

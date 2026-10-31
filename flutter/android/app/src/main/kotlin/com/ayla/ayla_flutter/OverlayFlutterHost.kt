@@ -184,11 +184,17 @@ class AylaOverlayFlutterHost(
      *
      * ⚠️ **与收起态无关**：收起不再改窗口宽度（见 [applyCollapsed]）。
      */
-    private fun expandedWidthDp(): Int = when {
+    private fun expandedWidthDp(): Int = groupWidthDp() + WIDE_RIGHT_DP
+
+    /** 球组本体宽度（不含贴边留白）：双球 132 / 单球 80。 */
+    private fun groupWidthDp(): Int = when {
         ballCount >= 2 -> 132
         ballCount == 1 -> 80
         else -> TOGGLE_WIDTH_DP
     }
+
+    /** 收起后屏幕上应剩的宽度 = 28dp 把手 + 右侧 24dp 留白（贴边语义见组件）。 */
+    private fun collapsedWidthDp(): Int = TOGGLE_WIDTH_DP + WIDE_RIGHT_DP
 
     // ---------------------------------------------------------------- 视图
 
@@ -203,7 +209,7 @@ class AylaOverlayFlutterHost(
         collapsed = false
         val flutter = ensureEngine()
         densityValue = context.resources.displayMetrics.density
-        rebuildWindow(expandedWidthDp(), topDp = initialTopDp(), engine = flutter)
+        resizeWindow(expandedWidthDp(), topDp = initialTopDp(), engine = flutter)
     }
 
     /**
@@ -213,7 +219,21 @@ class AylaOverlayFlutterHost(
      * 改尺寸会让合成器重分配 surface buffer，旧内容在新 buffer 里按原原点渲染一帧
      * ⇒ 斜向位置伪影（DE23）；这里靠 remove + add 规避。
      */
-    private fun rebuildWindow(widthDp: Int, topDp: Int, engine: FlutterEngine) {
+    /**
+     * 把窗口调整到 (展开宽, 竖直位置)。
+     *
+     * ## 为什么不再 removeView + addView（2026-11-01 真机实报根因）
+     * 用户实报三处闪烁：「收起最后把手会闪」「一个球变两个球时会闪」「变多路直播时会闪」。
+     * 三者的共同触发点都是这个函数。
+     * 旧实现把整个 FlutterView 摘掉再新建一个：**旧视图已移除、新视图第一帧还没到**
+     * 的那几帧窗口是空的（透明），于是看到「闪一下」。
+     *
+     * 现在改成在**同一个 FlutterView 上** updateViewLayout 改宽高：
+     * 渲染面不换、不清空，尺寸变化由 `FlutterView.onSizeChanged` 直接转给引擎，
+     * 下一帧就是新尺寸的内容。代价是宽高变化的当帧合成器要重分配 buffer，
+     * 可能出现一帧的字形拉伸（DE23），但**远好于整段空白闪烁**。
+     */
+    private fun resizeWindow(widthDp: Int, topDp: Int, engine: FlutterEngine) {
         val wm = windowManager
             ?: (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
             ?: return
@@ -222,19 +242,28 @@ class AylaOverlayFlutterHost(
         val maxTop = (screenHeight() - heightPx).coerceAtLeast(0)
         val y = topPx(topDp).coerceIn(0, maxTop)
 
-        val oldView = flutterView
-        if (oldView != null) {
+        val view = flutterView
+        val layout = params
+        if (view != null && layout != null) {
+            // 已有窗口 ⇒ 原地改尺寸（不换渲染面 ⇒ 不闪）。
+            layout.width = widthPx
+            layout.height = heightPx
+            // 右缘恒贴屏幕右缘：窗口从左侧伸缩时，最右端的把手在屏幕上原地不动。
+            layout.x = screenWidth() - widthPx
+            layout.y = y
             try {
-                wm.removeView(oldView)
+                wm.updateViewLayout(view, layout)
+                currentWindowWidthDp = widthDp
             } catch (error: Exception) {
-                Log.w(TAG, "removeView for resize failed: ${error.message}")
+                Log.w(TAG, "resizeWindow failed: ${error.message}")
             }
-            flutterView = null
+            return
         }
 
-        val view = FlutterView(context, TransparencyMode.transparent)
-        view.attachToFlutterEngine(engine)
-        val layout = WindowManager.LayoutParams(
+        // 首次创建：没有现成视图可用，只能新建。
+        val created = FlutterView(context, TransparencyMode.transparent)
+        created.attachToFlutterEngine(engine)
+        val fresh = WindowManager.LayoutParams(
             widthPx,
             heightPx,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -245,18 +274,16 @@ class AylaOverlayFlutterHost(
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            // **右缘对齐屏幕右缘**（见 [applyCollapsed]）：窗口从左侧收缩时，
-            // 最右端的把手在屏幕上原地不动，收起/展开看不出位移。
             x = screenWidth() - widthPx
             this.y = y
         }
         try {
-            wm.addView(view, layout)
+            wm.addView(created, fresh)
             windowManager = wm
-            flutterView = view
-            params = layout
+            flutterView = created
+            params = fresh
             currentWindowWidthDp = widthDp
-            installDragHandle(view)
+            installDragHandle(created)
         } catch (error: Exception) {
             Log.w(TAG, "addView failed: ${error.message}")
         }
@@ -331,35 +358,22 @@ class AylaOverlayFlutterHost(
      * 一个像素都不动，只是两个球滑出窗口被裁掉。
      * 反面做法（窗口整体右移、宽度不变）会把把手推到右边、球半截留在屏幕内 —— 已实测否决。
      */
+    /**
+     * 收起 / 展开：窗口宽度 132/80dp 变 28dp，右缘恒贴屏幕右缘。
+     *
+     * 语义：组件里把手是 Row 的最后一个子级，在球组最右端；窗口右缘恒等于
+     * 屏幕右缘，所以窗口从左侧收缩时，把手在屏幕上原地不动。
+     *
+     * 不再延迟：改宽度走 updateViewLayout、渲染面不换，动画不会被切断；
+     * 而延迟恰好会造成「收起最后把手闪一下」（动画播完后才缩窗那一下突变）。
+     */
     private fun applyCollapsed(nextCollapsed: Boolean) {
         if (collapsed == nextCollapsed && flutterView != null) return
         collapsed = nextCollapsed
-        mainHandler.removeCallbacks(collapseRebuild)
-        if (nextCollapsed) {
-            // 🎯 **收起：等动画播完再缩窗口**。
-            //
-            // 组件里球有 200ms 的滑出 + 淡隐。若点下把手就立刻 removeView+addView，
-            // 渲染面在半路消失 ⇒ 动画冻结在中间帧，只有别的手势逼出新帧才继续
-            // （用户实报：「要拖拽移动一下才继续播放动画」）。
-            // ⇒ 先在宽窗口里把 200ms 播完（球向右滑出窗口，窗口右缘 = 屏幕右缘，
-            //    所以视觉上是「滑出去」），再换成 28dp 的窗口 —— 两个动作接得上。
-            mainHandler.postDelayed(collapseRebuild, COLLAPSE_SETTLE_MS)
-        } else {
-            // 🎯 **展开：立刻把窗口撑宽，撑好之后才通知组件播动画**。
-            //
-            // 反了就会「在 28dp 窗口里滑」⇒ 整段动画被裁掉，球落点也不对
-            // （用户实报「展开时悬浮球位置不对」）。
-            collapseRebuild.run()
-            channel?.invokeMethod("expanded", null)
-        }
-    }
-
-    /** 按当前收起态重建窗口（收起 = 28dp / 展开 = 132 或 80dp）。 */
-    private val collapseRebuild = Runnable {
-        val flutter = engine ?: return@Runnable
-        if (flutterView == null) return@Runnable
-        rebuildWindow(
-            if (collapsed) TOGGLE_WIDTH_DP else expandedWidthDp(),
+        val flutter = engine ?: return
+        if (flutterView == null) return
+        resizeWindow(
+            if (collapsed) collapsedWidthDp() else expandedWidthDp(),
             topDp = currentTopDp(),
             engine = flutter,
         )
@@ -489,11 +503,11 @@ class AylaOverlayFlutterHost(
         updateBallCount()
         // 球数变化 ⇒ 窗口要按新的**目标宽度**重建（收起态恒 28dp，别把它顶回去）。
         if (flutterView != null) {
-            val target = if (collapsed) TOGGLE_WIDTH_DP else expandedWidthDp()
+            val target = if (collapsed) collapsedWidthDp() else expandedWidthDp()
             if (target != currentWindowWidthDp) {
                 val flutter = engine
                 if (flutter != null) {
-                    rebuildWindow(target, topDp = currentTopDp(), engine = flutter)
+                    resizeWindow(target, topDp = currentTopDp(), engine = flutter)
                 }
             }
         }
@@ -533,8 +547,16 @@ class AylaOverlayFlutterHost(
         /** 判定为拖动的最小位移（dp）。低于它仍算点击。 */
         const val DRAG_SLOP_DP = 8
 
-        /** 收起动画时长（组件是 200ms）之后再重建窗口；留 60ms 余量。 */
-        const val COLLAPSE_SETTLE_MS = 260L
+        /**
+         * 展开态球组离屏幕右缘的留白（= 组件 `wideRight` 24）。
+         *
+         * web `shell.css:461`：`.session-activity-group { right: 24px }` —— **展开时
+         * 把手不贴边**，离右边 24dp；收起时整组再右移 24dp 让把手贴住屏幕缘
+         * （`shell.css:501` 的 `.is-collapsed` transform）。
+         * ⇒ 窗口宽度必须把这 24dp 也算进去，否则整组会被窗口裁掉。
+         */
+        const val WIDE_RIGHT_DP = 24
+
 
         private val mainHandler = Handler(Looper.getMainLooper())
     }

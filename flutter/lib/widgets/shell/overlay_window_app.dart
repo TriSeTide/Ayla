@@ -238,10 +238,14 @@ class AylaOverlayWindowApp extends StatelessWidget {
 
     // 组件按视口做两件事：断点（宽/窄屏）与拖动 clamp 上限。
     //
-    // ⚠️ 宽度必须报**宽屏档**（见 hostViewportWidth）：真实窗口只有 176 宽，
-    // 报 176 会让组件走窄屏档（right 16 / top 104），与 web 不一致。
-    // 高度必须报**真实可用高度**（宿主窗口 = 整个工作区高），因为拖动 clamp 用的是它：
-    // 报小了拖动范围就被夹死（这正是第一版 132 高窗口「拖不动」的根因）。
+    // ⚠️ 视口必须报**真实窗口尺寸**，不能报一个更大的假值。
+    //
+    // 曾经报 `hostViewportWidth = 1280`（想让组件走「宽屏档」），结果：组件用
+    // `Positioned(right: 24)` 相对 **1280 宽的画布**定位，而真实窗口只有 132dp ——
+    // 算出来的位置在窗口里完全错位，表现就是「把手没有贴住屏幕右边缘」。
+    //
+    // 现在报真实尺寸：窗口宽 132dp ⇒ 组件走窄屏档（`right: 16`），
+    // 把手正好贴住窗口右缘 = 屏幕右缘。
     final Size viewport = MediaQuery.sizeOf(context);
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(
@@ -254,7 +258,7 @@ class AylaOverlayWindowApp extends StatelessWidget {
         //
         // 正确做法：视口 = 真实窗口；「能拖多远」由原生侧 clamp（applyBallGroupTop），
         // 组件只负责算出它认为的 top 并发给宿主。
-        size: Size(hostViewportWidth, viewport.height),
+        size: Size(viewport.width, viewport.height),
         padding: EdgeInsets.zero,
         viewPadding: EdgeInsets.zero,
         viewInsets: EdgeInsets.zero,
