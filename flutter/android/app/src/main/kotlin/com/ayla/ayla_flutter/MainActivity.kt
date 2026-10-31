@@ -182,6 +182,15 @@ class MainActivity : FlutterActivity() {
                                     overlayBall.hide()
                                     result.success(null)
                                 }
+                                // ===== 窗口外直播小窗（Flutter 自绘 · 第二引擎）=====
+                                // 用户定稿：「要直接用现有的直播小窗让他脱离应用，
+                                // 不要加按钮单独重做一个」⇒ 窗口里 build 的仍是 App 内
+                                // 那一个 AylaLiveMiniPlayer（LiveMiniWindowHost.kt）。
+                                "openLiveWindow" -> result.success(openLiveWindow(call))
+                                "closeLiveWindow" -> {
+                                    liveMini.hide(notify = false)
+                                    result.success(null)
+                                }
                                 else -> result.notImplemented()
                             }
                         } catch (error: Exception) {
@@ -195,6 +204,7 @@ class MainActivity : FlutterActivity() {
                                     AylaFloatingBallController.RESULT_FAILED,
                                 )
                                 "updateBall" -> result.success(false)
+                                "openLiveWindow" -> result.success(false)
                                 else -> result.success(null)
                             }
                         }
@@ -565,6 +575,53 @@ class MainActivity : FlutterActivity() {
     private fun updateBall(call: MethodCall): Boolean =
         overlayBall.update(call.argument<String>("payload"))
 
+    // ======================= 窗口外直播小窗 =======================
+
+    /**
+     * 叠加层里的直播小窗宿主（懒创建；**单实例**）。
+     *
+     * 与悬浮球同一套机制：第二 FlutterEngine + FlutterView 塞进
+     * `TYPE_APPLICATION_OVERLAY` 窗口，里面 build **同一份** `AylaLiveMiniPlayer`。
+     * 用户对 1.0.41 那版（`LiveOverlayFlutterHost.kt`，自绘 + 自造交互）的评价是
+     * 「各种交互都做烂了」⇒ 本实现**不复用其任何交互代码**。
+     */
+    private val liveMini: AylaLiveMiniWindowHost by lazy {
+        AylaLiveMiniWindowHost(
+            applicationContext,
+            onOpenRoom = { channelId ->
+                mainHandler.post {
+                    bringAppToFront()
+                    // 回直播间：复用既有 `onBallTap` 事件（Dart 侧已监听，不新增事件类型）。
+                    livePipChannel?.invokeMethod(
+                        "onBallTap",
+                        mapOf(
+                            "kind" to AylaFloatingBallController.KIND_LIVE,
+                            "sourceRoute" to "/live/$channelId",
+                        ),
+                    )
+                }
+            },
+            onClosed = {
+                mainHandler.post {
+                    livePipChannel?.invokeMethod("onLiveWindowClosed", null)
+                }
+            },
+        )
+    }
+
+    /**
+     * 通道 `openLiveWindow`：打开（或复用）窗口外直播小窗。
+     *
+     * 参数 `{channelId, title, playUrl}`；返回 true = 已显示。
+     * 返回 false 时 Dart 侧必须**明确回落到 App 内小窗**（不静默失败）。
+     */
+    private fun openLiveWindow(call: MethodCall): Boolean {
+        val channelId = call.argument<String>("channelId") ?: return false
+        val title = call.argument<String>("title") ?: "直播间"
+        val playUrl = call.argument<String>("playUrl") ?: return false
+        return liveMini.show(channelId, title, playUrl)
+    }
+
 
 
 
@@ -592,6 +649,15 @@ class MainActivity : FlutterActivity() {
         // 悬浮球**不在这里 hide**：它存在的意义就是「App 界面没了、球还在」。
         // 真正的清理点是 Dart 侧会话结束（`aylaHideDetachedBall`，经 Activity 重建后的
         // 新通道实例送达）与用户从系统层关掉它（`onBallClosed`）。
+        // 直播小窗同理：窗口外小窗存在的意义就是「App 界面没了、画面还在」，
+        // 但 Activity 销毁 ⇒ 通道没了，小窗的点击回调也送不回来 ⇒ 一并关掉。
+        // （Activity 因配置变更重建时 onDestroy 也会走，但那时 livePipChannel 同样会重建，
+        //   Dart 侧下一次 miniPlayer 同步会重新开窗，用户无感。）
+        try {
+            liveMini.hide(notify = false)
+        } catch (error: Exception) {
+            Log.w(TAG, "hide live mini failed: ${error.message}")
+        }
         // 只把通道句柄置空，避免已经销毁的 messenger 被回调。
         livePipChannel = null
         super.onDestroy()

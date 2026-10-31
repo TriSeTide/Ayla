@@ -149,6 +149,9 @@ class AylaOverlayWindowApp extends StatelessWidget {
     this.onGroupTopChanged,
     this.onHoverChanged,
     this.onHitRectsChanged,
+    this.compact = false,
+    this.onCollapsedChanged,
+    this.suppressTapTick = 0,
   });
 
   /// 可见按钮的精确矩形（视口坐标）。宿主转给原生做穿透判定。
@@ -171,6 +174,19 @@ class AylaOverlayWindowApp extends StatelessWidget {
   /// 否则 ⇒ 整窗放行给桌面。判断交给 Flutter（组件本就有 MouseRegion），
   /// 原生侧不需要复制任何布局常量。
   final ValueChanged<bool>? onHoverChanged;
+
+  /// **紧凑宿主**（Android 系统叠加层）：窗口尺寸 = 球组尺寸（132/80/28 × 44dp）。
+  ///
+  /// 这是 Android 上唯一可行的形态 —— overlay 窗口的尺寸就是触摸热区，没有公开 API
+  /// 能做非矩形热区（`TOUCHABLE_INSETS_REGION` 是 @hide）。紧凑模式下组件贴在窗口
+  /// 原点 (0,0)，竖直拖动交给原生（移动整个窗口）。
+  final bool compact;
+
+  /// 收起态变化（紧凑宿主据此让原生按新宽度重建窗口）。
+  final ValueChanged<bool>? onCollapsedChanged;
+
+  /// 原生刚拖动过的计数器（递增 ⇒ 抑制紧随其后的一次合成 tap）。
+  final int suppressTapTick;
 
   /// 宿主窗口的内容宽度（逻辑像素；见 `live_window.cpp` 的 kBallWindowWidth）。
   ///
@@ -258,7 +274,10 @@ class AylaOverlayWindowApp extends StatelessWidget {
               // every click on the ball gets passed through to the desktop.
               onTopChanged: onGroupTopChanged,
               onHoverChanged: onHoverChanged,
-              onHitRectsChanged: onHitRectsChanged,
+              onHitRectsChanged: compact ? null : onHitRectsChanged,
+              compact: compact,
+              onCollapsedChanged: onCollapsedChanged,
+              suppressTapTick: suppressTapTick,
             ),
           ],
         ),
@@ -309,6 +328,12 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
   /// Last reported on-screen width of the group (see _reportGroupTop).
   double _lastVisibleWidth = 0;
 
+  /// 悬浮球组是否收起（原生按此把窗口重建到 28dp 宽）。
+  bool _collapsed = false;
+
+  /// 「原生刚刚拖动过」的计数器：每次递增 ⇒ 组件抑制紧随其后的一次 tap。
+  int _suppressTapTick = 0;
+
   @override
   void initState() {
     super.initState();
@@ -322,6 +347,11 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
   }
 
   Future<Object?> _handleHostCall(MethodCall call) async {
+    // 原生拖动结束 ⇒ 让组件吞掉紧随其后的一次 tap（拖完不该误触收起/回房）。
+    if (call.method == 'suppressTap') {
+      if (!_disposed) setState(() => _suppressTapTick++);
+      return true;
+    }
     if (call.method != 'ballPayload') return null;
     final Object? raw = call.arguments;
     String encoded = '';
@@ -415,6 +445,24 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
     }
   }
 
+  /// 收起态变化 ⇒ 原生按新宽度（28dp / 132dp / 80dp）重建窗口。
+  ///
+  /// 必须是**重建**而不是 updateViewLayout 改宽高：改尺寸会让合成器重分配
+  /// surface buffer，旧内容在新 buffer 里按原原点渲染一帧 ⇒ 斜向位置伪影（DE23）。
+  Future<void> _reportCollapsed(bool collapsed) async {
+    if (_disposed || _collapsed == collapsed) return;
+    _collapsed = collapsed;
+    try {
+      await _channel.invokeMethod<bool>('setCollapsed', <String, Object?>{
+        'collapsed': collapsed,
+      });
+    } on MissingPluginException {
+      // 宿主未实现（画布 / 单测）：静默。
+    } on PlatformException {
+      // 同上。
+    }
+  }
+
   Future<void> _ready() async {
     try {
       await _channel.invokeMethod<bool>('ready');
@@ -457,15 +505,18 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
     // 无会话 ⇒ 组件按 tsx 135 零渲染；此时窗口里什么都不画（主引擎会顺手关窗）。
     return AylaOverlayWindowApp(
       payload: payload,
-      // 拖动把手 ⇒ 让**宿主窗口**跟着球一起移动。
+      // 拖动把手 ⇒ 让**宿主窗口**跟着球一起移动（Windows 全工作区窗口用）。
       //
-      // 组件拖动改的是 `Positioned.top`（窗口内坐标），而本窗口只有 176×132 且贴右上角
-      // ⇒ 拖到 top > 132 会被窗口裁掉，「交互完全一致」就不成立。
-      // 这里把新 top 交给原生：`SetWindowPos` 把窗口挪到对应屏幕位置，
-      // 组件内部坐标保持不变（所以视觉上球仍在窗口内同一个相对位置）。
+      // Android 上的拖动完全由原生 `installDragHandle` 负责（组件在紧凑模式下
+      // 不再改 `Positioned.top`，也不回传 top）—— 两处同时移动正是
+      // 「上下拖动来回跳变闪烁」的根因（交接文档 §2.1）。
       onGroupTopChanged: (double top) => unawaited(_reportGroupTop(top)),
       onHoverChanged: (bool hovering) => unawaited(_reportHover(hovering)),
       onHitRectsChanged: (List<Rect> rects) => unawaited(_reportHitRects(rects)),
+      // Android 系统叠加层的窗口尺寸 = 球组尺寸 ⇒ 走紧凑模式（见 OverlayFlutterHost.kt）。
+      compact: true,
+      onCollapsedChanged: _reportCollapsed,
+      suppressTapTick: _suppressTapTick,
       onOpenSession: (AylaActivitySession session) {
         // 组件只回传会话（web 的真实口径），种类要在这里按 id 反查：
         // 直播球的 id 与语音球的 id 不会相同（一个房间只有一个身份）。

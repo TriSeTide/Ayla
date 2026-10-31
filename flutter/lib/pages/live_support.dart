@@ -355,7 +355,14 @@ class AylaLiveRoomSession extends ChangeNotifier {
     // 窗口外小窗也要让位：它是第二个引擎 + 第二个 HLS 播放器，
     // 本会话要往主窗口挂画面，两路同时播会抢同一个流（表现：主窗口黑屏）。
     // 用户定稿的「退出直播间不关小窗」只约束**退出**方向，进入新直播间时应当让位。
-    await _retireDetachedWindow();
+    //
+    // ⚠️ **只有 Windows 走这条**（2026-11-01 实报根因）：Android 没有「第二引擎直播小窗」
+    // 这条实现（那边的脱离态是已在 1.0.40 移除的系统 PiP，通道恒返回 false），
+    // 无条件调用只会白跑一次通道 + 复位桥接标志，而用户实报的「退出直播间看不到小窗」
+    // 正是被这里连带误伤出来的。
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      await _retireDetachedWindow();
+    }
     // 本会话接管页面视图（[detachView] 的代际防御用：迟到的旧会话不得再进小窗）。
     _activeViewSession = this;
     final AylaLiveState store = _live;

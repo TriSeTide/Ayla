@@ -6,17 +6,15 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.view.MotionEvent
-import android.view.View
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.WindowManager
+import io.flutter.FlutterInjector
 import io.flutter.embedding.android.FlutterView
 import io.flutter.embedding.android.TransparencyMode
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.FlutterEngineGroup
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.embedding.engine.loader.FlutterLoader
-import io.flutter.FlutterInjector
 import io.flutter.plugin.common.MethodChannel
 import kotlin.math.roundToInt
 
@@ -29,46 +27,29 @@ import kotlin.math.roundToInt
  * > 「悬浮球不应该重新做一个出来，而是直接原来的浮层悬浮球直接扔出应用窗口外」
  * > 「应用内不会再存在任何浮层……外观和交互完全没有区别」
  *
- * 上一轮把球做成了 [BallGlyphView]（Canvas 手绘圆球），用户判定「**丑得要命**」「南辕北辙」。
+ * 上一轮把球做成了 `BallGlyphView`（Canvas 手绘圆球），用户判定「**丑得要命**」「南辕北辙」。
  * 结论：叠加层里必须 build **同一份** `AylaSessionActivityIndicator` widget ——
  * 一个 Flutter 视图只能铺满自己的窗口，所以它必须有自己的 engine。
  * **本文件一行绘制代码都没有**：视觉 100% 来自 Dart 侧那棵树。
  *
- * ## 引擎组而不是裸 engine
- * [FlutterEngineGroup] 复用主引擎已加载的 AOT 快照与 VM 资源，冷启动快得多，
- * 并且天然共享同一份 `kernel_blob`。入口用 [DartExecutor.DartEntrypoint] 指定
- * `aylaOverlayWindowMain`（`lib/main.dart` 的顶层函数，带 `@pragma('vm:entry-point')`）。
+ * ## 2026-11-01 真机重做（三个已定稿的决策）
+ * 1. **窗口尺寸严格等于当前状态的球组尺寸**：双球 132dp / 单球 80dp / 收起 28dp，高恒 44dp。
+ *    Android overlay 窗口的**尺寸就是触摸热区**（`TOUCHABLE_INSETS_REGION` 是 @hide），
+ *    所以「窗口 = 球组」是唯一能让球外区域不被吞掉的实现方式，误差仅为矩形近似
+ *    （用户已明确接受）。
+ * 2. **拖动只由原生负责**（[installDragHandle]）。Dart 侧在紧凑模式下**不再**改
+ *    `Positioned.top`，也不再调 `setBallGroupTop` 移动窗口 ——
+ *    两处同时移动正是「上下拖动来回跳变闪烁」的根因。
+ * 3. **`setOnTouchListener` 只旁听、绝不干预 Flutter 事件流**：所有分支返回 `false`，
+ *    不发 `ACTION_CANCEL`。之前发 CANCEL 会打断把手的普通点击
+ *    （用户实报「点把手不收起，拖拽时才收起」）。
  *
- * ## 不注册任何插件
- * `setAutomaticallyRegisterPlugins(false)` ⇒ media_kit / webrtc / record / livekit
- * 一个都不会在第二引擎里起第二份。这一层只需要「画球 + 一条 MethodChannel」。
- *
- * ## 通道（与 Dart 侧逐字一致）
- * - 通道名 `ayla/desktop_window`：**与 Windows 侧同名**，Dart 侧复用同一个
- *   `AylaOverlayBallWindowApp`（`lib/widgets/shell/overlay_window_app.dart`），
- *   于是两端行为一致、只有原生实现不同。
- * - 原生 → 浮层引擎：`ballPayload` { payload: String }（主引擎算好的整组投影）
- * - 浮层引擎 → 原生：`ready` → bool（第一帧已出，宿主据此认为可用）
- *                      `ballTap` { kind, sourceRoute } → bool（点球回房）
- * - 原生 → 主引擎：沿用既有 `ayla/live_pip` 的 `onBallTap` / `onBallClosed`
- *   （Dart 侧 `AylaDetachedLiveEvents` 已经在监听，不新增事件类型）。
- *
- * ## 窗口（为什么是「小窗」而不是全屏）
- * 全屏透明窗口 + 触摸穿透需要 `ViewTreeObserver.InternalInsetsInfo`
- * 的 `TOUCHABLE_INSETS_REGION`，那是 **@hide** API（`android.jar` 里没有，
- * 反射在 Android 9+ 属于受限隐藏 API，失败就是「整屏吞掉触摸」的灾难性降级）。
- * ⇒ 改用**与 Windows 完全同构的小窗**：窗口尺寸 = 内容信封（176×132dp），
- * 窗口之外的手势天然落到下面的应用，**零反射、零隐藏 API、零灾难降级**。
- *
- * ⚠️ 已知限制（如实登记）：球组在窗口坐标系里的位置由组件自己的
- * `Positioned(right: 24, top: 80)` 决定 ⇒
- * ① 竖直拖动只能在窗口内小幅移动（与 Windows 侧完全相同的限制）；
- * ② 窗口内「球之外的空白」会吞掉该处的触摸 —— 通过把窗口顶边推到屏幕外
- *   （`y = statusBarHeight - 80dp`）把这块空白尽量挪出屏幕，只留下状态栏那一条。
+ * ## 窗口尺寸变化为什么是 removeView + addView
+ * 改尺寸会让合成器重分配 surface buffer，旧内容在新 buffer 里按原原点渲染一帧
+ * ⇒ 斜向位置伪影（DE23）。所以**不用** `updateViewLayout` 改宽高，而是摘掉重建。
  *
  * ## 线程
  * 全部方法必须在**主线程**调用（`WindowManager.addView` 与 engine 创建都要求）。
- * MainActivity 的 MethodChannel 回调天然在主线程。
  */
 class AylaOverlayFlutterHost(
     private val context: Context,
@@ -83,33 +64,30 @@ class AylaOverlayFlutterHost(
     /** 是否正在拖着窗口走。 */
     private var dragging = false
 
-    /** 当前窗口宽度（逻辑 dp），用于判断状态是否变化。 */
-    private var currentWindowWidthDp = 0
-
     /** 拖动起点（手指 rawY 与窗口 y）。 */
     private var dragStartRawY = 0f
     private var dragStartY = 0
 
-    /** 当前是否因为手指按下而临时扩窗。 */
-    private var expandedForTouch = false
+    /** 当前窗口宽度（逻辑 dp），用于判断是否需要重建。 */
+    private var currentWindowWidthDp = 0
 
-    /** 扩窗前的位置（松手时恢复）。 */
-    private var savedForExpand: Pair<Int, Int>? = null
-    private var flutterView: FlutterView? = null
-    private var params: WindowManager.LayoutParams? = null
-
-    private var engineGroup: FlutterEngineGroup? = null
-    private var engine: FlutterEngine? = null
-    private var channel: MethodChannel? = null
-
-    /** 当前是否处于收起态（只有把手）。用于把窗口其余部分推出屏幕。 */
+    /** 当前是否处于收起态（只有把手）。由 Dart 侧 `setCollapsed` 同步。 */
     private var collapsed = false
+
+    /** 当前球数（0/1/2），来自主引擎推来的 payload。 */
+    private var ballCount = 0
 
     /** 最近一次要显示的投影（JSON 串）。浮层引擎 `ready` 之后补推一次。 */
     private var pendingPayload: String? = null
 
     /** 浮层引擎是否已经报到（`ready`）。 */
     private var engineReady = false
+
+    private var flutterView: FlutterView? = null
+    private var params: WindowManager.LayoutParams? = null
+
+    private var engine: FlutterEngine? = null
+    private var channel: MethodChannel? = null
 
     /** 是否有窗口（幂等判据）。 */
     val isShowing: Boolean
@@ -123,13 +101,14 @@ class AylaOverlayFlutterHost(
      */
     fun show(payload: String?): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            // TYPE_APPLICATION_OVERLAY 是 API 26+；低版本用已废弃的 TYPE_PHONE 属于
-            // 「偷偷塞一个」——明确降级而不是绕过。
             return AylaFloatingBallController.RESULT_UNSUPPORTED
         }
         if (!canDrawOverlays()) return AylaFloatingBallController.RESULT_PERMISSION_REQUIRED
 
         pendingPayload = payload
+        // 球数必须**先**算出来：窗口宽度 = 球组宽度，第一次 addView 就要是终态宽度
+        // （否则会先建 28dp 再重建 132dp，多一次 EngineView 抖动）。
+        updateBallCount()
         // 先起保活服务（此刻 App 仍在前台 ⇒ 满足 Android 12+ 的 FGS 启动限制）。
         AylaFloatingBallService.start(context)
 
@@ -159,6 +138,9 @@ class AylaOverlayFlutterHost(
         val wm = windowManager
         windowManager = null
         params = null
+        currentWindowWidthDp = 0
+        collapsed = false
+        ballCount = 0
         if (view != null && wm != null) {
             try {
                 wm.removeView(view)
@@ -166,7 +148,6 @@ class AylaOverlayFlutterHost(
                 Log.w(TAG, "removeView failed: ${error.message}")
             }
         }
-        // 引擎必须显式销毁：FlutterView 被移除只是断开渲染面，Dart isolate 还在跑。
         channel?.setMethodCallHandler(null)
         channel = null
         try {
@@ -175,10 +156,8 @@ class AylaOverlayFlutterHost(
             Log.w(TAG, "engine.destroy failed: ${error.message}")
         }
         engine = null
-        engineGroup = null
         engineReady = false
         pendingPayload = null
-        // 没有球就不该常驻通知栏。
         try {
             AylaFloatingBallService.stop(context)
         } catch (error: Exception) {
@@ -194,39 +173,65 @@ class AylaOverlayFlutterHost(
             false
         }
 
+    // ---------------------------------------------------------------- 尺寸
+
+    /**
+     * 当前状态对应的**球组真实宽度**（dp）。
+     *
+     * 精确到组件真实几何（`session_activity.dart`）：ballSize=44 / gap=8 / toggleWidth=28
+     *   双球 = 44+8+44+8+28 = 132
+     *   单球 = 44+8+28      =  80
+     *   收起 = 28（只剩把手）
+     */
+    private fun targetWidthDp(): Int = when {
+        collapsed -> TOGGLE_WIDTH_DP
+        ballCount >= 2 -> 132
+        ballCount == 1 -> 80
+        else -> TOGGLE_WIDTH_DP
+    }
+
     // ---------------------------------------------------------------- 视图
 
     /**
-     * 单个紧凑 overlay 窗口：**窗口尺寸 = 球组真实尺寸**。
+     * 单个紧凑 overlay 窗口：**窗口尺寸 = 球组真实尺寸**，贴屏幕右缘。
      *
-     * ## 为什么是这个形状
-     * Android overlay 窗口的**尺寸就是触摸热区**：窗口内任何位置都会吃掉触摸，
-     * `onTouch` 返回 false 也不会还给下层（WM input channel 在 DOWN 时已捕获，DE26）。
-     * 而公开 API 里没有「非矩形热区」（`TOUCHABLE_INSETS_REGION` 是 @hide，DE25）。
-     *
-     * ⇒ 唯一可行解：**把窗口做到刚好包住球组**，让矩形误差最小。
-     * 球组宽 132dp（双球）/ 28dp（收起态把手），高 44dp。窗口按展开态最大尺寸分配，
-     * 收起时把多余的横向空白推出屏幕右缘。
-     *
-     * ## 拖动
-     * 拖动时**移动窗口本身**（只改 x/y）。窗口高 44dp 刚好等于球组高，所以球在
-     * 窗口内没有竖直移动空间 —— Dart 侧收到的 top 变化全部换算成窗口位移。
-     *
-     * ⚠️ 永不改宽高（Fixed Surface Rule / DE23：改尺寸会让合成器重分配 surface
-     * buffer，旧内容按原原点渲染一帧 ⇒ 斜向位置伪影，用户会看到「一闪一闪被拉伸」）。
+     * 收起态窗口真的只有 28dp 宽 —— 这才是「收起」应有的效果：不挡触摸。
      */
     private fun ensureView() {
         if (flutterView != null) return
-        val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
+        collapsed = false
         val flutter = ensureEngine()
         densityValue = context.resources.displayMetrics.density
+        rebuildWindow(targetWidthDp(), topDp = initialTopDp(), engine = flutter)
+    }
 
-        // 透明：球有圆角、辉光、半透明玻璃背板，窗口不透明会变成方块黑边。
+    /**
+     * 按 (宽, 竖直位置) 重建窗口。
+     *
+     * - 宽度变了 ⇒ 摘掉旧 View、新建 FlutterView 挂同一个 engine（见文件头 DE23）；
+     * - 宽度没变 ⇒ 什么都不做。
+     */
+    private fun rebuildWindow(widthDp: Int, topDp: Int, engine: FlutterEngine) {
+        val wm = windowManager
+            ?: (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
+            ?: return
+        val widthPx = dp(widthDp)
+        val heightPx = dp(GROUP_HEIGHT_DP)
+        val maxTop = (screenHeight() - heightPx).coerceAtLeast(0)
+        val y = topPx(topDp).coerceIn(0, maxTop)
+
+        val oldView = flutterView
+        if (oldView != null) {
+            try {
+                wm.removeView(oldView)
+            } catch (error: Exception) {
+                Log.w(TAG, "removeView for resize failed: ${error.message}")
+            }
+            flutterView = null
+        }
+
         val view = FlutterView(context, TransparencyMode.transparent)
-        view.attachToFlutterEngine(flutter)
-
-        val widthPx = dp(WINDOW_WIDTH_DP)
-        val heightPx = dp(WINDOW_HEIGHT_DP)
+        view.attachToFlutterEngine(engine)
         val layout = WindowManager.LayoutParams(
             widthPx,
             heightPx,
@@ -238,35 +243,106 @@ class AylaOverlayFlutterHost(
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
+            // 右对齐：窗口右缘 = 屏幕右缘（收起态把手正好贴边）。
             x = screenWidth() - widthPx
-            y = statusBarHeight() + dp(BALL_TOP_DP)
+            this.y = y
         }
-        wm.addView(view, layout)
-
-        windowManager = wm
-        flutterView = view
-        params = layout
-
-        installDragHandle(view)
+        try {
+            wm.addView(view, layout)
+            windowManager = wm
+            flutterView = view
+            params = layout
+            currentWindowWidthDp = widthDp
+            installDragHandle(view)
+        } catch (error: Exception) {
+            Log.w(TAG, "addView failed: ${error.message}")
+        }
     }
 
     /**
-     * 拖动：手指按住球组竖直移动，窗口跟着走。
+     * 拖动：手指按住球组竖直移动，**窗口跟着走**（不消费事件）。
      *
-     * ## 为什么不用 setOnTouchListener
-     * `setOnTouchListener` 挂在 FlutterView 上时，会先于 Flutter 的触摸分发执行；
-     * 一旦在里面给 Flutter 发 `ACTION_CANCEL`（为了「拖完不误触点击」），
-     * **把手的普通点击也会被打断** —— 用户实报「点把手不收起，拖拽时才收起」。
+     * ## 为什么只旁听
+     * `setOnTouchListener` 挂在 FlutterView 上时先于 Flutter 的触摸分发执行。
+     * 旧实现在 MOVE 超阈值后给 Flutter 发 `ACTION_CANCEL`（想避免「拖完误触点击」），
+     * 结果**把手的普通点击也被打断** —— 用户实报「点把手不收起，拖拽时才收起」。
      *
-     * ## 现在的做法
-     * 只**旁听**，绝不干预：
-     *   · DOWN 记起点，不消费；
-     *   · MOVE 超阈值后移动窗口，但**不**给 Flutter 发 CANCEL；
-     *   · Flutter 侧收到的是完整事件流，点击/长按语义完全正常。
-     *
-     * 代价：拖完松手时 Flutter 可能把它当成一次「点击」而触发跳转。用
-     * [suppressNextTap] 标记抑制：拖动一旦发生，就在 UP 后短暂吞掉随后的点击。
+     * ⇒ 现在所有分支返回 `false`、不发 CANCEL；拖动结束后改为让 Dart 侧
+     * 抑制**下一次**点击（`suppressTap` 通道消息，见 Dart 的 `suppressTapTick`）。
      */
+    private fun installDragHandle(view: FlutterView) {
+        view.setOnTouchListener { _, event ->
+            val layout = params
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    dragging = false
+                    dragStartRawY = event.rawY
+                    dragStartY = layout?.y ?: 0
+                    false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val wm = windowManager
+                    if (wm == null || layout == null) return@setOnTouchListener false
+                    // 多指（捏合/双指）一律不拖：那是 Flutter 的手势。
+                    if (event.pointerCount > 1) {
+                        dragging = false
+                        return@setOnTouchListener false
+                    }
+                    val dy = event.rawY - dragStartRawY
+                    if (!dragging && Math.abs(dy) < dp(DRAG_SLOP_DP)) {
+                        return@setOnTouchListener false
+                    }
+                    dragging = true
+                    val maxY = (screenHeight() - dp(GROUP_HEIGHT_DP)).coerceAtLeast(0)
+                    val nextY = (dragStartY + dy).roundToInt().coerceIn(0, maxY)
+                    if (nextY != layout.y) {
+                        layout.y = nextY
+                        try {
+                            wm.updateViewLayout(view, layout)
+                        } catch (error: Exception) {
+                            Log.w(TAG, "drag move failed: ${error.message}")
+                        }
+                    }
+                    false
+                }
+                MotionEvent.ACTION_UP,
+                MotionEvent.ACTION_CANCEL -> {
+                    if (dragging) {
+                        dragging = false
+                        // 告诉 Dart：刚刚拖动过 ⇒ 抑制紧随其后的一次合成 tap。
+                        channel?.invokeMethod("suppressTap", null)
+                    }
+                    false
+                }
+                else -> false
+            }
+        }
+    }
+
+    /** 收起 / 展开：Dart 侧改了状态，原生按新宽度重建窗口（右缘贴合）。 */
+    private fun applyCollapsed(nextCollapsed: Boolean) {
+        if (collapsed == nextCollapsed && flutterView != null) return
+        collapsed = nextCollapsed
+        val flutter = engine ?: return
+        if (flutterView == null) return
+        rebuildWindow(
+            targetWidthDp(),
+            topDp = currentTopDp(),
+            engine = flutter,
+        )
+    }
+
+    private fun currentTopDp(): Int {
+        val layout = params ?: return initialTopDp()
+        return (layout.y / densityValue).roundToInt()
+    }
+
+    private fun topPx(topDp: Int): Int = dp(topDp)
+
+    private fun initialTopDp(): Int = BALL_TOP_DP
+
+    // ---------------------------------------------------------------- 引擎
+
     /**
      * 创建第二个引擎（浮层专用）。
      *
@@ -311,14 +387,13 @@ class AylaOverlayFlutterHost(
                     }
                     result.success(true)
                 }
-                "setBallGroupTop" -> {
-                    val top = call.argument<Double>("top")
-                        ?: call.argument<Number>("top")?.toDouble()
-                    if (top != null) {
-                        mainHandler.post { applyBallGroupTop(top) }
-                    }
+                "setCollapsed" -> {
+                    val next = call.argument<Boolean>("collapsed") == true
+                    mainHandler.post { applyCollapsed(next) }
                     result.success(true)
                 }
+                // 紧凑窗口下这些都不需要（窗口尺寸 = 球组尺寸 ⇒ 无需 hit-rect）。
+                "setBallGroupTop", "setHitRects", "setInteractive" -> result.success(true)
                 else -> result.notImplemented()
             }
         }
@@ -327,174 +402,36 @@ class AylaOverlayFlutterHost(
         return flutter
     }
 
-    private fun installDragHandle(view: FlutterView) {
-        view.setOnTouchListener { _, event ->
-            val wm = windowManager ?: return@setOnTouchListener false
-            val layout = params ?: return@setOnTouchListener false
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    dragging = false
-                    dragStartRawY = event.rawY
-                    dragStartY = layout.y
-                    false
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dy = event.rawY - dragStartRawY
-                    if (!dragging && Math.abs(dy) < dp(DRAG_SLOP_DP)) {
-                        return@setOnTouchListener false
-                    }
-                    dragging = true
-                    val nextY = (dragStartY + dy).toInt()
-                    val clamped = nextY.coerceIn(
-                        dp(MIN_TOP_DP),
-                        screenHeight() - dp(GROUP_HEIGHT_DP),
-                    )
-                    if (clamped != layout.y) {
-                        layout.y = clamped
-                        try {
-                            wm.updateViewLayout(view, layout)
-                        } catch (error: Exception) {
-                            Log.w(TAG, "drag move failed: ${error.message}")
-                        }
-                    }
-                    // 不消费、不发 CANCEL：Flutter 的点击语义保持完整。
-                    false
-                }
-                MotionEvent.ACTION_UP,
-                MotionEvent.ACTION_CANCEL -> {
-                    dragging = false
-                    false
-                }
-                else -> false
-            }
-        }
-    }
-
-    /**
-     * 按「收起状态 + 球的数量」重建窗口，让窗口永远紧贴球组的真实尺寸。
-     *
-     * ## 为什么是 remove + add 而不是 updateViewLayout
-     * 改窗口尺寸会让合成器重分配 surface buffer，旧内容在新 buffer 里按原原点渲染
-     * 一帧 ⇒ 斜向位置伪影（DE23）。所以**不用** `updateViewLayout` 改宽高，而是
-     * 把窗口摘掉重建（尺寸在 `addView` 时一次定死，符合 Fixed Surface Rule AX12）。
-     *
-     * ## 各状态的宽度
-     *   双球展开 = 44 + 8 + 44 + 8 + 28 = 132dp
-     *   单球展开 = 44 + 8 + 28        =  80dp
-     *   收起     = 28dp（只有把手）
-     *
-     * 收起后窗口真的只有 28dp 宽 —— 这才是「收起」应有的效果：不挡触摸。
-     */
-    private fun resizeWindowForState(isCollapsed: Boolean, ballCount: Int) {
-        // 精确到组件真实几何（session_activity.dart）：
-        //   ballSize=44, gap=8, toggleWidth=28
-        //   双球 = 44+8+44+8+28 = 132
-        //   单球 = 44+8+28       =  80
-        //   收起 = 28（只有把手）
-        val targetDp = when {
-            isCollapsed -> TOGGLE_WIDTH_DP
-            ballCount >= 2 -> 132
-            ballCount == 1 -> 80
-            else -> TOGGLE_WIDTH_DP
-        }
-        if (targetDp == currentWindowWidthDp) return
-        val wm = windowManager ?: return
-        val oldView = flutterView ?: return
-        val oldLayout = params ?: return
-        currentWindowWidthDp = targetDp
-        // 记住当前竖直位置，重建后保持（用户拖到哪就留在哪）。
-        val keepY = oldLayout.y
-        try {
-            wm.removeView(oldView)
+    /** 从最近的 payload 里读出球数（语音/直播各一个）。 */
+    private fun updateBallCount() {
+        val payload = pendingPayload ?: return
+        ballCount = try {
+            val json = org.json.JSONObject(payload)
+            val hasVoice = json.optString("voiceSessionId", "").isNotEmpty()
+            val hasLive = json.optString("liveSessionId", "").isNotEmpty()
+            (if (hasVoice) 1 else 0) + (if (hasLive) 1 else 0)
         } catch (error: Exception) {
-            Log.w(TAG, "removeView for resize failed: ${error.message}")
-        }
-        val newView = FlutterView(context, TransparencyMode.transparent)
-        val eng = engine ?: return
-        newView.attachToFlutterEngine(eng)
-        val widthPx: Int = dp(targetDp)
-        val heightPx: Int = dp(GROUP_HEIGHT_DP)  // 44dp，正好是球组高度
-        val newLayout = WindowManager.LayoutParams(
-            widthPx,
-            heightPx,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = screenWidth() - widthPx
-            y = keepY
-        }
-        try {
-            wm.addView(newView, newLayout)
-            flutterView = newView
-            params = newLayout
-            installDragHandle(newView)
-        } catch (error: Exception) {
-            Log.w(TAG, "addView for resize failed: ${error.message}")
-        }
-    }
-
-    /**
-     * 把球组的竖直位置应用到窗口上。
-     *
-     * Dart 侧 `Positioned(top:)` 的坐标空间是**窗口内的逻辑像素**；窗口高度固定为
-     * [WINDOW_HEIGHT_DP]，球组在其内部位于 `top - GROUP_TOP_DP` 处。想要球在屏幕上
-     * 走到某个高度，就要让窗口的 y 相应平移：
-     *
-     *   ballScreenY = windowY + dp(top) - dp(GROUP_TOP_DP)
-     *   ⇒ windowY   = ballScreenY - dp(top) + dp(GROUP_TOP_DP)
-     *
-     * 这里直接用「Dart 给的 top 变化量」平移窗口即可（两者一一对应），
-     * 并把结果 clamp 在屏幕可视范围内。
-     *
-     * ⚠️ 只改 `y`，永不改宽高（Fixed Surface Rule）。
-     */
-    private fun applyBallGroupTop(topLogical: Double) {
-        val wm = windowManager ?: return
-        val view = flutterView ?: return
-        val layout = params ?: return
-        // Dart 侧 top 是「球组顶边在**全屏**坐标系里的位置」（逻辑 px）。
-        // TOUCH 窗口就是球组本体，所以直接把窗口 y 设成它即可。
-        val topPx = (topLogical * densityValue).roundToInt() - dp(GROUP_TOP_DP)
-        val maxTop = screenHeight() - dp(GROUP_HEIGHT_DP)
-        val nextY = topPx.coerceIn(dp(MIN_TOP_DP), maxTop)
-        if (nextY == layout.y) return
-        layout.y = nextY
-        try {
-            wm.updateViewLayout(view, layout)
-        } catch (error: Exception) {
-            Log.w(TAG, "applyBallGroupTop failed: ${error.message}")
+            0
         }
     }
 
     /** 把最新投影推给浮层引擎（未 ready 时只记下，报到后补推）。 */
     private fun pushPayload() {
         val payload = pendingPayload ?: return
-        // 收起态变化会影响窗口的 x（让球组之外的空白移出屏幕），先同步。
-        val nextCollapsed = try {
-            org.json.JSONObject(payload).optBoolean("collapsed", false)
-        } catch (error: Exception) {
-            false
+        updateBallCount()
+        // 球数变化 ⇒ 窗口要按新宽度重建（收起态宽度不变）。
+        if (flutterView != null) {
+            val target = targetWidthDp()
+            if (target != currentWindowWidthDp) {
+                val flutter = engine
+                if (flutter != null) {
+                    rebuildWindow(target, topDp = currentTopDp(), engine = flutter)
+                }
+            }
         }
-        // 按「当前状态的球组真实宽度」重建窗口（不是 resize —— 见 resizeWindowForState）。
-        val hasVoice = try {
-            org.json.JSONObject(payload).optString("voiceSessionId", "").isNotEmpty()
-        } catch (error: Exception) { false }
-        val hasLive = try {
-            org.json.JSONObject(payload).optString("liveSessionId", "").isNotEmpty()
-        } catch (error: Exception) { false }
-        val ballCount = (if (hasVoice) 1 else 0) + (if (hasLive) 1 else 0)
-        resizeWindowForState(nextCollapsed, ballCount)
         if (!engineReady) return
         try {
-            channel?.invokeMethod(
-                "ballPayload",
-                mapOf("payload" to payload),
-            )
+            channel?.invokeMethod("ballPayload", mapOf("payload" to payload))
         } catch (error: Exception) {
             Log.w(TAG, "pushPayload failed: ${error.message}")
         }
@@ -503,19 +440,6 @@ class AylaOverlayFlutterHost(
     private fun screenWidth(): Int = context.resources.displayMetrics.widthPixels
 
     private fun screenHeight(): Int = context.resources.displayMetrics.heightPixels
-
-    private fun statusBarHeight(): Int {
-        val id = context.resources.getIdentifier(
-            "status_bar_height",
-            "dimen",
-            "android",
-        )
-        if (id > 0) {
-            val value = context.resources.getDimensionPixelSize(id)
-            if (value > 0) return value
-        }
-        return dp(24)
-    }
 
     private fun dp(value: Int): Int =
         (value * context.resources.displayMetrics.density).roundToInt()
@@ -529,31 +453,17 @@ class AylaOverlayFlutterHost(
         /** 与 Windows 侧同名 ⇒ Dart 侧复用同一个 `AylaOverlayBallWindowApp`。 */
         const val INNER_CHANNEL = "ayla/desktop_window"
 
-        /**
-         * 窗口逻辑尺寸（dp）= 与 Windows 侧 `AylaOverlayWindowApp.hostViewport` 同构：
-         * 176×132 = 组件宽屏档 `right: 24` + 球组最大宽 132 + 余量 / `top: 80` + 44 + 8。
-         */
-        const val WINDOW_WIDTH_DP = 176
-        const val WINDOW_HEIGHT_DP = 132
-
-        /** 组件 `.session-activity-group` 的宽屏 top（`shell.css:462`，= 80）。 */
-        const val GROUP_TOP_DP = 80
-
         /** 球组高度（两个 44dp 球 + 内边距）。 */
         const val GROUP_HEIGHT_DP = 44
-
-        /** 球组顶端允许到达的最小屏幕高度（避开状态栏）。 */
-        const val MIN_TOP_DP = 8
 
         /** 把手宽度（收起态只剩它）：`AylaSessionActivityIndicator.toggleWidth`。 */
         const val TOGGLE_WIDTH_DP = 28
 
-        /** 球组距状态栏的初始高度。 */
-        const val BALL_TOP_DP = 80
+        /** 球组初始竖直位置（距屏幕顶，逻辑 dp）。 */
+        const val BALL_TOP_DP = 120
 
         /** 判定为拖动的最小位移（dp）。低于它仍算点击。 */
         const val DRAG_SLOP_DP = 8
-
 
         private val mainHandler = Handler(Looper.getMainLooper())
     }

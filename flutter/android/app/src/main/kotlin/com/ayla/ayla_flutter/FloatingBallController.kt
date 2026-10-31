@@ -135,13 +135,24 @@ class AylaFloatingBallService : Service() {
         private const val NOTIFICATION_ID = 0x41594C41 // 'AYLA'
 
         /**
-         * 启动保活服务。
+         * 当前有几个宿主在用这个前台服务（悬浮球 / 直播小窗）。
+         *
+         * 两个宿主各自独立开关窗口，任何一方关窗都不该把另一方的保活一起停掉
+         * （否则「球还在、直播声音却被系统冻结」）。用引用计数表达这件事。
+         * 只在**主线程**读写（两个宿主的通道回调都在主线程）。
+         */
+        private var activeCount = 0
+
+        /**
+         * 启动保活服务（幂等；引用计数 +1）。
          *
          * ⚠️ 必须由**仍在前台**的 App 调用（Android 12+ 后台起 FGS 抛
-         * `ForegroundServiceStartNotAllowedException`）；唯一调用点是
-         * [AylaOverlayFlutterHost.show]，由 UI 手势触发。
+         * `ForegroundServiceStartNotAllowedException`）；调用点是
+         * [AylaOverlayFlutterHost.show] 与 [AylaLiveMiniWindowHost.show]，都由 UI 触发。
          */
         fun start(context: Context) {
+            activeCount += 1
+            if (activeCount > 1) return
             try {
                 ContextCompat.startForegroundService(
                     context,
@@ -149,17 +160,23 @@ class AylaFloatingBallService : Service() {
                 )
             } catch (error: Exception) {
                 // 后台起 FGS 被拒是**预期**分支（某些 ROM 的手势路径），
-                // 记日志并继续：球本体仍能显示，只是进程可能被回收。
+                // 记日志并继续：窗口仍能显示，只是进程可能被回收。
                 Log.w(TAG, "startForegroundService failed: ${error.message}", error)
             }
         }
 
+        /** 停止保活服务（引用计数 -1；归零才真的停）。 */
         fun stop(context: Context) {
+            activeCount = (activeCount - 1).coerceAtLeast(0)
+            if (activeCount > 0) return
             try {
                 context.stopService(Intent(context, AylaFloatingBallService::class.java))
             } catch (error: Exception) {
                 Log.w(TAG, "stopService failed: ${error.message}")
             }
         }
+
+        /** 直播小窗关窗用的别名（语义同 [stop]，保留可读性）。 */
+        fun stopIfIdle(context: Context) = stop(context)
     }
 }

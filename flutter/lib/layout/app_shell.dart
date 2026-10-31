@@ -742,12 +742,6 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
             user != null && user.isLive && user.liveRoomId != null
                 ? user.liveRoomId
                 : null;
-        // ignore: avoid_print
-        print('[AYLA-BALL] isInVoice=' +
-            (user?.isInVoice ?? false).toString() +
-            ' voiceRoomId=' + (user?.voiceRoomId ?? 'null') +
-            ' isLive=' + (user?.isLive ?? false).toString() +
-            ' liveRoomId=' + (user?.liveRoomId ?? 'null'));
         final AylaActivitySession? voice = voiceId == null
             ? null
             : _activitySession(

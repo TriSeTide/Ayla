@@ -51,6 +51,8 @@ import 'state/room_providers.dart';
 import 'theme/app_theme.dart';
 import 'widgets/live/live_player.dart' show aylaUsesDesktopFullscreen;
 import 'widgets/live/live_window_surface.dart' show AylaDetachedLiveWindowApp;
+import 'widgets/live/android_live_mini_window.dart'
+    show AylaAndroidLiveMiniWindowApp;
 import 'widgets/shell/overlay_window_app.dart'
     show AylaOverlayBallWindowApp, AylaOverlayPayload;
 import 'widgets/shell/overlay_scrollbar.dart';
@@ -518,6 +520,45 @@ void aylaOverlayWindowMain(List<String> args) {
     }
   }
   runApp(_aylaOverlayWindowRoot(initialPayload: payload));
+}
+
+/// Android **窗口外直播小窗**的 Dart 入口（**第二引擎**；原生侧见
+/// `android/.../LiveMiniWindowHost.kt`）。
+///
+/// ## 为什么单独一个入口
+/// Android 的小窗宿主窗口是**卡片尺寸**（overlay 尺寸即触摸热区），
+/// 而 Windows 那棵树的宿主窗口是整个工作区 —— 两者几何约定不同，
+/// 共用入口会让「谁负责移动窗口」这件事再次变成两处同时生效。
+/// 视觉与组件代码仍是**同一份** `AylaLiveMiniPlayer`。
+///
+/// ## 参数
+/// 原生用 `DartEntrypointArgs` 传一条 JSON：
+/// `{"kind":"liveMini","channelId":"9","playUrl":"https://..."}`。
+@pragma('vm:entry-point')
+void aylaAndroidLiveWindowMain(List<String> args) {
+  WidgetsFlutterBinding.ensureInitialized();
+  String? channelId;
+  String? playUrl;
+  if (args.isNotEmpty) {
+    try {
+      final Object? decoded = jsonDecode(args.first);
+      if (decoded is Map) {
+        final Object? rawId = decoded['channelId'];
+        final Object? rawUrl = decoded['playUrl'];
+        if (rawId != null) channelId = rawId.toString();
+        if (rawUrl is String && rawUrl.isNotEmpty) playUrl = rawUrl;
+      }
+    } catch (error) {
+      // 参数不是合法 JSON（手工调试）：退化成「等宿主发 play」，不崩。
+      debugPrint('[AYLA-ANDROID-LIVE-WINDOW] entrypoint 参数解析失败：$error');
+    }
+  }
+  runApp(
+    AylaAndroidLiveMiniWindowApp(
+      initialChannelId: channelId,
+      initialPlayUrl: playUrl,
+    ),
+  );
 }
 
 /// 第二引擎里**浮层**那棵树的根（Windows 的 activityBall 与 Android 叠加层共用）。

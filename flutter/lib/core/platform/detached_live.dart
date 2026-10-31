@@ -150,18 +150,19 @@ Future<bool> aylaEnterDetachedLive({
     }
   }
   if (defaultTargetPlatform == TargetPlatform.android) {
+    // ⚠️ **不再是系统 PiP**（1.0.40 已彻底移除，用户明确要求）。
+    //
+    // 现在 Android 的「脱离应用」是 **Flutter 自绘的窗口外直播小窗**：
+    // 第二引擎 + `TYPE_APPLICATION_OVERLAY`（原生 `LiveMiniWindowHost.kt`），
+    // 里面 build 的仍是 App 内那一个 `AylaLiveMiniPlayer`（用户定稿：
+    // 「要直接用现有的直播小窗让他脱离应用，不要加按钮单独重做一个」）。
     try {
       final bool? ok = await _pipChannel.invokeMethod<bool>(
-        'enterPip',
+        'openLiveWindow',
         <String, Object?>{
-          'aspectX': aspectX,
-          'aspectY': aspectY,
-          if (videoRect != null) ...<String, Object?>{
-            'x': videoRect.left.round(),
-            'y': videoRect.top.round(),
-            'w': videoRect.width.round(),
-            'h': videoRect.height.round(),
-          },
+          'channelId': channelId,
+          'title': title,
+          'playUrl': playUrl,
         },
       );
       return ok ?? false;
@@ -212,13 +213,24 @@ Future<void> aylaSetLivePipSessionActive(bool active) async {
 ///
 /// 幂等：没有脱离态时调用不产生副作用。
 Future<void> aylaCloseDetachedLive() async {
-  if (defaultTargetPlatform != TargetPlatform.windows) return;
-  try {
-    await _desktopChannel.invokeMethod<void>('closeLiveWindow');
-  } on MissingPluginException {
-    // 原生未实现：静默（这是「关闭」，静默安全）
-  } on PlatformException {
-    // 同上
+  if (defaultTargetPlatform == TargetPlatform.windows) {
+    try {
+      await _desktopChannel.invokeMethod<void>('closeLiveWindow');
+    } on MissingPluginException {
+      // 原生未实现：静默（这是「关闭」，静默安全）
+    } on PlatformException {
+      // 同上
+    }
+    return;
+  }
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    try {
+      await _pipChannel.invokeMethod<void>('closeLiveWindow');
+    } on MissingPluginException {
+      // 静默。
+    } on PlatformException {
+      // 静默。
+    }
   }
 }
 

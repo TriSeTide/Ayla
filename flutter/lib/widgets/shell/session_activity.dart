@@ -133,6 +133,9 @@ class AylaSessionActivityIndicator extends StatefulWidget {
     this.onTopChanged,
     this.onHoverChanged,
     this.onHitRectsChanged,
+    this.compact = false,
+    this.onCollapsedChanged,
+    this.suppressTapTick = 0,
   });
 
   /// 当前**可见按钮**在视口坐标系里的精确矩形（圆的按外接方框给）。
@@ -169,6 +172,27 @@ class AylaSessionActivityIndicator extends StatefulWidget {
 
   /// 点击悬浮球：回传该会话（等价 web `navigate(session.sourceRoute)`，路由由页面层决定）。
   final ValueChanged<AylaActivitySession>? onOpenSession;
+
+  /// **紧凑宿主模式**（Android 系统叠加层用）。
+  ///
+  /// ## 为什么需要它（2026-11-01 真机实测根因）
+  /// Android 的 overlay 窗口**尺寸就是触摸热区**（`TOUCHABLE_INSETS_REGION` 是 @hide，
+  /// 见交接文档 §5），所以窗口只能做到「刚好等于球组」：132/80/28 × 44dp。
+  /// 而本组件在应用内是 `Positioned(right: 24, top: 80)` —— 把它塞进 44dp 高的窗口里
+  /// 就会整体落到窗口之外被裁掉（这正是「球不出现 / 矩形里全是空白」的根因）。
+  ///
+  /// ⇒ 紧凑模式下：**组固定在窗口原点 (0,0)**，窗口本身就是球组；
+  /// 竖直拖动交给原生（移动整个窗口），组件自己不再改 `Positioned.top`。
+  final bool compact;
+
+  /// 收起态变化回调（紧凑宿主用它把新状态交给原生，按新宽度重建同尺寸窗口）。
+  final ValueChanged<bool>? onCollapsedChanged;
+
+  /// 「刚刚发生了一次原生拖动」的计数器：每次递增 ⇒ 抑制紧随其后的一次点击。
+  ///
+  /// 原生拖动是**移动窗口**，手指相对窗口的坐标几乎不变 ⇒ Flutter 侧看不到位移，
+  /// 松手时会被判成一次普通 tap（拖完误触收起/回房）。由原生在拖动结束时递增它。
+  final int suppressTapTick;
 
   /// 拖动把手后**新的 top 值**（null = 不回传，应用内使用时的默认行为）。
   ///
@@ -320,6 +344,15 @@ class _AylaSessionActivityIndicatorState
   bool _isNarrow(BuildContext context) =>
       AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
 
+  @override
+  void didUpdateWidget(covariant AylaSessionActivityIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 原生刚刚拖动过 ⇒ 抑制紧随其后的那一次合成 tap（见 [suppressTapTick]）。
+    if (widget.suppressTapTick != oldWidget.suppressTapTick) {
+      _suppressClick = true;
+    }
+  }
+
   /// CSS 侧由浏览器算出的默认 top（`top: 80px` / `calc(56px + env(safe-area-inset-top) + 48px)`）。
   ///
   /// web 在 pointerdown 时读 `group.getBoundingClientRect().top` 作为拖动起点；
@@ -352,6 +385,10 @@ class _AylaSessionActivityIndicatorState
 
   void _onPointerMove(PointerMoveEvent event) {
     if (!_dragActive) return;
+    // 紧凑宿主（Android 叠加层）：竖直拖动由**原生移动窗口**负责
+    // （见 OverlayFlutterHost.kt 的 installDragHandle）。这里若再改 Positioned.top，
+    // 两个位移源会同时生效 ⇒ 窗口在新位置与默认位置之间来回跳（用户实报）。
+    if (widget.compact) return;
     final double dy = event.position.dy - _dragStartY;
     // tsx 107：未超阈值前不判定为拖动，也不移动（保留点击语义）
     if (!_dragMoved && dy.abs() < AylaSessionActivityIndicator.dragThreshold) {
@@ -388,7 +425,10 @@ class _AylaSessionActivityIndicatorState
       _suppressClick = false;
       return;
     }
-    setState(() => _collapsed = !_collapsed);
+    final bool next = !_collapsed;
+    setState(() => _collapsed = next);
+    // 紧凑宿主：宽度变了，原生要按新尺寸重建窗口（不能 updateViewLayout 改宽高）。
+    widget.onCollapsedChanged?.call(next);
   }
 
   @override
@@ -455,32 +495,46 @@ class _AylaSessionActivityIndicatorState
       _scheduleHitRectReport(delay: const Duration(milliseconds: 260));
     }
 
+    // 紧凑宿主（Android 叠加层）：窗口就是球组。
+    //
+    // 贴右上角（right 0 / top 0）而不是应用内的 right 24 / top 80 ——
+    // 窗口只有 132x44dp，套用应用内的定位量会把整组推到窗口外
+    // （真机表现：窗口在那儿、里面全透明看不见球）。
+    // 收起态的「整体右移」也不需要了：原生按 28dp 重建窗口，
+    // 把手本来就贴住屏幕右缘（窗口自身右对齐）。
+    final Widget animated = TweenAnimationBuilder<double>(
+      // 只给 end：首帧即落在当前状态，之后（收起/展开）才做过渡
+      tween: Tween<double>(end: _collapsed ? 1 : 0),
+      duration: groupDuration,
+      curve: AylaCurves.easeOut,
+      builder: (BuildContext context, double v, Widget? child) =>
+          Transform.translate(
+        // 位移 = right 偏移（宽屏 24 / 窄屏 16）⇒ 收起时把手右缘贴住屏幕右缘。
+        // 紧凑宿主下位移恒为 0：窗口右缘就是屏幕右缘，再位移会把把手推出窗口。
+        offset: Offset(
+          widget.compact
+              ? 0
+              : (narrow
+                        ? AylaSessionActivityIndicator.collapsedShiftNarrow
+                        : AylaSessionActivityIndicator.collapsedShiftWide) *
+                    v,
+          0,
+        ),
+        child: child,
+      ),
+      child: group,
+    );
+
+    if (widget.compact) {
+      return Positioned(right: 0, top: 0, child: animated);
+    }
+
     return Positioned(
       right: narrow
           ? AylaSessionActivityIndicator.narrowRight
           : AylaSessionActivityIndicator.wideRight,
-      // tsx 142：`topPx != null` 时才写内联 top，否则由 CSS 决定
       top: _topPx ?? _defaultTop(context),
-      child: TweenAnimationBuilder<double>(
-        // 只给 end：首帧即落在当前状态，之后（收起/展开）才做过渡
-        tween: Tween<double>(end: _collapsed ? 1 : 0),
-        duration: groupDuration,
-        // `.session-activity-group { transition: transform 200ms var(--ease-out) }`
-        curve: AylaCurves.easeOut,
-        builder: (BuildContext context, double v, Widget? child) =>
-            Transform.translate(
-          // 位移 = right 偏移（宽屏 24 / 窄屏 16）⇒ 收起时把手右缘贴住屏幕右缘
-          offset: Offset(
-            (narrow
-                    ? AylaSessionActivityIndicator.collapsedShiftNarrow
-                    : AylaSessionActivityIndicator.collapsedShiftWide) *
-                v,
-            0,
-          ),
-          child: child,
-        ),
-        child: group,
-      ),
+      child: animated,
     );
   }
 }

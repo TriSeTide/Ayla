@@ -77,7 +77,18 @@ class AylaLiveMiniPlayer extends StatefulWidget {
     this.initialSize,
     this.cardKey,
     this.closeButtonKey,
+    this.fixedPosition,
   });
+
+  /// **固定落点**（窗口外宿主用）：卡片钉在宿主窗口内的这个偏移上。
+  ///
+  /// 非 null 时本组件**不再自己移动/缩放**（拖动、边缘缩放、捏合、滚轮全部关闭）——
+  /// 在 Android 系统叠加层里，窗口的尺寸就是卡片尺寸，改卡片等于改窗口，
+  /// 只能由原生 `WindowManager.updateViewLayout` 做（见 `LiveMiniWindowHost.kt`）。
+  /// 这里若再叠一层组件级缩放，两者会互相打架（每帧改两次尺寸）。
+  ///
+  /// 视觉、关闭键位置、点击语义**完全不变** —— 换的只是「谁负责几何」。
+  final Offset? fixedPosition;
 
   /// 卡片本体（不含关闭键）的 key：宿主用它量可点击区域。
   final GlobalKey? cardKey;
@@ -382,7 +393,10 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
   @override
   Widget build(BuildContext context) {
     final Size viewport = MediaQuery.sizeOf(context);
-    final Offset pos = _pos ?? _defaultPos(viewport);
+    final Offset pos = widget.fixedPosition ?? (_pos ?? _defaultPos(viewport));
+    // 固定落点（窗口外宿主）⇒ 组件不参与几何：拖动/缩放/滚轮全部不注册，
+    // 让原生的窗口手势独占（见 [AylaLiveMiniPlayer.fixedPosition]）。
+    final bool fixed = widget.fixedPosition != null;
 
     return Positioned(
       // `position: fixed; right: 16; bottom: 16`（拖动后改为绝对 left/top）
@@ -456,11 +470,14 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _openRoom,
-                  onScaleStart: (ScaleStartDetails d) =>
-                      _onScaleStart(d, viewport),
-                  onScaleUpdate: (ScaleUpdateDetails d) =>
-                      _onScaleUpdate(d, viewport),
-                  onScaleEnd: _onScaleEnd,
+                  // 固定落点模式（Android 窗口外宿主）：几何全归原生，这里只留点击。
+                  onScaleStart: fixed
+                      ? null
+                      : (ScaleStartDetails d) => _onScaleStart(d, viewport),
+                  onScaleUpdate: fixed
+                      ? null
+                      : (ScaleUpdateDetails d) => _onScaleUpdate(d, viewport),
+                  onScaleEnd: fixed ? null : _onScaleEnd,
                   // ⚠️ 关闭键画在卡片**外侧**（top/right: -kLiveCloseInset），
                   // 所以这里必须给它留出真实占位：Flutter 的 RenderBox.hitTest
                   // 会先判断该点是否落在**自身 size 内**，落在外面直接返回 false。
