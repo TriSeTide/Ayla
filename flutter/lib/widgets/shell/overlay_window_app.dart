@@ -187,6 +187,15 @@ class AylaOverlayWindowApp extends StatelessWidget {
   /// 报给组件的**视口宽度**：只要 `> 768` 就走宽屏档（取值本身不影响布局）。
   static const double hostViewportWidth = 1280;
 
+  /// 报给组件的**视口高度**（拖动 clamp 的上限）。
+  ///
+  /// Android 的浮层窗口只有内容那么大（176×132dp），若把它当成视口高度，
+  /// 组件的 `maxTop` 会被夹到 80dp，球等于拖不动。这里取一个足够大的值让 clamp
+  /// 覆盖整屏；真正的屏幕边界由原生在 `setBallGroupTop` 里 clamp。
+  ///
+  /// Windows 端窗口本来就是满工作区高，这个值对它是等价（只会更宽松，且原生同样 clamp）。
+  static const double hostViewportHeight = 3000;
+
   /// 画布样张的舞台尺寸（只用于 `aylaOverlayWindowSamples`）。
   static const Size sampleStageSize = Size(176, 132);
 
@@ -216,6 +225,15 @@ class AylaOverlayWindowApp extends StatelessWidget {
     final Size viewport = MediaQuery.sizeOf(context);
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(
+        // ⚠️ 高度必须报**真实窗口高度**。
+        //
+        // 曾试过报屏幕高度（3000）让组件 clamp 覆盖全屏，结果 **raster 线程 SIGSEGV**
+        // （logcat: `Fatal signal 11 in tid xxx (1.raster)`）：视口远大于真实窗口时，
+        // Android 的 FlutterView 会按视口尺寸准备渲染缓冲，与实际 surface 严重不符，
+        // 渲染线程直接崩。
+        //
+        // 正确做法：视口 = 真实窗口；「能拖多远」由原生侧 clamp（applyBallGroupTop），
+        // 组件只负责算出它认为的 top 并发给宿主。
         size: Size(hostViewportWidth, viewport.height),
         padding: EdgeInsets.zero,
         viewPadding: EdgeInsets.zero,

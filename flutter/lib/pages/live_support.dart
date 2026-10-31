@@ -352,6 +352,10 @@ class AylaLiveRoomSession extends ChangeNotifier {
     // 销毁仍挂在 AppShell 上的旧小窗会话 —— Flutter 的平台视图不能跨树迁移、复用不了旧 session
     // （文件头「与 web 的结构差异」已登记该偏离）。
     await _retireMiniPlayerOwner();
+    // 窗口外小窗也要让位：它是第二个引擎 + 第二个 HLS 播放器，
+    // 本会话要往主窗口挂画面，两路同时播会抢同一个流（表现：主窗口黑屏）。
+    // 用户定稿的「退出直播间不关小窗」只约束**退出**方向，进入新直播间时应当让位。
+    await _retireDetachedWindow();
     // 本会话接管页面视图（[detachView] 的代际防御用：迟到的旧会话不得再进小窗）。
     _activeViewSession = this;
     final AylaLiveState store = _live;
@@ -586,6 +590,12 @@ class AylaLiveRoomSession extends ChangeNotifier {
 
   /// 挂载播放器（幂等：同 URL 不重建，见 `hls_player.dart` 的 attach 幂等）。
   Future<void> _attachPlayer() async {
+    // 主窗口要放画面 ⇒ 之前的「脱离态挂起」到此结束。
+    //
+    // 场景：小窗开着时又进了直播间。播放器在进入脱离态时被 destroy 过，
+    // 标志若不在这里清掉，之后 resume 逻辑会一直认为「还挂在脱离态」，
+    // 退出直播间时也不会恢复 —— 表现就是主窗口直播一直黑着。
+    _playerSuspendedForDetached = false;
     final AylaLiveChannelSnapshot? channel = _live.currentChannel;
     final String? raw = channel?.hlsUrl;
     if (raw == null || raw.isEmpty) return;
@@ -761,9 +771,14 @@ class AylaLiveRoomSession extends ChangeNotifier {
     // 关闭时机只剩两个：用户点小窗的关闭键（原生回 `liveWindowClosed`），
     // 或宿主进程结束。Android PiP 仍由系统自己收起，[setSessionActive] 已
     // 撤销自动进 PiP 的武装，不需要额外关窗。
-    // 与 [closeDetachedPresentation] 同理：原生不会回 `onLiveWindowClosed`，
-    // 若不复位「已挂起」标志，下一次 [enterDetachedPresentation] 会带着错的基线
-    // 去判断「要不要恢复」，恢复路径就永远不被触发（会话重启后第一次脱离即黑屏）。
+    //
+    // ⚠️ 但**必须把画面还给主窗口**：进入脱离态时主窗口那一路播放器被主动停掉
+    // 以把画面所有权交给第二引擎（见 _suspendMainPlayerForDetached）。
+    // 原实现是靠 close() 触发的交接把它恢复回来；现在不关窗了，若在这里直接
+    // 返回，主窗口就永远停在挂起状态 —— 表现正是「电脑端直播一直黑着」。
+    if (_playerSuspendedForDetached) {
+      await _resumeMainPlayerAfterDetached();
+    }
     _resetDetachedWindowBridge();
   }
 
@@ -949,6 +964,21 @@ class AylaLiveRoomSession extends ChangeNotifier {
     if (owner == null || identical(owner, this)) return;
     await owner.stop();
     owner.dispose();
+  }
+
+  /// 窗口外小窗让位（本会话往主窗口挂画面前）。
+  ///
+  /// 窗口外小窗是第二个 Flutter engine + 第二个 HLS 播放器。若它还在播，
+  /// 主窗口再挂一路就是两路抢同一个流，主窗口表现为一直黑屏。
+  /// （用户定稿「退出直播间不关小窗」只约束退出方向，进入直播间时应当让位。）
+  Future<void> _retireDetachedWindow() async {
+    if (_detached) {
+      _detached = false;
+      await _detachedPresenter.close();
+    }
+    // 无论之前是否处于脱离态，都把桥接标志复位，避免陈旧的「已挂起」认知
+    // 影响下一次进入脱离态时的判定。
+    _resetDetachedWindowBridge();
   }
 
   /// 完整销毁（幂等）：HLS → WS → 弹幕帧 → 清状态（web `leave`）。

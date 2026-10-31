@@ -517,6 +517,7 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
               //   旧写法 !fullscreen 恒真，导致 inline 侧在全屏期间仍持有同一个 controller，
               //   与 overlay 里的那份重复 attach ⇒ 手机端点全屏后画面黑掉/卡住）；
               // · 全屏宿主（形参 true）+ 全屏中 ⇒ 挂 ✅。
+              // ignore: avoid_print
               if (_showVideo && fullscreen == _fullscreen)
                 ColoredBox(
                   color: Colors.black,

@@ -33,6 +33,9 @@
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"
         android:allowBackup="false">
+        <!-- ⚠️ 不要加回 android:supportsPictureInPicture：1.0.40 已彻底移除系统 PiP。
+             用户明确要求「彻底移除那个手机端系统 PiP（缩小整个 App）」。
+             直播「脱离应用」走 Flutter 自绘的独立小窗，不是系统画中画。 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -41,7 +44,6 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
-            android:supportsPictureInPicture="true"
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize">
             <!-- Specifies an Android theme to apply to this Activity as soon as

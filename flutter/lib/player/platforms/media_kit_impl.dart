@@ -95,7 +95,17 @@ class MediaKitHls implements HlsPlatformPlayer {
     // `controls: NoVideoControls` **必须显式传**：media_kit 默认挂 AdaptiveVideoControls，
     // 会在画面之上叠一层自带控制条 + 缓冲时的大号白色进度圈（用户截图里那个白色 U 形圈），
     // 与 Ayla 自己的悬浮控件重复。web 的 <video> 不带 controls，这里同样只交出画面。
-    return Video(controller: vc, controls: NoVideoControls);
+    // ⚠️ 必须带一个**随 controller 变化**的 key。
+    //
+    // 自愈重建（hls_player.rebuild）会新建 Player + VideoController；若这里交出
+    // 的 Video 没有 key，Flutter 会复用旧 Element，继续渲染**已被释放的旧纹理**
+    // ⇒ 画面永久黑屏（日志里能看到「新纹理创建了、但没有 NativeVideoController
+    // 注册」）。用 controller 的 identity 当 key，重建后强制换一个新 Element。
+    return Video(
+      key: ObjectKey(vc),
+      controller: vc,
+      controls: NoVideoControls,
+    );
   }
 
   @override
