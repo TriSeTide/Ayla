@@ -136,6 +136,7 @@ class AylaSessionActivityIndicator extends StatefulWidget {
     this.compact = false,
     this.onCollapsedChanged,
     this.suppressTapTick = 0,
+    this.expandTick = 0,
   });
 
   /// 当前**可见按钮**在视口坐标系里的精确矩形（圆的按外接方框给）。
@@ -187,6 +188,12 @@ class AylaSessionActivityIndicator extends StatefulWidget {
 
   /// 收起态变化回调（紧凑宿主用它把新状态交给原生，按新宽度重建同尺寸窗口）。
   final ValueChanged<bool>? onCollapsedChanged;
+
+  /// 原生把窗口撑回展开宽度后的信号：每 +1 ⇒ 组件开始播「滑回来」动画。
+  ///
+  /// 必须在窗口**已经变宽之后**才递增，否则动画会在 28dp 的窗口里跑、整段被裁掉
+  /// （用户实报「展开时悬浮球位置不对」）。
+  final int expandTick;
 
   /// 「刚刚发生了一次原生拖动」的计数器：每次递增 ⇒ 抑制紧随其后的一次点击。
   ///
@@ -246,10 +253,10 @@ class AylaSessionActivityIndicator extends StatefulWidget {
 
   @override
   State<AylaSessionActivityIndicator> createState() =>
-      _AylaSessionActivityIndicatorState();
+      AylaSessionActivityIndicatorState();
 }
 
-class _AylaSessionActivityIndicatorState
+class AylaSessionActivityIndicatorState
     extends State<AylaSessionActivityIndicator> {
   /// 收起态（tsx 25 `const [collapsed, setCollapsed] = useState(false)`）。
   bool _collapsed = false;
@@ -351,6 +358,8 @@ class _AylaSessionActivityIndicatorState
     if (widget.suppressTapTick != oldWidget.suppressTapTick) {
       _suppressClick = true;
     }
+    // 原生已把窗口撑回展开宽度 ⇒ 现在才播「滑回来」的动画（见 [expandTick]）。
+    if (widget.expandTick != oldWidget.expandTick) applyHostExpanded();
   }
 
   /// CSS 侧由浏览器算出的默认 top（`top: 80px` / `calc(56px + env(safe-area-inset-top) + 48px)`）。
@@ -426,9 +435,38 @@ class _AylaSessionActivityIndicatorState
       return;
     }
     final bool next = !_collapsed;
-    setState(() => _collapsed = next);
-    // 紧凑宿主：宽度变了，原生要按新尺寸重建窗口（不能 updateViewLayout 改宽高）。
-    widget.onCollapsedChanged?.call(next);
+    if (!widget.compact) {
+      // 应用内（宿主 = 整屏）：动画与窗口无关，直接切。
+      setState(() => _collapsed = next);
+      return;
+    }
+    // ---- 紧凑宿主（Android 叠加层）：动画与窗口宽度必须串行，不能同时发生 ----
+    //
+    // 窗口尺寸 = 球组尺寸 ⇒ 改宽度必然 replace 掉 FlutterView（DE23 禁改宽高），
+    // 渲染面一断，正在跑的 200ms 动画就冻结在中间帧（用户实报「要拖一下才继续播」）。
+    //
+    // 两个方向的最优顺序相反：
+    //   · **收起**：先在宽窗口里把动画播完（球滑出 + 淡隐），再让原生收成 28dp；
+    //   · **展开**：先让原生把窗口撑开（否则球没地方滑回来），收到回执后再播动画。
+    if (next) {
+      setState(() => _collapsed = true);
+      widget.onCollapsedChanged?.call(true);
+      return;
+    }
+    pendingExpand = true;
+    widget.onCollapsedChanged?.call(false);
+  }
+
+  /// 展开请求已交给原生、等它把窗口撑宽（紧凑宿主专用）。
+  bool pendingExpand = false;
+
+  /// 原生已把窗口撑到展开宽度 ⇒ 现在才让组件开始「滑回来」的动画。
+  ///
+  /// 顺序颠倒会让球在 28dp 的窗口里滑，整段动画都被裁掉（用户实报「展开位置不对」）。
+  void applyHostExpanded() {
+    if (!mounted || !pendingExpand) return;
+    pendingExpand = false;
+    setState(() => _collapsed = false);
   }
 
   @override
@@ -456,6 +494,7 @@ class _AylaSessionActivityIndicatorState
             kind: _ActivityBallKind.voice,
             collapsed: _collapsed,
             reduceMotion: reduceMotion,
+            compact: widget.compact,
             onHoverChanged: _onChildHoverChanged,
             title: voice.title, // tsx 150
             onPressed: () => widget.onOpenSession?.call(voice),
@@ -466,6 +505,7 @@ class _AylaSessionActivityIndicatorState
             kind: _ActivityBallKind.live,
             collapsed: _collapsed,
             reduceMotion: reduceMotion,
+            compact: widget.compact,
             onHoverChanged: _onChildHoverChanged,
             title: live.title, // tsx 161
             onPressed: () => widget.onOpenSession?.call(live),
@@ -474,6 +514,7 @@ class _AylaSessionActivityIndicatorState
           key: _toggleKey,
           collapsed: _collapsed,
           reduceMotion: reduceMotion,
+          compact: widget.compact,
           onHoverChanged: _onChildHoverChanged,
           onPressed: _onToggleClick,
           onPointerDown: _onPointerDown,
@@ -560,6 +601,7 @@ class _ActivityBall extends StatefulWidget {
     required this.kind,
     required this.collapsed,
     required this.reduceMotion,
+    required this.compact,
     this.onHoverChanged,
     this.title,
     this.onPressed,
@@ -571,6 +613,13 @@ class _ActivityBall extends StatefulWidget {
   final _ActivityBallKind kind;
   final bool collapsed;
   final bool reduceMotion;
+
+  /// 紧凑宿主（Android 叠加层）：窗口 = 球组，外阴影必然被窗口边界裁掉 ⇒ 不画。
+  ///
+  /// 用户 2026-11-01 实报：「悬浮球的阴影被裁了会不好看，可以把手机端阴影直接删掉，
+  /// 电脑端不用动」。Windows 的浮层窗口铺满整个工作区（阴影不会被裁），
+  /// 走非紧凑分支 ⇒ 那边一个字都不用改。
+  final bool compact;
 
   /// 球的悬停提示（web «SessionActivityIndicator.tsx:150 / 161»：«title={session.title}»，
   /// 即语音房 / 直播间的名字；**与 aria-label「返回语音房 / 返回直播间」不同**）。
@@ -619,14 +668,17 @@ class _ActivityBallState extends State<_ActivityBall> {
     );
     // 外阴影只画形状之外：常驻 `.12` 卡影，hover/focus → `--glow-shadow`；
     // `transition: box-shadow 150ms var(--ease-out)`（shell.css 495–496）
-    box = AylaGlassShadow.animatedRing(
-      radius: AylaRadii.pill,
-      shadows: _active ? AylaShadows.glow : _kActivityShadow,
-      duration:
-          widget.reduceMotion ? Duration.zero : AylaSessionActivityIndicator.ballTransition,
-      curve: AylaCurves.easeOut,
-      child: box,
-    );
+    if (!widget.compact) {
+      box = AylaGlassShadow.animatedRing(
+        radius: AylaRadii.pill,
+        shadows: _active ? AylaShadows.glow : _kActivityShadow,
+        duration: widget.reduceMotion
+            ? Duration.zero
+            : AylaSessionActivityIndicator.ballTransition,
+        curve: AylaCurves.easeOut,
+        child: box,
+      );
+    }
 
     // 收起：`translateX(64px)` + `opacity 0`。
     //
@@ -732,6 +784,7 @@ class _ActivityToggle extends StatefulWidget {
     super.key,
     required this.collapsed,
     required this.reduceMotion,
+    required this.compact,
     required this.onPressed,
     required this.onPointerDown,
     required this.onPointerMove,
@@ -739,13 +792,16 @@ class _ActivityToggle extends StatefulWidget {
     this.onHoverChanged,
   });
 
+  /// 紧凑宿主（Android 叠加层）：不画外阴影（会被窗口边界裁成硬边）。
+  final bool compact;
+
   /// 悬停变化（true = 鼠标停在把手上）。见 [AylaSessionActivityIndicator.onHoverChanged]。
   final ValueChanged<bool>? onHoverChanged;
 
   final bool collapsed;
   final bool reduceMotion;
 
-  /// 点击（已含「拖动后抑制」逻辑，见 [_AylaSessionActivityIndicatorState._onToggleClick]）。
+  /// 点击（已含「拖动后抑制」逻辑，见 [AylaSessionActivityIndicatorState._onToggleClick]）。
   final VoidCallback onPressed;
 
   /// 原始指针事件（把手拖动）。
@@ -831,18 +887,23 @@ class _ActivityToggleState extends State<_ActivityToggle> {
     );
     // 同一个 `0 2px 12px rgba(70,91,146,.12)`（shell.css 537）。本件 hover **不换**阴影
     // （auroraqua 只加 scale、shell.css 只换背景/字色）⇒ 静态 ring，无需插值。
-    box = Stack(
-      clipBehavior: Clip.none,
-      children: <Widget>[
-        Positioned.fill(
-          child: AylaGlassShadow.ring(
-            radius: radius,
-            shadows: _kActivityShadow,
+    //
+    // 紧凑宿主（Android 叠加层）不画：窗口尺寸 = 球组尺寸，向外的阴影必然被窗口
+    // 边界切成硬边（用户实报「阴影被裁了会不好看」）⇒ 手机上直接去掉。
+    if (!widget.compact) {
+      box = Stack(
+        clipBehavior: Clip.none,
+        children: <Widget>[
+          Positioned.fill(
+            child: AylaGlassShadow.ring(
+              radius: radius,
+              shadows: _kActivityShadow,
+            ),
           ),
-        ),
-        box,
-      ],
-    );
+          box,
+        ],
+      );
+    }
 
     // 玻璃：`--glass-bg-strong`（.78 **半透明**）+ `blur(18px) saturate(1.4)`
     // （shell.css 534–536）——与球不同，把手必须保留背板模糊，否则通透感丢失。

@@ -152,6 +152,7 @@ class AylaOverlayWindowApp extends StatelessWidget {
     this.compact = false,
     this.onCollapsedChanged,
     this.suppressTapTick = 0,
+    this.expandTick = 0,
   });
 
   /// 可见按钮的精确矩形（视口坐标）。宿主转给原生做穿透判定。
@@ -187,6 +188,9 @@ class AylaOverlayWindowApp extends StatelessWidget {
 
   /// 原生刚拖动过的计数器（递增 ⇒ 抑制紧随其后的一次合成 tap）。
   final int suppressTapTick;
+
+  /// 原生已把窗口撑回展开宽度的计数器（递增 ⇒ 组件开始播「滑回来」的动画）。
+  final int expandTick;
 
   /// 宿主窗口的内容宽度（逻辑像素；见 `live_window.cpp` 的 kBallWindowWidth）。
   ///
@@ -278,6 +282,7 @@ class AylaOverlayWindowApp extends StatelessWidget {
               compact: compact,
               onCollapsedChanged: onCollapsedChanged,
               suppressTapTick: suppressTapTick,
+              expandTick: expandTick,
             ),
           ],
         ),
@@ -331,8 +336,12 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
   /// 悬浮球组是否收起（原生按此把窗口重建到 28dp 宽）。
   bool _collapsed = false;
 
+
   /// 「原生刚刚拖动过」的计数器：每次递增 ⇒ 组件抑制紧随其后的一次 tap。
   int _suppressTapTick = 0;
+
+  /// 原生已把窗口撑回展开宽度的计数器：+1 ⇒ 组件开始播「滑回来」的动画。
+  int _expandTick = 0;
 
   @override
   void initState() {
@@ -350,6 +359,12 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
     // 原生拖动结束 ⇒ 让组件吞掉紧随其后的一次 tap（拖完不该误触收起/回房）。
     if (call.method == 'suppressTap') {
       if (!_disposed) setState(() => _suppressTapTick++);
+      return true;
+    }
+    // 原生已把窗口撑回展开宽度 ⇒ 现在才让组件播「滑回来」的动画
+    // （否则动画会在 28dp 的窗口里跑、整段被裁掉，用户实报「展开位置不对」）。
+    if (call.method == 'expanded') {
+      if (!_disposed) setState(() => _expandTick++);
       return true;
     }
     if (call.method != 'ballPayload') return null;
@@ -517,6 +532,7 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
       compact: true,
       onCollapsedChanged: _reportCollapsed,
       suppressTapTick: _suppressTapTick,
+      expandTick: _expandTick,
       onOpenSession: (AylaActivitySession session) {
         // 组件只回传会话（web 的真实口径），种类要在这里按 id 反查：
         // 直播球的 id 与语音球的 id 不会相同（一个房间只有一个身份）。
