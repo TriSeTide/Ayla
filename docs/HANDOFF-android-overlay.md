@@ -162,3 +162,36 @@ if (!showVoice && !showLive) return null;
 - 悬浮球：进 App 自动出现（有自己会话时）、上下拖动跟手不跳、点把手能收起且窗口缩到 28dp、收起态能拖、点球能唤起 Ayla
 - 直播小窗：退出直播间自动出现、能拖能缩放、点画面回房间、点关闭键关闭
 - 全程不吞触摸（球/窗之外能正常点桌面）
+
+---
+
+## 9. 补充发现（写文档后新增，重要）
+
+### 9.1 `app_shell.dart` 本轮**没有**改显示逻辑
+`git diff 5f1a5b4..5c6acda -- flutter/lib/layout/app_shell.dart` 只有一条我加的诊断 `print`。
+⇒ **问题 5（显示时机）不是本轮引入的**，是历史行为。排查方向：`isInVoice/isLive` 的实际赋值链路，
+而不是 app_shell 的渲染逻辑。
+
+### 9.2 问题 6 的直接根因：`_retireDetachedWindow`
+`lib/pages/live_support.dart` 的 `start()` 里本轮新增了：
+```dart
+await _retireDetachedWindow();   // 进入直播间时关闭窗口外小窗
+```
+这会导致：**退出直播间 → 小窗刚出现 → 再次进入直播间 → 小窗被强制关掉**。
+
+同时 `_attachPlayer()` 里新增了 `_playerSuspendedForDetached = false;`。
+
+**这两处是为了修「Windows 端直播黑屏」加的**（当时确实修好了 Windows 黑屏）。
+但它们是 Windows 专用语义，Android 上不该照搬：
+- Windows：小窗是第二引擎 + 第二个 HLS 播放器，会抢流 ⇒ 进直播间必须让小窗让位
+- Android：当前**根本没有**窗口外小窗实现 ⇒ 这段代码只会误伤
+
+**决策**：把 `_retireDetachedWindow()` 的调用限定为 `defaultTargetPlatform == TargetPlatform.windows`。
+`_playerSuspendedForDetached` 的清零保留（它是幂等的，Android 上本来就是 false）。
+
+### 9.3 「切后台后声音没了」的排查方向
+Android 上直播音频依赖主引擎的 media_kit player。切后台后：
+- 若 `clearDetachedPresentation` 走了 `_resumeMainPlayerAfterDetached()` 而 player 已 destroy ⇒ 无音频
+- 检查 `MainActivity` 是否有前台服务 / `onPause` 里是否停了音频焦点
+- 参考 web：web 切后台不会停播放器
+- Android 需要 `FOREGROUND_SERVICE_MEDIA_PLAYBACK` 前台服务保活，否则系统会冻结进程
