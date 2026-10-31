@@ -136,7 +136,8 @@ class AylaSessionActivityIndicator extends StatefulWidget {
     this.compact = false,
     this.onCollapsedChanged,
     this.suppressTapTick = 0,
-    this.expandTick = 0,
+    this.compactCollapseShift = 0,
+    this.onWindowOffsetChanged,
   });
 
   /// 当前**可见按钮**在视口坐标系里的精确矩形（圆的按外接方框给）。
@@ -186,14 +187,21 @@ class AylaSessionActivityIndicator extends StatefulWidget {
   /// 竖直拖动交给原生（移动整个窗口），组件自己不再改 `Positioned.top`。
   final bool compact;
 
-  /// 收起态变化回调（紧凑宿主用它把新状态交给原生，按新宽度重建同尺寸窗口）。
+  /// 收起态变化回调（紧凑宿主用它让原生把窗口平移到对应位置）。
   final ValueChanged<bool>? onCollapsedChanged;
 
-  /// 原生把窗口撑回展开宽度后的信号：每 +1 ⇒ 组件开始播「滑回来」动画。
+  /// 紧凑宿主：收起时整组需要左移的 dp 数（= 窗口宽 − 28）。
   ///
-  /// 必须在窗口**已经变宽之后**才递增，否则动画会在 28dp 的窗口里跑、整段被裁掉
-  /// （用户实报「展开时悬浮球位置不对」）。
-  final int expandTick;
+  /// 由原生按**当前窗口宽度**下发：双球 132−28=104 / 单球 80−28=52。
+  /// 它与窗口右移量精确互补 ⇒ 把手在屏幕上原地不动。
+  final double compactCollapseShift;
+
+  /// 紧凑宿主：每帧上报「窗口应右移多少 dp」——由组件动画值驱动。
+  ///
+  /// 这是让把手在屏幕上**绝对不动**的唯一办法：窗口位移与组位移取自
+  /// **同一个插值变量**，同一帧同一个数 ⇒ 数学上不可能错位。
+  /// （各自独立动画会因计时/曲线差异在中途错开，用户实报「把手被挤来挤去」。）
+  final ValueChanged<double>? onWindowOffsetChanged;
 
   /// 「刚刚发生了一次原生拖动」的计数器：每次递增 ⇒ 抑制紧随其后的一次点击。
   ///
@@ -241,6 +249,7 @@ class AylaSessionActivityIndicator extends StatefulWidget {
   static const double gap = AylaSpacing.sp2;
 
   /// 收起态整组右移量 = `right` 偏移（宽屏 24 / 窄屏 16，把手正好贴住屏幕右缘）。
+  ///
   static const double collapsedShiftWide = wideRight;
   static const double collapsedShiftNarrow = narrowRight;
 
@@ -358,8 +367,6 @@ class AylaSessionActivityIndicatorState
     if (widget.suppressTapTick != oldWidget.suppressTapTick) {
       _suppressClick = true;
     }
-    // 原生已把窗口撑回展开宽度 ⇒ 现在才播「滑回来」的动画（见 [expandTick]）。
-    if (widget.expandTick != oldWidget.expandTick) applyHostExpanded();
   }
 
   /// CSS 侧由浏览器算出的默认 top（`top: 80px` / `calc(56px + env(safe-area-inset-top) + 48px)`）。
@@ -440,34 +447,18 @@ class AylaSessionActivityIndicatorState
       setState(() => _collapsed = next);
       return;
     }
-    // ---- 紧凑宿主（Android 叠加层）：动画与窗口宽度必须串行，不能同时发生 ----
+    // ---- 紧凑宿主（Android 叠加层，方案 C）：**立刻切状态** ----
     //
-    // 窗口尺寸 = 球组尺寸 ⇒ 改宽度必然 replace 掉 FlutterView（DE23 禁改宽高），
-    // 渲染面一断，正在跑的 200ms 动画就冻结在中间帧（用户实报「要拖一下才继续播」）。
-    //
-    // 两个方向的最优顺序相反：
-    //   · **收起**：先在宽窗口里把动画播完（球滑出 + 淡隐），再让原生收成 28dp；
-    //   · **展开**：先让原生把窗口撑开（否则球没地方滑回来），收到回执后再播动画。
-    if (next) {
-      setState(() => _collapsed = true);
-      widget.onCollapsedChanged?.call(true);
-      return;
-    }
-    pendingExpand = true;
-    widget.onCollapsedChanged?.call(false);
+    // 窗口宽高恒定、收起/展开只平移窗口（见 OverlayFlutterHost.kt 的 applyCollapsed），
+    // 所以不存在「改尺寸把动画切断」的问题，动画与窗口平移可以同时发生：
+    //   · 窗口右移 104dp（原生）
+    //   · 组件整组左移 104dp（下面的 Transform.translate）
+    // 两者互相抵消 ⇒ 把手在屏幕上原地不动，只有球滑出屏幕右缘。
+    setState(() => _collapsed = next);
+    widget.onCollapsedChanged?.call(next);
   }
 
-  /// 展开请求已交给原生、等它把窗口撑宽（紧凑宿主专用）。
-  bool pendingExpand = false;
 
-  /// 原生已把窗口撑到展开宽度 ⇒ 现在才让组件开始「滑回来」的动画。
-  ///
-  /// 顺序颠倒会让球在 28dp 的窗口里滑，整段动画都被裁掉（用户实报「展开位置不对」）。
-  void applyHostExpanded() {
-    if (!mounted || !pendingExpand) return;
-    pendingExpand = false;
-    setState(() => _collapsed = false);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -548,21 +539,35 @@ class AylaSessionActivityIndicatorState
       tween: Tween<double>(end: _collapsed ? 1 : 0),
       duration: groupDuration,
       curve: AylaCurves.easeOut,
-      builder: (BuildContext context, double v, Widget? child) =>
-          Transform.translate(
-        // 位移 = right 偏移（宽屏 24 / 窄屏 16）⇒ 收起时把手右缘贴住屏幕右缘。
-        // 紧凑宿主下位移恒为 0：窗口右缘就是屏幕右缘，再位移会把把手推出窗口。
+      builder: (BuildContext context, double v, Widget? child) {
+        // 紧凑宿主：把**同一个**插值变量 v 报给原生去平移窗口。
+        // 窗口右移量 = v * shift；组左移量 = -v * shift ⇒ 两者精确抵消。
+        if (widget.compact) {
+          widget.onWindowOffsetChanged?.call(v * widget.compactCollapseShift);
+        }
+        return Transform.translate(
+        // ## 位移语义
+        // 应用内：位移 = right 偏移（宽屏 24 / 窄屏 16），把手右缘贴住屏幕右缘。
+        //
+        // 紧凑宿主（Android 叠加层）：收起时**窗口整体右移** (窗口宽 − 28dp)，
+        // 屏幕上只剩最左 28dp 的把手。而把手是 Row 的最后一个子级、在窗口右端，
+        // 若不补偿会被一起推出屏幕。
+        // ⇒ 收起时把整组**左移同样的量** [compactCollapseShift]，两者精确抵消
+        //    ⇒ 把手在屏幕上**原地不动**，只有球滑出屏幕右缘。
+        // ⚠️ 位移量由原生按**当前窗口宽度**下发（双球 132−28=104 / 单球 80−28=52），
+        //    不能写死 132 —— 单球时窗口只有 80dp（用户实报「单球窗口没这么长」）。
         offset: Offset(
           widget.compact
-              ? 0
+              ? -widget.compactCollapseShift * v
               : (narrow
                         ? AylaSessionActivityIndicator.collapsedShiftNarrow
                         : AylaSessionActivityIndicator.collapsedShiftWide) *
                     v,
           0,
         ),
-        child: child,
-      ),
+          child: child,
+        );
+      },
       child: group,
     );
 

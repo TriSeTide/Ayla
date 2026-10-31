@@ -322,11 +322,17 @@ Future<void> aylaHideDetachedBall() async {
 Future<bool> aylaUpdateDetachedBall({required String payload}) async {
   if (!aylaDetachedBallPlatformSupported) return false;
   try {
-    final String? result = defaultTargetPlatform == TargetPlatform.windows
-        ? await _desktopChannel.invokeMethod<String>('updateBall', <String, Object?>{
-            'payload': payload,
-          })
-        : null;
+    // ⚠️ **Android 也必须真的发这条调用**（2026-11-01 实报根因：响应不及时）。
+    //
+    // 旧实现只有 Windows 分支真的调通道，Android 分支直接 `: null`
+    // ⇒ 返回值恒 false ⇒ 调用方以为「窗口没开」，于是每次会话变化都走
+    // `showBall` 重开窗口（重建 FlutterView = 闪一下 + 明显变慢）。
+    final MethodChannel target =
+        defaultTargetPlatform == TargetPlatform.windows ? _desktopChannel : _pipChannel;
+    final String? result =
+        await target.invokeMethod<String>('updateBall', <String, Object?>{
+      'payload': payload,
+    });
     return result == 'shown';
   } on MissingPluginException {
     return false;
