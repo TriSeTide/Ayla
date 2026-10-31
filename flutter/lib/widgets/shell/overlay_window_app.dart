@@ -301,6 +301,67 @@ Widget aylaOverlayWindowScope({required Widget child}) {
 /// 第二引擎 → 宿主窗口的内层通道（与 `live_window.cpp` 逐字一致）。
 const String kAylaOverlayInnerChannel = 'ayla/desktop_window';
 
+/// **临时诊断探针**（只跑在第二引擎里）：把「每秒实际产生了多少帧」写进文件。
+///
+/// 为什么需要：真机实报「点击后动画只播一帧，拖一下窗口才继续」——
+/// 有两种完全不同的成因，必须用数据区分，不能靠猜：
+///   A. 引擎根本没在出帧（overlay 渲染面不触发 vsync）⇒ 改宿主/渲染方式；
+///   B. 引擎在出帧，是组件被重建打断了动画 ⇒ 改组件。
+/// 它自己是一个无限循环的 `AnimationController.repeat()` —— 只要引擎在出帧，
+/// 这个循环就会持续排帧，探针每秒落一行 fps。
+class AylaOverlayFrameProbe extends StatefulWidget {
+  const AylaOverlayFrameProbe({super.key});
+
+  @override
+  State<AylaOverlayFrameProbe> createState() => _AylaOverlayFrameProbeState();
+}
+
+class _AylaOverlayFrameProbeState extends State<AylaOverlayFrameProbe>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 1),
+  )..repeat();
+  final MethodChannel _channel = const MethodChannel(kAylaOverlayInnerChannel);
+  int _frames = 0;
+  int _lastReport = DateTime.now().millisecondsSinceEpoch;
+
+  @override
+  void initState() {
+    super.initState();
+    _c.addListener(_onFrame);
+    // 证明探针本身挂上了（用来区分「探针没挂载」与「挂了但引擎不出帧」）。
+    _channel.invokeMethod<bool>('probeFrames', <String, Object?>{
+      'frames': -1,
+      'spanMs': 0,
+    }).catchError((Object _) => false);
+  }
+
+  void _onFrame() {
+    _frames += 1;
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastReport < 1000) return;
+    final int span = now - _lastReport;
+    _lastReport = now;
+    final int n = _frames;
+    _frames = 0;
+    // 第二引擎写不了外部存储（scoped storage）⇒ 交给原生落盘（它有自己的 filesDir）。
+    _channel.invokeMethod<bool>('probeFrames', <String, Object?>{
+      'frames': n,
+      'spanMs': span,
+    }).catchError((Object _) => false);
+  }
+
+  @override
+  void dispose() {
+    _c.removeListener(_onFrame);
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
 /// 窗口外悬浮球组的根 widget（第二引擎的 `runApp` 目标）。
 ///
 /// ## 为什么它是有状态的
@@ -518,7 +579,7 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
     final AylaOverlayPayload payload =
         _payload ?? const AylaOverlayPayload(kind: AylaOverlayKind.activityBall);
     // 无会话 ⇒ 组件按 tsx 135 零渲染；此时窗口里什么都不画（主引擎会顺手关窗）。
-    return AylaOverlayWindowApp(
+    final Widget app = AylaOverlayWindowApp(
       payload: payload,
       // 拖动把手 ⇒ 让**宿主窗口**跟着球一起移动（Windows 全工作区窗口用）。
       //
@@ -543,6 +604,8 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
         unawaited(_openSession(session, kind));
       },
     );
+    // 诊断探针与真正的 UI 同级挂载（零尺寸，不参与布局）。
+    return Stack(children: <Widget>[app, const AylaOverlayFrameProbe()]);
   }
 }
 

@@ -400,6 +400,29 @@ class AylaOverlayFlutterHost(
             listOf(org.json.JSONObject().put("payload", payload).toString())
         } ?: emptyList()
         flutter.dartExecutor.executeDartEntrypoint(entrypoint, dartArgs)
+        // 🎯 **必须显式把第二引擎的生命周期推到 RESUMED**（2026-11-01 真机实测根因）。
+        //
+        // ## 现象
+        // 「点击后动画只播一帧，拖一下窗口才继续」。插桩实测：这个引擎**一帧都不出**
+        // （探针 20 秒内只收到 initState 那一条，之后 0 条）。拖窗口能让画面继续，
+        // 是因为拖动触发了渲染面的重合成。
+        //
+        // ## 根因
+        // SchedulerBinding 只在收到 flutter/lifecycle 的 AppLifecycleState.resumed /
+        // inactive 时才把 framesEnabled 打开（scheduler/binding.dart:420-427）；
+        // 而 overlay 窗口**不属于任何 FlutterActivity**，没有任何东西会给这个引擎发生命
+        // 周期消息 ⇒ 框架停在 hidden/paused ⇒ scheduleFrame() 直接 return，
+        // 动画永远停在第 1 帧。
+        //
+        // ## 修法
+        // 引擎起来后立刻手动发一次 RESUMED —— 这正是 FlutterActivity 在 onResume 里做的
+        // 同一件事（FlutterActivityAndFragmentDelegate.java:604）。
+        // 系统叠加层窗口本来就常驻前台，RESUMED 是它真实的生命周期。
+        try {
+            flutter.lifecycleChannel.appIsResumed()
+        } catch (error: Exception) {
+            Log.w(TAG, "appIsResumed failed: ${error.message}")
+        }
         val methodChannel = MethodChannel(
             flutter.dartExecutor.binaryMessenger,
             INNER_CHANNEL,
@@ -423,6 +446,18 @@ class AylaOverlayFlutterHost(
                 "setCollapsed" -> {
                     val next = call.argument<Boolean>("collapsed") == true
                     mainHandler.post { applyCollapsed(next) }
+                    result.success(true)
+                }
+                // 临时诊断：第二引擎的真实出帧率（见 Dart 侧 AylaOverlayFrameProbe）。
+                "probeFrames" -> {
+                    val frames = call.argument<Int>("frames") ?: 0
+                    val span = call.argument<Int>("spanMs") ?: 0
+                    try {
+                        java.io.File(context.filesDir, "overlay_frames.log")
+                            .appendText("frames=$frames spanMs=$span\n")
+                    } catch (error: Exception) {
+                        Log.w(TAG, "probe write failed: ${error.message}")
+                    }
                     result.success(true)
                 }
                 // 紧凑窗口下这些都不需要（窗口尺寸 = 球组尺寸 ⇒ 无需 hit-rect）。

@@ -390,6 +390,14 @@ class AylaLiveMiniWindowHost(
             DartExecutor.DartEntrypoint(loader.findAppBundlePath(), ENTRYPOINT),
             args,
         )
+        // 同一个坑（见 OverlayFlutterHost.ensureEngine）：overlay 窗口不属于任何
+        // FlutterActivity ⇒ 没有任何东西会给这个引擎发 flutter/lifecycle ⇒ 框架停在
+        // hidden/paused ⇒ scheduleFrame() 直接 return ⇒ 小窗画面冻在第一帧。
+        try {
+            flutter.lifecycleChannel.appIsResumed()
+        } catch (error: Exception) {
+            Log.w(TAG, "appIsResumed failed: ${error.message}")
+        }
         val methodChannel = MethodChannel(flutter.dartExecutor.binaryMessenger, CHANNEL)
         methodChannel.setMethodCallHandler { call, result ->
             when (call.method) {
