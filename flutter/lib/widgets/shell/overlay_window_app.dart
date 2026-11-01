@@ -153,6 +153,7 @@ class AylaOverlayWindowApp extends StatelessWidget {
     this.onCollapsedChanged,
     this.suppressTapTick = 0,
     this.compactCollapseShift = 0,
+    this.onWindowOffsetChanged,
   });
 
   /// 可见按钮的精确矩形（视口坐标）。宿主转给原生做穿透判定。
@@ -191,6 +192,12 @@ class AylaOverlayWindowApp extends StatelessWidget {
 
   /// 收起时整组需要左移的 dp（= 窗口宽 − 28）；由原生按当前球数下发。
   final double compactCollapseShift;
+
+  /// 紧凑宿主：每帧上报「窗口应右移多少 dp」——由组件动画值驱动。
+  ///
+  /// 窗口位移与组位移取自**同一个插值变量**，同一帧同一个数 ⇒ 数学上不会错位。
+  /// 各自独立动画会因计时/曲线差异在中途错开（用户实报「把手被挤来挤去」）。
+  final ValueChanged<double>? onWindowOffsetChanged;
 
   /// 原生已把窗口撑回展开宽度的计数器（递增 ⇒ 组件开始播「滑回来」的动画）。
   /// 宿主窗口的内容宽度（逻辑像素；见 `live_window.cpp` 的 kBallWindowWidth）。
@@ -239,14 +246,10 @@ class AylaOverlayWindowApp extends StatelessWidget {
 
     // 组件按视口做两件事：断点（宽/窄屏）与拖动 clamp 上限。
     //
-    // ⚠️ 视口必须报**真实窗口尺寸**，不能报一个更大的假值。
-    //
-    // 曾经报 `hostViewportWidth = 1280`（想让组件走「宽屏档」），结果：组件用
-    // `Positioned(right: 24)` 相对 **1280 宽的画布**定位，而真实窗口只有 132dp ——
-    // 算出来的位置在窗口里完全错位，表现就是「把手没有贴住屏幕右边缘」。
-    //
-    // 现在报真实尺寸：窗口宽 132dp ⇒ 组件走窄屏档（`right: 16`），
-    // 把手正好贴住窗口右缘 = 屏幕右缘。
+    // ⚠️ 宽度必须报**宽屏档**（见 hostViewportWidth）：真实窗口只有 176 宽，
+    // 报 176 会让组件走窄屏档（right 16 / top 104），与 web 不一致。
+    // 高度必须报**真实可用高度**（宿主窗口 = 整个工作区高），因为拖动 clamp 用的是它：
+    // 报小了拖动范围就被夹死（这正是第一版 132 高窗口「拖不动」的根因）。
     final Size viewport = MediaQuery.sizeOf(context);
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(
@@ -259,7 +262,7 @@ class AylaOverlayWindowApp extends StatelessWidget {
         //
         // 正确做法：视口 = 真实窗口；「能拖多远」由原生侧 clamp（applyBallGroupTop），
         // 组件只负责算出它认为的 top 并发给宿主。
-        size: Size(viewport.width, viewport.height),
+        size: Size(hostViewportWidth, viewport.height),
         padding: EdgeInsets.zero,
         viewPadding: EdgeInsets.zero,
         viewInsets: EdgeInsets.zero,
@@ -288,6 +291,7 @@ class AylaOverlayWindowApp extends StatelessWidget {
               onCollapsedChanged: onCollapsedChanged,
               suppressTapTick: suppressTapTick,
               compactCollapseShift: compactCollapseShift,
+              onWindowOffsetChanged: onWindowOffsetChanged,
             ),
           ],
         ),
@@ -611,6 +615,7 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
       onCollapsedChanged: _reportCollapsed,
       suppressTapTick: _suppressTapTick,
       compactCollapseShift: _collapseShift,
+      onWindowOffsetChanged: _reportWindowOffset,
       onOpenSession: (AylaActivitySession session) {
         // 组件只回传会话（web 的真实口径），种类要在这里按 id 反查：
         // 直播球的 id 与语音球的 id 不会相同（一个房间只有一个身份）。
