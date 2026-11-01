@@ -329,11 +329,26 @@ Future<bool> aylaUpdateDetachedBall({required String payload}) async {
     // `showBall` 重开窗口（重建 FlutterView = 闪一下 + 明显变慢）。
     final MethodChannel target =
         defaultTargetPlatform == TargetPlatform.windows ? _desktopChannel : _pipChannel;
-    final String? result =
-        await target.invokeMethod<String>('updateBall', <String, Object?>{
+    // ⚠️ **返回类型是两个（Android 是 Boolean，Windows 是 String）**，不能只按一种解析：
+    //
+    // 原生实现：
+    // · Windows `desktop_window.cpp` 的 `updateBall` ⇒ 字符串 `"shown"` / `""`；
+    // · Android `MainActivity` 的 `"updateBall" -> result.success(updateBall(call))`
+    //   ⇒ **Boolean**（`OverlayFlutterHost.update` 返回 Boolean）。
+    //
+    // 旧写法无条件 `invokeMethod<String>` ⇒ Android 上每次会话变化都抛
+    // `type 'bool' is not a subtype of type 'String?' in type cast`
+    // （2026-11-01 实测栈：`_SessionActivityHostState._syncDetachedBall` ←
+    //  `aylaUpdateDetachedBall`）。这个异常会打断壳层那一整段同步，
+    // 进而让「进直播间时关掉窗口外小窗」等收尾动作全部不执行。
+    final Object? result =
+        await target.invokeMethod<Object?>('updateBall', <String, Object?>{
       'payload': payload,
     });
-    return result == 'shown';
+    // 两种原生回执语义对齐到同一个布尔：已送达。
+    if (result is bool) return result;
+    if (result is String) return result == 'shown';
+    return false;
   } on MissingPluginException {
     return false;
   } on PlatformException {

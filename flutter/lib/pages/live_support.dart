@@ -241,6 +241,14 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// 视频视图（页面注入 [AylaLiveRoomBody.videoView]）。
   Widget? get videoView => _playerAttached ? _player.videoView : null;
 
+  /// 画面宽高比（页面注入 [AylaLiveRoomBody.videoAspectRatio]）。
+  ///
+  /// 用于把播放面收成等比盒（= `object-fit: contain`）：全屏时容器是整块屏幕，
+  /// 不知道比例就只能拉伸（2026-11-01 用户实报「不要拉伸屏幕，多余的留黑」）。
+  /// 未知 ⇒ null（调用方不套等比盒，与 web `<video>` 尚无元数据时一致）。
+  double? get videoAspectRatio =>
+      _playerAttached ? _player.videoAspectRatio : null;
+
   /// 弹幕历史窗口（页面装配 [AylaHistoryControlsData] 用）。
   AylaCursorHistory<AylaLiveDanmaku>? get history => _history;
 
@@ -352,15 +360,34 @@ class AylaLiveRoomSession extends ChangeNotifier {
     // 销毁仍挂在 AppShell 上的旧小窗会话 —— Flutter 的平台视图不能跨树迁移、复用不了旧 session
     // （文件头「与 web 的结构差异」已登记该偏离）。
     await _retireMiniPlayerOwner();
+    // 回到直播间 ⇒ 窗口外小窗必须消失（用户实报「回到直播间时小窗应该消失」）。
+    //
+    // `_retireMiniPlayerOwner()` 只销毁**别的**会话，不会清本会话写下的 miniPlayer 投影；
+    // 而 AppShell 的同步器只认 `miniPlayer != null` ⇒ 不清就永远留着那个小窗。
+    //
+    // ⚠️ 只清投影**不够**：清投影只让「壳层下次 build 时去关窗」，而进直播间这一刻
+    // 壳层未必还会 build（同一路径重进时路由没变），窗口可能继续挂着并和主窗口抢流。
+    // 所以这里直接把窗口关掉（幂等），保证「进直播间」之后不会有两个 HLS 播放器。
+    _miniPlayerFromBackground = false;
+    // 重新进直播间 = 新一轮观看：把「用户点掉过小窗」的抑制清掉。
+    _miniWindowDismissedByUser = false;
+    if (!_live.isDisposed) _live.setMiniPlayer(null);
+    if (!kIsWeb && aylaDetachedLivePlatformSupported) {
+      await closeDetachedWindow();
+    }
     // 窗口外小窗也要让位：它是第二个引擎 + 第二个 HLS 播放器，
     // 本会话要往主窗口挂画面，两路同时播会抢同一个流（表现：主窗口黑屏）。
     // 用户定稿的「退出直播间不关小窗」只约束**退出**方向，进入新直播间时应当让位。
     //
-    // ⚠️ **只有 Windows 走这条**（2026-11-01 实报根因）：Android 没有「第二引擎直播小窗」
-    // 这条实现（那边的脱离态是已在 1.0.40 移除的系统 PiP，通道恒返回 false），
-    // 无条件调用只会白跑一次通道 + 复位桥接标志，而用户实报的「退出直播间看不到小窗」
-    // 正是被这里连带误伤出来的。
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+    // ⚠️⚠️ **Android 也必须走这条**（2026-11-01 用户实报「点击小窗回到直播间
+    // 会导致直播间加载不出来」）。此前这里硬编码成「只有 Windows」，理由是
+    // 「Android 没有第二引擎小窗」——**那个理由已经过期**：1.0.41 起 Android 的
+    // 脱离态就是 `LiveMiniWindowHost.kt` 的第二引擎 + 第二个 HLS 播放器，
+    // 与 Windows 是同一套机制。于是从安卓小窗点回房时：小窗窗口不关、第二个
+    // 播放器继续拉着同一路 HLS，主窗口那一路抢不到流 ⇒ 页面一直转圈/黑屏。
+    //
+    // 让位语义两端一致：关掉窗口外小窗（幂等，本来没开就是 no-op），再挂主窗口。
+    if (!kIsWeb && aylaDetachedLivePlatformSupported) {
       await _retireDetachedWindow();
     }
     // 本会话接管页面视图（[detachView] 的代际防御用：迟到的旧会话不得再进小窗）。
@@ -810,7 +837,63 @@ class AylaLiveRoomSession extends ChangeNotifier {
   void _onDetachedLiveEvent(AylaDetachedLiveEvent event) {
     if (event.kind != AylaDetachedLiveEventKind.liveWindowClosed) return;
     if (_disposed) return;
+    // Windows：独立窗口没了 ⇒ 主窗口重新接管画面（旧语义）。
     _onDetachedWindowClosed();
+  }
+
+  /// Android 窗口外小窗是否已挂上「被关闭」的监听（幂等）。
+  bool _miniWindowLifecycleBound = false;
+
+  /// 挂上「窗口外小窗被关掉了」的监听（Android）。
+  ///
+  /// 为什么只有小窗 owner 才挂：这条事件是**窗口级别的**，谁开过小窗谁负责收尾
+  /// （`onLiveWindowClosed` 由原生在窗口移除时发，见 `LiveMiniWindowHost.hide`）。
+  /// 不挂的后果是：用户点了小窗的关闭键，窗口没了，而**会话还在后台播**
+  /// （HLS 音频继续响、心跳继续刷「在看」），且 `miniPlayer` 投影永远非空 ⇒
+  /// 再也打不开第二次小窗。
+  void _bindMiniWindowLifecycle() {
+    if (!_ownsMiniPlayer) return;
+    if (_miniWindowLifecycleBound) return;
+    _miniWindowLifecycleBound = true;
+    _miniWindowEventsSub ??= AylaDetachedLiveEvents.instance.stream
+        .listen(_onMiniWindowEvent);
+  }
+
+  StreamSubscription<AylaDetachedLiveEvent>? _miniWindowEventsSub;
+
+  /// 解开「窗口外小窗被关掉」的监听（摘牌 / 会话结束时调用；幂等）。
+  void _unbindMiniWindowLifecycle() {
+    if (!_miniWindowLifecycleBound) return;
+    _miniWindowLifecycleBound = false;
+    unawaited(_miniWindowEventsSub?.cancel() ?? Future<void>.value());
+    _miniWindowEventsSub = null;
+  }
+
+  void _onMiniWindowEvent(AylaDetachedLiveEvent event) {
+    if (event.kind != AylaDetachedLiveEventKind.liveWindowClosed) return;
+    if (_disposed || !_alive) return;
+    if (!_ownsMiniPlayer) return;
+    // ⚠️ 「关掉小窗」≠「退出观看」：必须看用户现在在哪。
+    //
+    // · 用户**就站在直播间里**（本会话仍是页面级活跃会话）⇒ 他只是收起小窗，
+    //   页面还要继续播。这里若照 web 的 leave() 语义销毁会话，页面会连带被弄死
+    //   （2026-11-01 实报：「退不出直播间了」，因为会话被 dispose、页面拿到的
+    //   播放器与 store 状态全空，画面永远停在加载态）。⇒ 只摘牌 + 记抑制。
+    // · 用户**已经离开直播间**（页面已卸载，`_viewDetached`）：小窗是他唯一的
+    //   观看面，关掉就是不想看了 ⇒ 完整销毁（web `LiveMiniPlayer.tsx:93–96`）。
+    final bool stillOnRoomPage =
+        identical(_activeViewSession, this) && !_viewDetached;
+    _miniWindowDismissedByUser = true;
+    if (stillOnRoomPage) {
+      _miniPlayerOwner = null;
+      _miniPlayerFromBackground = false;
+      _unbindMiniWindowLifecycle();
+      if (!_live.isDisposed) _live.setMiniPlayer(null);
+      unawaited(_resumeMainPlayerAfterDetached());
+      if (!_disposed) notifyListeners();
+      return;
+    }
+    unawaited(stop().whenComplete(dispose));
   }
 
   /// 独立直播窗口没了（用户关掉 / 点画面回主窗口）⇒ 主窗口重新接管画面。
@@ -824,7 +907,11 @@ class AylaLiveRoomSession extends ChangeNotifier {
       // 「回到 App 内小窗」复用既有路径。只在**页面已经卸载**时登记小窗投影：
       // 用户就站在直播间页里时画面由页面自己的 videoView 接管，再挂一层小窗
       // 投影会多出一个盖在页面上的浮层。
-      if (wasDetached && !identical(_activeViewSession, this)) {
+      //
+      // ⚠️ 用户亲手点掉了小窗 ⇒ **不得**在这里重新登记（否则就是「关不掉的自动出现」）。
+      if (wasDetached &&
+          !identical(_activeViewSession, this) &&
+          !_miniWindowDismissedByUser) {
         _enterMiniPlayer();
       }
     }
@@ -857,6 +944,38 @@ class AylaLiveRoomSession extends ChangeNotifier {
     if (!_alive || _playerAttached) return;
     if (_live.currentPlayerError != null) return;
     await _attachPlayer();
+  }
+
+  /// 把「小窗所有权 + miniPlayer 投影」摘掉，**但不销毁会话**。
+  ///
+  /// 与 [aylaCloseLiveMiniPlayer] 的区别：那个是「用户不要这个小窗了」（完整销毁）；
+  /// 本方法是「App 回到前台、页面重新接管画面」，会话与观看登记都要继续。
+  void releaseMiniPlayerForForeground() {
+    final bool wasBackgroundAuto = _miniPlayerFromBackground;
+    if (!_ownsMiniPlayer) return;
+    _miniPlayerOwner = null;
+    _miniPlayerFromBackground = false;
+    // 摘牌 ⇒ 不再是小窗宿主，小窗关闭事件也就不该再消费（下次进小窗会重新挂）。
+    _unbindMiniWindowLifecycle();
+    if (!_live.isDisposed) _live.setMiniPlayer(null);
+    // 「页面级活跃会话」的牌子还给它：切后台时没被摘掉（见 [_enterMiniPlayer]），
+    // 这里只是把它重新标成当前视图的 owner，保证之后「退出直播间」仍能正常进小窗。
+    if (wasBackgroundAuto && _alive && !_viewDetached) {
+      _activeViewSession = this;
+    }
+  }
+
+  /// 回到前台、后台自动小窗让位后，把画面还给页面播放器。
+  ///
+  /// 与 [enterMiniPlayerOnBackground] 配对：进后台时页面那一路被挂起
+  /// （`_suspendMainPlayerForDetached`），回前台必须重新挂上，否则用户回到直播间
+  /// 看到的是黑屏。幂等：没挂起过就什么都不做。
+  Future<void> resumePagePlayerAfterMini() async {
+    if (!_alive || _disposed) return;
+    if (!_playerSuspendedForDetached) return;
+    if (_live.currentPlayerError != null) return;
+    await _resumeMainPlayerAfterDetached();
+    if (!_disposed) notifyListeners();
   }
 
   /// 复位「独立窗口」的桥接状态（终止路径调用；随会话一起作废）。
@@ -896,6 +1015,30 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// 本会话当前是否为小窗宿主（唯一 owner 判定）。
   bool get _ownsMiniPlayer => identical(_miniPlayerOwner, this);
 
+  /// 用户**自己点掉了**小窗 ⇒ 本会话在「切后台」时不再自动弹（用户实报：
+  /// 「我点了小窗的关闭键，过一会小窗又自动会出现，你写死了他会自动出现但没写怎么关」）。
+  ///
+  /// 这是「用户意图」而不是「窗口状态」：窗口状态由投影表达，意图必须单独记，
+  /// 否则下一次 `paused` 又会按「还在播 + 没有小窗」重新弹出来。
+  bool _miniWindowDismissedByUser = false;
+
+  /// 当前这个小窗是不是「App 切后台时自动弹出」的。
+  ///
+  /// 用途只有一条：App 回到前台时**只有这种小窗**要自动消失
+  /// （用户规格：「回到直播间时小窗应该消失」，而「退出直播间」得到的那个小窗
+  /// 要一直留着）。两条路径共用 [AylaLiveMiniPlayerState] 投影，靠这个位区分。
+  bool _miniPlayerFromBackground = false;
+
+  /// 只读投影（[aylaHandleLiveViewingLifecycle] 回前台时判定用）。
+  bool get miniWindowIsBackgroundAuto =>
+      _ownsMiniPlayer && _miniPlayerFromBackground;
+
+  /// 这个会话是否仍是**某个页面正在使用**的会话（页面没卸载、也没被接管）。
+  ///
+  /// 判断「能不能销毁」的唯一依据：页面级会话被 dispose 会让页面拿到的播放器
+  /// 与共享状态全空（画面卡在加载态）。小窗让位、关闭、回前台一律只摘牌。
+  bool get isPageAlive => _alive && !_viewDetached;
+
   /// 视图分离（页面卸载）：**窄屏 + 普通观看 + 直播中** ⇒ 进入小窗（会话所有权移交小窗宿主，
   /// 播放器不销毁、不重新 attach）；否则完整销毁并回收本会话。
   ///
@@ -925,13 +1068,20 @@ class AylaLiveRoomSession extends ChangeNotifier {
     _viewDetached = true;
     // 代际防御（全局版）：切台 / 路由替换会让新旧页面并存，新页面 start 之后旧页面才
     // 跑 detachView。此时旧会话**不得**进小窗（会把刚接管的视图挤掉），直接完整销毁。
-    if (!identical(_activeViewSession, this)) {
+    //
+    // ⚠️ 唯一的例外 = 用户亲手点掉了小窗（[AylaLiveRoomSession._miniWindowDismissedByUser]）。
+    // 那一刻 `_activeViewSession` 可能已是 null（小窗登记时摘过牌），若照旧销毁，
+    // 会把仍在页面上的会话打死 ⇒ 画面卡在加载态、「退不出直播间」（2026-11-01 实报）。
+    if (!identical(_activeViewSession, this) && !_miniWindowDismissedByUser) {
       await stop();
       dispose();
       return;
     }
+    // ⚠️ `!_miniWindowDismissedByUser`：用户亲手点掉过小窗 ⇒ 本次会话不再自动弹。
+    // 少了这条就是「写死了会自动出现但没写怎么关」（2026-11-01 用户实报）。
     final bool enterMiniPlayer = isNarrow &&
         !isOwnerConsole &&
+        !_miniWindowDismissedByUser &&
         _live.srsStatus == AylaLiveSrsStatus.live &&
         _live.currentPlayerError == null;
     if (enterMiniPlayer) {
@@ -942,11 +1092,78 @@ class AylaLiveRoomSession extends ChangeNotifier {
     dispose();
   }
 
+  /// App 切后台时进小窗（用户实报「从直播间离开 app，把 Ayla 放后台没有出现小窗」）。
+  ///
+  /// 与 [detachView] 的区别：
+  ///   · [detachView] 是「离开直播间页面」（路由级，带 `_viewDetached` 幂等位）；
+  ///   · 本方法是「App 进后台但页面还在」（生命周期级，可反复进出）。
+  /// 所以不能复用 [detachView] —— 它会把这个会话标记成已分离，回到前台就再也接不回来。
+  ///
+  /// 条件与 [detachView] 的 `enterMiniPlayer` 判定一致：直播进行中、无播放器错误、
+  /// 且当前不在主播控制台（主播自己的控制台不该被小窗顶掉）。
+  Future<void> enterMiniPlayerOnBackground() async {
+    if (!_alive || _viewDetached) return;
+    if (_ownsMiniPlayer) return; // 已经在小窗里了，幂等
+    // 用户亲手点掉过小窗 ⇒ 本次会话不再自动弹（这是唯一的「怎么关」）。
+    if (_miniWindowDismissedByUser) return;
+    if (_live.srsStatus != AylaLiveSrsStatus.live) return;
+    if (_live.currentPlayerError != null) return;
+    // ⚠️ 先把主窗口（页面）这一路播放器停掉，再弹小窗。
+    //
+    // 小窗是**第二个引擎 + 第二个 HLS 播放器**（`LiveMiniWindowHost.kt`），
+    // 与页面那一路是两条独立的解码链：同时播同一个直播流会双声道叠加、互相错相
+    // （听着像回声/颤动）。页面此刻已经在后台、看不见，没必要继续解码。
+    // 这与 Windows 独立窗口的交接是同一条纪律（`_suspendMainPlayerForDetached`）。
+    await _suspendMainPlayerForDetached();
+    if (!_alive) return;
+    _enterMiniPlayer(fromBackground: true);
+    // ⚠️ **必须在这里直接开窗**，不能等 `AppShell` 的同步器。
+    //
+    // 同步器靠 `build` 里的 `addPostFrameCallback` 触发，而进后台后主引擎
+    // **不再出帧**（`scheduler/binding.dart` 的 `handleAppLifecycleStateChanged`：
+    // hidden/paused/detached ⇒ `_setFramesEnabledState(false)`）⇒ 那一帧永远不会来
+    // ⇒ 小窗要等用户切回前台才出现（等于「切后台不出现小窗」没修）。
+    // 小窗本身跑在**第二个引擎**里，开窗这一步不依赖主引擎出帧。
+    await _openDetachedWindowDirect();
+  }
+
+  /// 关掉「窗口外小窗」这件事的平台动作（**走注入的 presenter**，便于测试断言）。
+  ///
+  /// 为什么不直接调模块级 `aylaCloseDetachedLive()`：会话的平台动作统一从
+  /// [_detachedPresenter] 出，测试才能在不碰 MethodChannel 的情况下验证
+  /// 「到底有没有真的去关窗」（同 `enter` 的理由）。
+  Future<void> closeDetachedWindow() async {
+    try {
+      await _detachedPresenter.close();
+    } catch (_) {
+      // 关窗失败不该打断生命周期收口（原生侧 hide 本身幂等且不抛）。
+    }
+  }
+
+  /// 直接调平台「开窗口外小窗」（不进 [_detached] 记录：那不是 Windows 那种脱离态）。
+  ///
+  /// 幂等由原生保证（同频道同地址重复 `show` 直接返回 true，不重建引擎）。
+  Future<void> _openDetachedWindowDirect() async {
+    if (!aylaDetachedLivePlatformSupported) return;
+    final String? url = _detachedPlayUrl();
+    if (url == null) return;
+    try {
+      await _detachedPresenter.enter(
+        channelId: channelId,
+        title: _live.currentChannel?.title ?? '直播间',
+        playUrl: url,
+      );
+    } catch (_) {
+      // 开窗失败不打断生命周期收口（接下来照常暂停观看登记）。
+    }
+  }
+
   /// 进入小窗（web `enterMiniPlayer`，`liveSessionRuntime.ts:321–328`）。
   ///
   /// 把「频道 id + 频道快照 + 回房路由」投影进 store（UI 侧只读 [AylaLiveState.miniPlayer]），
   /// 并把本会话登记为小窗宿主 —— **唯一 owner**：已有别的会话挂着小窗时先完整销毁它。
-  void _enterMiniPlayer() {
+  void _enterMiniPlayer({bool fromBackground = false}) {
+    _miniPlayerFromBackground = fromBackground;
     // 先取快照：销毁旧 owner 的 `stop()` 会 `clearCurrent()`（否则这里读到 null）。
     final AylaLiveChannelSnapshot? channel = _live.currentChannel;
     final AylaLiveRoomSession? previous = _miniPlayerOwner;
@@ -954,8 +1171,18 @@ class AylaLiveRoomSession extends ChangeNotifier {
       unawaited(previous.stop().whenComplete(previous.dispose));
     }
     // 转为小窗宿主：不再是页面级活跃会话（代际防御的「active」位让给下一个 start）。
-    if (identical(_activeViewSession, this)) _activeViewSession = null;
+    //
+    // ⚠️ **切后台那条路径不能清**：页面还挂在树上、用户就在直播间里，只是 App 被
+    // 放到后台了。清掉之后「回到前台再退出直播间」会走到 [detachView] 的代际防御
+    // 分支（`!_activeViewSession` ⇒ 直接销毁），小窗就再也不出现了。
+    if (!fromBackground && identical(_activeViewSession, this)) {
+      _activeViewSession = null;
+    }
     _miniPlayerOwner = this;
+    // ⚠️ 必须在 `_miniPlayerOwner = this` **之后**才挂监听：
+    // `_bindMiniWindowLifecycle` 用 `_ownsMiniPlayer` 做前置判定，早挂会被自己挡掉
+    // ⇒ 用户点小窗关闭键时没人收事件 ⇒ 窗口关了、投影还在、还继续自动出现。
+    _bindMiniWindowLifecycle();
     _live.setMiniPlayer(
       AylaLiveMiniPlayerState(
         channelId: channelId,
@@ -981,8 +1208,12 @@ class AylaLiveRoomSession extends ChangeNotifier {
   Future<void> _retireDetachedWindow() async {
     if (_detached) {
       _detached = false;
-      await _detachedPresenter.close();
     }
+    // 无论 `_detached` 标志如何都要真的关一次窗口：
+    // 「切后台自动弹出小窗」那条路径**不走** `_detached`（它不是 Windows 的脱离态语义，
+    // 见 `_openDetachedWindowDirect`），只认标志就会漏关 ⇒ 两路抢流 ⇒ 主窗口黑屏。
+    // 原生 `hide` 幂等（没有窗口时什么也不做），重复调用没有代价。
+    await closeDetachedWindow();
     // 无论之前是否处于脱离态，都把桥接标志复位，避免陈旧的「已挂起」认知
     // 影响下一次进入脱离态时的判定。
     _resetDetachedWindowBridge();
@@ -1051,6 +1282,11 @@ class AylaLiveRoomSession extends ChangeNotifier {
     // 「页面卸载完成后」同步段里（web `leave` 末尾的 `setMiniPlayer(null)`）。
     final bool ownsMiniPlayer = _ownsMiniPlayer;
     if (ownsMiniPlayer) _miniPlayerOwner = null;
+    _miniPlayerFromBackground = false;
+    _miniWindowDismissedByUser = false;
+    _unbindMiniWindowLifecycle();
+    // 会话结束了就不该再被「回前台恢复观看登记」碰到（那个集合是全局的）。
+    _backgroundPausedSessions.remove(this);
     if (identical(_activeViewSession, this)) _activeViewSession = null;
     // ⚠️ 清共享状态必须在**页面真正卸载完成之后**才安全（见 [detachView] 的注释）；
     // 本方法由页面在 microtask 里调用（那时 Riverpod 已注销该页面的监听）。
@@ -1077,9 +1313,13 @@ class AylaLiveRoomSession extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _backgroundPausedSessions.remove(this);
     // 原生事件订阅随会话终结（它引用 this，漏摘会让已 dispose 的会话继续收事件）。
     unawaited(_detachedEventsSub?.cancel() ?? Future<void>.value());
     _detachedEventsSub = null;
+    _miniWindowLifecycleBound = false;
+    unawaited(_miniWindowEventsSub?.cancel() ?? Future<void>.value());
+    _miniWindowEventsSub = null;
     // 兜底：异常路径可能绕过 [stop]（例如页面直接 dispose），原生武装不能因此漏撤销。
     // 不阻塞 UI；[clearDetachedPresentation] 内部幂等。
     unawaited(clearDetachedPresentation());
@@ -1149,14 +1389,19 @@ AylaLiveRoomSession? _activeViewSession;
 AylaLiveRoomSession? get aylaMiniPlayerOwner => _miniPlayerOwner;
 
 
-/// App 生命周期 → 直播观看登记的收口（`main.dart` 的 `didChangeAppLifecycleState` 只转发到这里）。
+/// App 生命周期 → 直播小窗 + 观看登记的收口（`main.dart` 的 `didChangeAppLifecycleState` 只转发到这里）。
 ///
 /// ## 语义（逐条，勿凭印象改）
 /// | 生命周期档 | 行为 |
 /// |---|---|
-/// | `resumed` | 续上观看登记（重连弹幕 WS、重拉在看人数） |
-/// | `paused` / `hidden` / `detached` | **先问原生是否在画中画**：在 PiP 里 ⇒ **什么都不做**（仍算在看人）；否则暂停观看登记 |
-/// | `inactive` | 不动（来电/通知横幅/切控制中心都只是短暂失焦） |
+/// | `resumed` | **先撤掉「切后台自动弹出」的小窗**（用户规格：回到直播间小窗必须消失）⇒ 再续上观看登记 |
+/// | `paused` / `hidden` / `detached` | **若正在看直播 ⇒ 弹出窗口外小窗**（用户实报「放后台没有出现小窗」）；再问原生是否在画中画：在 PiP 里 ⇒ 不暂停观看登记；否则暂停 |
+/// | `inactive` | 不动（来电/通知横幅/切控制中心都只是短暂失焦）—— 小窗也不能在这一档弹：Android 从 `inactive` 就开始画转场，太早弹会闪 |
+
+/// ⚠️ **小窗时序**：`paused` 是引擎「帧已停」的那一档（见 `scheduler/binding.dart`
+/// 的 `handleAppLifecycleStateChanged`：hidden/paused/detached 会 `_setFramesEnabledState(false)`）。
+/// 小窗在 `paused` 之前（`hidden`）被请求，原生侧就能在引擎停下之前把第二引擎拉起来；
+/// 若只认 `paused`，用户把 App 切后台时小窗会晚一拍才出现。三档都调、靠会话内部幂等去重。
 ///
 /// ## 为什么需要 PiP 守卫（用户明确要求「小窗观看直播时也算作观看人」）
 /// Android 进画中画后引擎只给 `inactive`（不会 `paused`），所以 WS 本来就不会断；
@@ -1172,16 +1417,45 @@ Future<void> aylaHandleLiveViewingLifecycle(
 }) async {
   switch (state) {
     case AppLifecycleState.resumed:
+      // 回到前台 ⇒ 撤掉「切后台自动弹出」的那个小窗（用户规格：「回到直播间时
+      // 小窗应该消失」）。只撤这一档：用户在**离开直播间之后**主动得到的小窗
+      // （`detachView` 那条路径）必须一直留着，用户可能正在别的 App 里看它。
+      await _dismissBackgroundAutoMiniWindow();
       await aylaResumeLiveViewingFromBackground();
-    case AppLifecycleState.paused:
     case AppLifecycleState.hidden:
+    case AppLifecycleState.paused:
     case AppLifecycleState.detached:
+      // 进后台 ⇒ 若正看着直播，弹出窗口外小窗（用户实报「从直播间离开 app，
+      // 把 Ayla 放后台没有出现小窗」）。必须在「暂停观看登记」**之前**做：
+      // 小窗要接管画面，先断观看登记会让它在一次网络往返里处于「不在播」的判定下。
+      await _activeViewSession?.enterMiniPlayerOnBackground();
       if (await _livePipGuardSaysStillWatching(detached)) return;
       await aylaPauseLiveViewingForBackground();
     case AppLifecycleState.inactive:
       // 短暂失焦不算离开，**不动**。
       break;
   }
+}
+
+/// 撤掉「App 切后台时自动弹出」的小窗（回到前台时调用）。
+///
+/// 只处理**自动弹出**那一档（[AylaLiveRoomSession.miniWindowIsBackgroundAuto]）：
+/// 「离开直播间」得到的小窗是用户主动保留的观看面，回前台不该被抢走。
+///
+/// 让位语义与「进直播间」一致：小窗是第二个引擎 + 第二个 HLS 播放器，页面要重新
+/// 挂画面就必须先把它关掉（两路同播会抢流 / 双声道），然后由会话把页面播放器重新
+/// 挂上（进后台时被 `_suspendMainPlayerForDetached` 挂起过）。
+Future<void> _dismissBackgroundAutoMiniWindow() async {
+  final AylaLiveRoomSession? owner = _miniPlayerOwner;
+  if (owner == null) return;
+  if (!owner.miniWindowIsBackgroundAuto) return;
+  // ⚠️ **先摘牌、再关窗**：关窗会让原生回 `onLiveWindowClosed`，会话的监听逻辑
+  // 是「我还是小窗 owner ⇒ 完整销毁会话」。此刻会话正是页面在用的那一个，
+  // 被销毁就等于回到前台后直播间整个黑掉。摘牌之后那条事件自然被忽略。
+  owner.releaseMiniPlayerForForeground();
+  await owner.closeDetachedWindow();
+  if (!owner.alive) return;
+  await owner.resumePagePlayerAfterMini();
 }
 
 /// 画中画守卫：true = 人还在 PiP 里看 ⇒ 不许退观看。
@@ -1219,16 +1493,33 @@ Future<void> aylaPauseLiveViewingForBackground() async {
   final AylaLiveRoomSession? mini = _miniPlayerOwner;
   // 只断 WS（退出在看名单、停心跳），**不销毁会话**：回前台可无缝续上。
   for (final AylaLiveRoomSession? s in <AylaLiveRoomSession?>[active, mini]) {
-    s?.pauseViewerPresence();
+    if (s == null) continue;
+    s.pauseViewerPresence();
+    _backgroundPausedSessions.add(s);
   }
 }
+
+/// 因「App 进后台」被暂停观看登记的会话（回前台要原样续上）。
+///
+/// ⚠️ 为什么要单独记：进后台时会话可能**刚被移交成小窗**（`_enterMiniPlayer` 会把
+/// `_activeViewSession` 置空 —— 那是页面代际防御），而回前台撤小窗时又会摘掉
+/// 小窗牌子 ⇒ 那一刻 [aylaResumeLiveViewingFromBackground] 在两个全局槽里都找不到它，
+/// 结果「回到前台还挂在离开观看的状态」（别人看你不在看了，心跳也不恢复）。
+final Set<AylaLiveRoomSession> _backgroundPausedSessions =
+    <AylaLiveRoomSession>{};
 
 /// App 回到前台时的恢复（与 [aylaPauseLiveViewingForBackground] 配对）。
 Future<void> aylaResumeLiveViewingFromBackground() async {
   final AylaLiveRoomSession? active = _activeViewSession;
   final AylaLiveRoomSession? mini = _miniPlayerOwner;
-  for (final AylaLiveRoomSession? s in <AylaLiveRoomSession?>[active, mini]) {
-    s?.resumeViewerPresence();
+  final List<AylaLiveRoomSession> targets = <AylaLiveRoomSession>[
+    ..._backgroundPausedSessions,
+    if (active != null) active,
+    if (mini != null) mini,
+  ];
+  _backgroundPausedSessions.clear();
+  for (final AylaLiveRoomSession s in targets) {
+    s.resumeViewerPresence();
   }
 }
 
@@ -1239,6 +1530,15 @@ Future<void> aylaResumeLiveViewingFromBackground() async {
 Future<void> aylaCloseLiveMiniPlayer() async {
   final AylaLiveRoomSession? owner = _miniPlayerOwner;
   if (owner == null) return;
+  // ⚠️ 用户就站在直播间页里时，这个会话是**页面的**会话，不能连同 dispose ——
+  // 那会让页面拿到已销毁的播放器与 store 状态，画面永远停在加载态、退不出去
+  // （2026-11-01 实报「退不出直播间」）。只摘牌 + 交还画面。
+  if (owner.isPageAlive) {
+    owner.releaseMiniPlayerForForeground();
+    await owner.closeDetachedWindow();
+    await owner.resumePagePlayerAfterMini();
+    return;
+  }
   await owner.stop();
   owner.dispose();
 }

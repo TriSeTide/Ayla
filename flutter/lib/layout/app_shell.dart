@@ -51,6 +51,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../pages/group_page.dart' show AylaGroupBackHandler, aylaGroupBackHandler;
+import '../pages/live_support.dart'
+    show AylaLiveRoomSession, aylaMiniPlayerOwner;
 import '../pages/quick_messages_support.dart' show AylaQuickMessagesHost;
 import '../router/shell_config.dart';
 import '../state/auth_bootstrap.dart';
@@ -526,7 +528,13 @@ class _AppShellState extends ConsumerState<AppShell> {
         // 无渲染子级 ⇒ 本件不占 `Stack` 的任何位置（也不再有 z 60 的层序问题）。
         _LiveMiniPlayerHost(
           mini: liveMiniPlayer,
-          onOpenRoom: () => context.go(liveMiniPlayer!.sourceRoute),
+          // ⚠️ 用 `push` 而不是 `go`：`go` 会把壳层（`ShellRoute`）一起换掉，
+          // 本件随旧壳销毁，`dispose` 里没机会「关掉小窗再导航」—— 结果就是
+          // 「点了画面、跳回直播间，小窗却还浮在上面」。`push` 后壳还在，
+          // `_onOpenRoom` 能先关窗再进房（进入直播间本身也会清投影，双保险）。
+          // Android 上「点小窗画面」实际走原生 `onBallTap` 事件（见
+          // `_SessionActivityHost._onDetachedEvent`）；这条回调留给 Windows 独立窗口。
+          onOpenRoom: () => context.push(liveMiniPlayer!.sourceRoute),
         ),
         // ---- 客户端更新弹窗（登录后自动检查的呈现面；层级高于 FAB/小窗）----
         const AylaUpdateHost(),
@@ -636,8 +644,23 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
     switch (event.kind) {
       case AylaDetachedLiveEventKind.ballTap:
         // 点球 = 回房。路由合法才 go（原生侧理论上不会传空，空串仍要防）。
+        //
+        // ⚠️ 直播小窗**复用**这条事件（`MainActivity.liveMini` 的 onOpenRoom），
+        // 所以这里必须先分清「用户真的在别的 App 里」还是「已经站在这个直播间」：
+        // 后者再 `go` 一次会重建整个直播间页面 ⇒ 画面重新握手、加载不出来
+        // （用户实报「点击小窗回到直播间会导致直播间加载不出来」）。
         final String route = event.sourceRoute;
-        if (route.isNotEmpty && mounted) context.go(route);
+        if (route.isEmpty || !mounted) return;
+        final String here = GoRouterState.of(context).uri.path;
+        final String target = Uri.tryParse(route)?.path ?? route;
+        if (here == target) {
+          // 已经在直播间里：点小窗只应当撤销小窗，不重新导航。
+          _dismissMiniForSameRoom();
+          return;
+        }
+        // 真的要从别处跳回来：先关掉窗口外小窗，避免跳转期间它继续遮挡 / 抢流。
+        if (aylaMiniPlayerOwner != null) _dismissMiniForSameRoom();
+        context.go(route);
       case AylaDetachedLiveEventKind.ballClosed:
         // 用户从系统层关掉了球（Android 通知栏「关闭」/ Windows 关窗）⇒ 清掉
         // 「窗口外悬浮球已打开」的本地认知，下一次会话变化要能重开它
@@ -649,6 +672,21 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
         // PiP / 独立直播窗归 task-2 / task-4；本件不消费。
         break;
     }
+  }
+
+  /// 撤掉窗口外小窗（用户点它回房 / 已经在直播间时）。
+  ///
+  /// 顺序很重要：**先摘会话的小窗牌子，再关原生窗口**。
+  /// 关窗会让原生回 `onLiveWindowClosed`，而会话那边的监听是「我还是小窗 owner
+  /// ⇒ 完整销毁会话」——此刻会话正被直播间页面使用，被销毁就表现为页面黑屏
+  /// （用户实报「回到直播间加载不出来」的那条链路之一）。
+  void _dismissMiniForSameRoom() {
+    final AylaLiveRoomSession? owner = aylaMiniPlayerOwner;
+    owner?.releaseMiniPlayerForForeground();
+    // 关窗幂等（原生 hide 对「本来就没窗口」是 no-op）⇒ 不必先判断开没开。
+    unawaited(aylaCloseDetachedLive());
+    // 画面还给页面播放器（进后台 / 开小窗时被挂起过）。
+    if (owner != null) unawaited(owner.resumePagePlayerAfterMini());
   }
 
   /// 把「当前有哪些会话」推给**窗口外**的悬浮球窗口（Windows / Android 的唯一渲染宿主）。
@@ -901,10 +939,17 @@ AylaActivitySession _activitySession({
 /// `mini`，不需要额外的全局注册表；并且它**返回零尺寸**（`SizedBox.shrink`），
 /// 不参与 `Stack` 的层序（应用内不再有任何浮层）。
 ///
-/// ## 同步语义
+/// ## 同步语义（2026-11-01 修正：`mini == null` **必须真的关窗**）
 /// - `mini != null` 且窗口没开 ⇒ `openLiveWindow`（带归一后的 HLS 地址 + 标题）；
 /// - `mini != null` 且窗口已开 ⇒ 只更新标题/地址（切台）；
 /// - `mini == null` 且窗口已开 ⇒ `closeLiveWindow`。
+///
+/// ⚠️ 旧实现在 `mini == null` 分支里**直接 return**（理由是「退出直播间不该关小窗」），
+/// 于是一旦小窗打开过，`miniPlayer` 被清空也不会关窗：
+///   · 回到直播间 ⇒ 小窗还在（用户实报「回到直播间小窗应该消失」）；
+///   · 用户点小窗的关闭键 ⇒ 窗口没了但本地 `_open` 永远是 true ⇒ 之后再也不会重开。
+/// 现在关闭的**唯一判据**就是投影为空，谁清投影谁负责（会话层写投影、壳层关窗）；
+/// 「退出直播间要留着小窗」由会话层**不清投影**表达（见 `detachView`）。
 ///
 /// 原生侧「用户关掉小窗」会回 `onLiveWindowClosed` ⇒ 清掉本地认知，
 /// 下一次 `miniPlayer` 变化还能重开（不会「关一次就再也不出现」）。
@@ -917,6 +962,7 @@ class _LiveMiniPlayerHost extends StatefulWidget {
   /// 点小窗主体 → 回直播间（由原生侧 `activateMain` 触发）。
   final VoidCallback onOpenRoom;
 
+
   @override
   State<_LiveMiniPlayerHost> createState() => _LiveMiniPlayerHostState();
 }
@@ -928,6 +974,17 @@ class _LiveMiniPlayerHostState extends State<_LiveMiniPlayerHost> {
   /// 正在打开 / 关闭中（防重入：`show` 会建第二个 engine，很慢）。
   bool _busy = false;
 
+  /// 通道调用期间又有新的 `mini` 变化 ⇒ 结束后必须再同步一次。
+  bool _pendingSync = false;
+
+  /// 上一次看到的 `mini`（判「投影是不是刚变空」）。
+  ///
+  /// 为什么不用 `_open` 判：**切后台那条路径**的窗口是会话层直接开的
+  /// （主引擎进后台后不再出帧，本件的 `_sync` 根本不会被调到），所以 `_open`
+  /// 一直是 false。若关闭分支只认 `_open`，「回到直播间」就关不掉那个窗口。
+  /// 判据改成「投影刚从有变无」⇒ 不管窗口是谁开的，都得关。
+  bool _hadMini = false;
+
   /// 上一次成功打开时的频道 id / 播放地址（切台或换地址才需要重开窗口）。
   String? _openedChannelId;
   String? _openedUrl;
@@ -935,14 +992,17 @@ class _LiveMiniPlayerHostState extends State<_LiveMiniPlayerHost> {
   /// 原生事件订阅（`liveWindowClosed`）。
   StreamSubscription<AylaDetachedLiveEvent>? _events;
 
+
   @override
   void initState() {
     super.initState();
     _events = AylaDetachedLiveEvents.instance.stream.listen(
       (AylaDetachedLiveEvent e) {
         if (e.kind != AylaDetachedLiveEventKind.liveWindowClosed) return;
-        // 用户关掉了窗口外小窗 ⇒ 清本地认知。**不销毁会话**：会话归
-        // `live_support.dart` 管（它自己也收到这条事件去重新接管画面）。
+        // 窗口真的没了（用户点关闭键 / Dart 主动关 / Activity 销毁）⇒ 清本地认知。
+        // **不销毁会话**：那是会话层的事（`live_support.dart` 自己也收这条事件）。
+        // 起点很关键：不清 `_open`，下一次 `mini != null` 会被去重判成「已打开」，
+        // 小窗从此再也开不出来。
         _open = false;
         _openedChannelId = null;
         _openedUrl = null;
@@ -962,17 +1022,33 @@ class _LiveMiniPlayerHostState extends State<_LiveMiniPlayerHost> {
 
   /// 把「该不该有窗口外小窗」同步给原生（幂等；只在真的变化时才发通道调用）。
   Future<void> _sync() async {
-    if (_busy) return;
-    final AylaLiveMiniPlayerState? mini = widget.mini;
+    final AylaLiveMiniPlayerState? current = widget.mini;
+    final bool miniJustCleared = _hadMini && current == null;
+    _hadMini = current != null;
+    if (_busy) {
+      // 通道调用进行中（开窗要建第二引擎，很慢）。此刻新的状态不能丢：
+      // 记一笔，等本次结束再同步一次。漏了这一步，「开窗过程中用户已经回到
+      // 直播间」这种快速往返会把小窗留在屏幕上（谁都不会再触发一次关闭）。
+      _pendingSync = true;
+      return;
+    }
+    final AylaLiveMiniPlayerState? mini = current;
     if (mini == null) {
-      // ⚠️ 会话结束（用户退出直播间 / 返回列表）**不关闭**窗口外小窗。
+      // 投影为空 ⇒ 窗口必须关掉（见类注释「同步语义」）。
       //
-      // 用户定稿：「应用内退出直播间不应该退出小窗」，小窗要一直播到用户
-      // 亲自点它的关闭键为止。这里曾经无条件 `aylaCloseDetachedLive()`，
-      // 于是每次退出直播间小窗就跟着消失。
-      //
-      // 真正的关闭时机只有两个：用户在**小窗里**点关闭键（原生发
-      // `liveWindowClosed` 事件，见 initState 的订阅）、或宿主窗口被销毁。
+      // 「退出直播间仍然要留着小窗」不靠这里兜：那条路径下会话**不清投影**
+      // （`AylaLiveRoomSession.detachView` 进小窗时 miniPlayer 一直非空）。
+      // 会走到这里的情形只有：回到直播间（`start()` 清投影）、用户点小窗
+      // 关闭键、直播结束、App 回前台撤掉自动弹出的那个小窗。
+      if (!_open && !miniJustCleared) return;
+      _busy = true;
+      await aylaCloseDetachedLive();
+      _busy = false;
+      if (!mounted) return;
+      _open = false;
+      _openedChannelId = null;
+      _openedUrl = null;
+      _drainPendingSync();
       return;
     }
     // 平台不支持（iOS / Web / 原生未实现）：明确降级 —— 应用内不再有浮层，
@@ -994,6 +1070,17 @@ class _LiveMiniPlayerHostState extends State<_LiveMiniPlayerHost> {
     _open = ok;
     _openedChannelId = ok ? channelId : null;
     _openedUrl = ok ? url : null;
+    _drainPendingSync();
+  }
+
+  /// 通道空闲后补一次同步（见 [_pendingSync]）。
+  void _drainPendingSync() {
+    if (!_pendingSync) return;
+    _pendingSync = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_sync());
+    });
   }
 
   @override

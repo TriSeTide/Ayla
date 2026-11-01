@@ -39,9 +39,15 @@ import kotlin.math.roundToInt
  * 而公开 API 里没有「非矩形热区」（`TOUCHABLE_INSETS_REGION` 是 @hide）。
  * ⇒ 窗口必须**刚好包住卡片**（含关闭键的 10dp 外溢），否则会吞掉桌面触摸。
  *
- * ## 几何约定（与 Dart 侧 `AylaLiveMiniPlayer.compact` 逐条对应）
- * 窗口 = (卡片宽 + [CLOSE_INSET_DP]) × (卡片高 + [CLOSE_INSET_DP])：
- * 卡片画在 `(0, CLOSE_INSET_DP)`，右上角外侧的关闭键正好落在多出来的那条边距里。
+ * ## 几何约定（与 Dart 侧 `_AylaAndroidLiveMiniWindowAppState.build` 逐条对应）
+ * 窗口 = (卡片宽 + **2×**[CLOSE_INSET_DP]) × (卡片高 + **2×**[CLOSE_INSET_DP])。
+ *
+ * 关闭键用 `Positioned(top: -CLOSE_INSET_DP, right: -CLOSE_INSET_DP)` 画在卡片
+ * **右上角外侧**（用户要求「不许把按钮移进卡片内部」），它在窗口坐标系里占
+ * `y ∈ [0, 24]`、`x ∈ [w-24, w]`（24 = 按钮直径）。旧实现窗口高度只加了**一侧**
+ * 的 CLOSE_INSET，卡片又画在 (0,0) ⇒ 按钮上半部分落在窗口外、被 WM 裁掉
+ * （用户实报「关闭键上半部分被裁断」）。四边各留 [CLOSE_INSET_DP]，卡片画在
+ * `(CLOSE_INSET_DP, CLOSE_INSET_DP)`，按钮整圆就完整落在窗口里。
  *
  * ## 交互分工
  * - **拖动 / 双指缩放由原生负责**（窗口尺寸就是几何，Dart 侧改不了窗口）；
@@ -52,9 +58,14 @@ import kotlin.math.roundToInt
  */
 class AylaLiveMiniWindowHost(
     private val context: Context,
-    /** 点画面 ⇒ 回直播间（原生负责拉前台 + 通知主引擎导航）。 */
+    /**
+     * 点画面 ⇒ 回直播间（原生负责拉前台 + 通知主引擎）。
+     *
+     * 「屏幕上本来就在这个直播间 ⇒ 只取消小窗、不再 push 路由」这条判定放在
+     * Dart 侧（`AppShell` 拿得到当前 pathname），原生只负责把意图送回去。
+     */
     private val onOpenRoom: (channelId: String) -> Unit,
-    /** 点关闭键 / 直播结束 ⇒ 关窗（不通知主引擎，Dart 侧自己知道的路径不回调）。 */
+    /** 窗口真的没了（用户点关闭键 / Dart 主动关 / Activity 销毁）⇒ 告诉主引擎。 */
     private val onClosed: () -> Unit,
 ) {
     private var windowManager: WindowManager? = null
@@ -72,8 +83,14 @@ class AylaLiveMiniWindowHost(
     /** 第一帧已出。 */
     private var ready = false
 
-    /** 卡片逻辑宽度（dp；高度按 16:9）。 */
-    private var cardWidthDp = DEFAULT_WIDTH_DP
+    /**
+     * 卡片逻辑宽度（dp；高度按 16:9）。
+     *
+     * ⚠️ 这里保留 **Float**，不再取整成 Int：捏合过程中每帧都 `roundToInt()` 会在
+     * 慢速捏合时产生明显锯齿（用户实报「缩放有点不跟手、很抖」）。像素级取整
+     * 交给 `dp()` 在下发窗口尺寸那一刻做，手势过程中用浮点累积才不会抖动。
+     */
+    private var cardWidthDp = DEFAULT_WIDTH_DP.toFloat()
 
     private var dragging = false
     private var dragStartRawX = 0f
@@ -83,7 +100,7 @@ class AylaLiveMiniWindowHost(
 
     /** 双指缩放会话。 */
     private var scaleStartSpan = 0f
-    private var scaleStartWidthDp = 0
+    private var scaleStartWidthDp = 0f
 
     val isShowing: Boolean
         get() = flutterView != null
@@ -125,7 +142,7 @@ class AylaLiveMiniWindowHost(
             true
         } catch (error: Exception) {
             Log.w(TAG, "show live mini failed: ${error.message}", error)
-            hide(notify = false)
+            hide()
             false
         }
     }
@@ -139,8 +156,18 @@ class AylaLiveMiniWindowHost(
         return true
     }
 
-    /** 关闭（幂等）。[notify] = 是否回调 [onClosed]（Dart 自己要求的关闭不回调）。 */
-    fun hide(notify: Boolean) {
+    /**
+     * 关闭（幂等）。
+     *
+     * [notify] 参数保留为兼容签名，但**不再有「静默关闭」这条路径**：无论谁发起的
+     * 关闭，都必须让主引擎知道「窗口已经没了」—— 否则 Dart 侧 `miniPlayer` 投影
+     * 还停在「有小窗」，而窗口其实已经消失，下一次同步会被去重逻辑判成「已打开」
+     * ⇒ **小窗再也打不开**（关一次就永久失效）。
+     *
+     * 主引擎据此做的只是「清掉小窗投影」，不销毁会话：用户点关闭键的语义是
+     * 「不要这个小窗了」，不是「退出直播间」。
+     */
+    fun hide(notify: Boolean = true) {
         val view = flutterView
         val wm = windowManager
         flutterView = null
@@ -169,7 +196,7 @@ class AylaLiveMiniWindowHost(
         } catch (error: Exception) {
             Log.w(TAG, "stop service failed: ${error.message}")
         }
-        if (notify) onClosed()
+        onClosed()
     }
 
     fun canDrawOverlays(): Boolean =
@@ -191,8 +218,10 @@ class AylaLiveMiniWindowHost(
     private fun rebuildWindow() {
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
         val flutter = engine ?: return
-        val widthPx = dp(cardWidthDp + CLOSE_INSET_DP)
-        val heightPx = dp((cardWidthDp * 9 / 16) + CLOSE_INSET_DP)
+        // 关闭键画在卡片**外侧**（top/right 各 -CLOSE_INSET），所以窗口四边都要
+        // 留出 CLOSE_INSET 的余量，否则它上半部分会被窗口裁掉（用户实报）。
+        val widthPx = dp(cardWidthDp + CLOSE_INSET_DP * 2)
+        val heightPx = dp((cardWidthDp * 9f / 16f) + CLOSE_INSET_DP * 2)
 
         val old = flutterView
         if (old != null) {
@@ -232,27 +261,45 @@ class AylaLiveMiniWindowHost(
         }
     }
 
-    /** 只改宽高（不重建 View）。缩放过程中用它，避免每帧重建 FlutterView。 */
+    /**
+     * 按 [cardWidthDp] 改窗口宽高（不重建 View）。
+     *
+     * 调用点：捏合**结束**（[endGestureResize]）、以及任何需要把窗口收敛到
+     * 卡片真实尺寸的场合。捏合过程中**不**调用它（见 [beginGestureResize]）。
+     */
     private fun resizeInPlace() {
         val wm = windowManager ?: return
         val view = flutterView ?: return
         val layout = params ?: return
-        val widthPx = dp(cardWidthDp + CLOSE_INSET_DP)
-        val heightPx = dp((cardWidthDp * 9 / 16) + CLOSE_INSET_DP)
+        // 关闭键画在卡片**外侧**（top/right 各 -CLOSE_INSET），所以窗口四边都要
+        // 留出 CLOSE_INSET 的余量，否则它上半部分会被窗口裁掉（用户实报）。
+        val widthPx = dp(cardWidthDp + CLOSE_INSET_DP * 2)
+        val heightPx = dp((cardWidthDp * 9f / 16f) + CLOSE_INSET_DP * 2)
         if (layout.width == widthPx && layout.height == heightPx) return
+        // **中心锚定**（用户定稿「不要以右下角为准缩放，以中心为准」）：
+        // 窗口收回卡片尺寸时保持中心不动，卡片视觉上原地收缩/长大。
+        val centerX = layout.x + layout.width / 2
+        val centerY = layout.y + layout.height / 2
         layout.width = widthPx
         layout.height = heightPx
-        // 右下锚定：缩放时左上角跟着移动，视觉上像从右下角长出来。
-        layout.x = (layout.x + (layout.width - widthPx)).let { layout.x }
+        layout.x = (centerX - widthPx / 2).coerceIn(0, (screenWidth() - widthPx).coerceAtLeast(0))
+        layout.y = (centerY - heightPx / 2).coerceIn(0, (screenHeight() - heightPx).coerceAtLeast(0))
         try {
             wm.updateViewLayout(view, layout)
         } catch (error: Exception) {
             Log.w(TAG, "resize failed: ${error.message}")
         }
+        // 窗口尺寸是权威值 ⇒ 立刻告诉 Dart，卡片按它对齐（捏合结束后清掉临时宽度）。
         pushSize()
     }
 
-    /** 把「卡片可用区」报给 Dart（窗口减去关闭键外溢）。 */
+    /**
+     * 把**窗口尺寸**报给 Dart。
+     *
+     * 约定（与 Dart 侧 `_AylaAndroidLiveMiniWindowAppState.build` 配对）：
+     * 窗口 = 卡片 + 四边各 [CLOSE_INSET_DP]。Dart 收到窗口尺寸后减去 2×inset
+     * 得到卡片尺寸。两边必须遵守同一约定，否则卡片会缩水成窗口的一半不到。
+     */
     private fun pushSize() {
         val layout = params ?: return
         if (!ready) return
@@ -270,11 +317,75 @@ class AylaLiveMiniWindowHost(
         }
     }
 
+    /** 捏合手势进行中（窗口已一次性让位到最大档，卡片缩放由 Dart 驱动）。 */
+    private var gestureResizing = false
+
+    /**
+     * 捏合开始：**一次性**把窗口让位到最大档（[MAX_WIDTH_DP]）。
+     *
+     * ## 为什么不再每帧改窗口（2026-11-01 用户实报「缩放还是好抖」）
+     * 每帧 `updateViewLayout` ⇒ FlutterView 的 surface 每帧都变尺寸 ⇒ Flutter
+     * 每帧重新光栅化，而窗口尺寸永远领先画面一帧 —— 用户看到的就是
+     * 「先改窗口、直播画面再追上来同步比例」。
+     *
+     * 新分工：窗口在手势开始**一次性**让到最大档（全程只有这一次重排，且窗口
+     * 透明、多出来的部分不可见）；之后每一帧由 Dart 侧按手势比例缩放卡片
+     * （通道 `gestureScale`，与 App 内小窗捏合同一条渲染管线，同帧出图）；
+     * 手势结束窗口再**一次性**收到最终尺寸。整个手势 = 2 次窗口重排，
+     * 中间全部是 Dart 帧内缩放，不再有「窗口领先画面」的追赶。
+     *
+     * 锚点：**卡片中心**（用户定稿「不要以右下角为准缩放，以中心为准」）。
+     * 让位时保持卡片中心点不动、窗口向四周均匀扩展，Dart 侧把卡片画在窗口正中
+     * （`(win - size) / 2`）⇒ 放大缩小时视觉中心不漂。
+     */
+    private fun beginGestureResize() {
+        if (gestureResizing) return
+        val layout = params ?: return
+        val view = flutterView ?: return
+        gestureResizing = true
+        val maxW = dp(MAX_WIDTH_DP + CLOSE_INSET_DP * 2)
+        val maxH = dp((MAX_WIDTH_DP * 9f / 16f) + CLOSE_INSET_DP * 2)
+        if (layout.width >= maxW && layout.height >= maxH) return
+        // 卡片中心 = 窗口中心（卡片在窗口里居中，四边余量对称）。
+        val centerX = layout.x + layout.width / 2
+        val centerY = layout.y + layout.height / 2
+        layout.width = maxW
+        layout.height = maxH
+        // 让位后卡片仍居中 ⇒ 窗口左上角 = 中心 - 窗口/2（clamp 回屏幕内）。
+        layout.x = (centerX - maxW / 2).coerceIn(0, (screenWidth() - maxW).coerceAtLeast(0))
+        layout.y = (centerY - maxH / 2).coerceIn(0, (screenHeight() - maxH).coerceAtLeast(0))
+        // 卡片中心随窗口 clamp 一起平移（Dart 侧按窗口居中算，不需要额外传参）。
+        try {
+            wm()?.updateViewLayout(view, layout)
+        } catch (error: Exception) {
+            Log.w(TAG, "gesture begin resize failed: ${error.message}")
+        }
+        pushSize()
+    }
+
+    /**
+     * 捏合结束：窗口**立刻**收回卡片大小（一次重排），Dart 侧由 `size` 消息对齐。
+     *
+     * ⚠️ 必须在这里就收回，不能等 Dart：overlay 窗口的尺寸就是**触摸热区**，
+     * 让位期间多出来的那圈会吞掉桌面触摸（用户在小窗旁边点桌面没反应）。
+     */
+    private fun endGestureResize() {
+        if (!gestureResizing) return
+        gestureResizing = false
+        resizeInPlace()
+    }
+
+    private fun wm(): WindowManager? =
+        context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+
     /**
      * 触摸：**只旁听**，从不消费（全部返回 false）。
      *
      * - 单指竖直/水平位移超 slop ⇒ 移动窗口（拖动）；
-     * - 两指 ⇒ 按指距比例改窗口宽度（16:9 等比，168..900dp）；
+     * - 两指 ⇒ 捏合缩放（16:9 等比，120..320dp）。分工：窗口只在**手势开始**
+     *   一次性让到最大档、**结束**一次性收回卡片尺寸（两次重排），中间每一帧
+     *   只把目标宽度推给 Dart（`gestureScale`）由卡片在帧内缩放 —— 这样不再有
+     *   「窗口先变、画面追一帧」的抖动；
      * - 与悬浮球同一纪律：**绝不发 ACTION_CANCEL**，否则 Flutter 的点击会被打断
      *   （悬浮球上一版「点把手不收起」就是这么来的）。
      */
@@ -298,6 +409,8 @@ class AylaLiveMiniWindowHost(
                     if (event.pointerCount == 2) {
                         scaleStartSpan = span(event)
                         scaleStartWidthDp = cardWidthDp
+                        // 捏合开始：窗口一次性让位到最大档，之后由 Dart 帧内缩放。
+                        beginGestureResize()
                     }
                     false
                 }
@@ -305,12 +418,14 @@ class AylaLiveMiniWindowHost(
                     if (event.pointerCount >= 2) {
                         if (scaleStartSpan <= 0f) return@setOnTouchListener false
                         val ratio = span(event) / scaleStartSpan
+                        // 窗口已在 [beginGestureResize] 一次性让到最大档 ⇒ 这里**不再
+                        // 动窗口**，只把目标宽度推给 Dart：卡片在帧内缩放（同一条渲染
+                        // 管线出图），不会出现「窗口先变、画面再追」。
                         val next = (scaleStartWidthDp * ratio)
-                            .roundToInt()
-                            .coerceIn(MIN_WIDTH_DP, MAX_WIDTH_DP)
-                        if (next != cardWidthDp) {
+                            .coerceIn(MIN_WIDTH_DP.toFloat(), MAX_WIDTH_DP.toFloat())
+                        if (abs(next - cardWidthDp) >= SCALE_EPSILON_DP) {
                             cardWidthDp = next
-                            resizeInPlace()
+                            channel?.invokeMethod("gestureScale", next)
                         }
                         return@setOnTouchListener false
                     }
@@ -345,6 +460,13 @@ class AylaLiveMiniWindowHost(
                     }
                     if (event.actionMasked != MotionEvent.ACTION_POINTER_UP) {
                         scaleStartSpan = 0f
+                    }
+                    // 所有手指都离场 ⇒ 捏合结束：窗口一次性收到最终尺寸，Dart 侧再由
+                    // `size` 消息把卡片对齐到同一档（见 [endGestureResize]）。
+                    if (event.actionMasked == MotionEvent.ACTION_UP ||
+                        event.actionMasked == MotionEvent.ACTION_CANCEL
+                    ) {
+                        endGestureResize()
                     }
                     false
                 }
@@ -410,11 +532,13 @@ class AylaLiveMiniWindowHost(
                     result.success(true)
                 }
                 "openRoom" -> {
-                    mainHandler.post { onOpenRoom(channelId) }
+                    val target = channelId
+                    mainHandler.post { onOpenRoom(target) }
                     result.success(true)
                 }
                 "close" -> {
-                    mainHandler.post { hide(notify = false) }
+                    // 用户点关闭键：关窗 + 让主引擎清掉小窗投影（见 hide 的说明）。
+                    mainHandler.post { hide() }
                     result.success(true)
                 }
                 else -> result.notImplemented()
@@ -447,18 +571,42 @@ class AylaLiveMiniWindowHost(
         /** 关闭键相对卡片右上角的**外溢**（= Dart 的 `kLiveCloseInset`）。 */
         const val CLOSE_INSET_DP = 10
 
-        /** 默认卡片宽度（逻辑 dp；用户要求 400×225）。 */
-        const val DEFAULT_WIDTH_DP = 400
+        /**
+         * 默认卡片宽度 = **设计尺寸 168dp**（web `live.css:1026`，与 App 内小窗一致）。
+         *
+         * 曾经是 400（电脑端值）：Windows 125% 缩放下 168 只有 210 物理像素、画面太糊，
+         * 桌面才把它抬上去（commit `5f1a5b4`）。手机不需要那档大尺寸 ——
+         * 用户实报「小窗在手机上太大了，手机上应该还原成没有加大过的那个样子」。
+         */
+        const val DEFAULT_WIDTH_DP = 168
 
-        /** 双指缩放范围（用户：168×94 ~ 900×506）。 */
-        const val MIN_WIDTH_DP = 168
-        const val MAX_WIDTH_DP = 900
+        /**
+         * 双指缩放范围：**120..320**（高按 16:9）。
+         *
+         * 上限 320 = web `LiveMiniPlayer.tsx:32–33` 的手机原值，与 Dart 侧
+         * `kLiveMiniMaxWidth` 逐字一致。
+         *
+         * ⚠️ 这里曾是 900（跟着电脑端一起抬的）：手机屏宽只有 360dp 左右，
+         * 900dp 的卡片等于铺满整屏，用户实报「缩放肯定不能缩放到这——么——大」。
+         * 电脑端那档 900 在 Dart 侧 `kLiveMiniDesktopMaxWidth`，走独立窗口实现，
+         * 与本文件（Android 叠加层）无关。
+         */
+        const val MIN_WIDTH_DP = 120
+        const val MAX_WIDTH_DP = 320
 
         /** 距屏幕右下角的初始留白。 */
         const val MARGIN_DP = 12
 
         /** 判定为拖动的最小位移（dp）。 */
         const val DRAG_SLOP_DP = 8
+
+        /**
+         * 捏合时触发一次窗口改尺寸所需的最小宽度变化（dp）。
+         *
+         * 0.5dp ≈ 1.5 物理像素（480dpi）—— 比这更小的变化用户看不出，
+         * 但每帧都 `updateViewLayout` 会让 SurfaceFlinger 反复重排，肉眼是「抖」。
+         */
+        const val SCALE_EPSILON_DP = 0.5f
 
         private val mainHandler = Handler(Looper.getMainLooper())
     }

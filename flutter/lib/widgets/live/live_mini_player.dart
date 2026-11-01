@@ -22,6 +22,8 @@ library;
 
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart'
     show
@@ -52,17 +54,50 @@ const double kLiveCloseInset = 10;
 const double kLiveMiniWidth = 168;
 const double kLiveMiniHeight = 94;
 
-/// 双指缩放范围（tsx 32–33：宽 120–320，高按 16:9）。
+/// 双指缩放范围（tsx 32–33：宽 **120–320**，高按 16:9）—— **手机端**。
 /// 缩放下限 = 设计尺寸的 120（web 原值）。
 ///
 /// ⚠️ App 内的默认尺寸就是 kLiveMiniWidth(168)，下限若也等于它，捏合收拢会
 /// 完全没有变化（测试「收拢手指 ⇒ 变小」会失败，真实体验也是「缩不小」）。
 /// 「窗口外浮层最小 168」由浮层自己传 initialSize 保证，不靠改这个常量。
 const double kLiveMiniMinWidth = 120;
-const double kLiveMiniMaxWidth = 900;
 
-/// 窗口外浮层的**默认**宽度：设计尺寸偏小，浮层场景给大一点（16:9 等比）。
-const double kLiveDetachedMiniDefaultWidth = 400.0;
+/// 手机端缩放**上限** = 320（web `LiveMiniPlayer.tsx:32–33` 原值）。
+///
+/// ## 为什么不是 900（2026-11-01 用户实报「缩放肯定不能缩放到这——么——大」）
+/// `900` 是**电脑端**为「画面太糊」加的：Windows 125% 缩放下 168 只有 210 物理像素，
+/// 400 起步才够看（commit `5f1a5b4` 的正文逐条写了这件事）。
+/// 那次改动把上限从我这里共用的一份常量一起抬到 900，于是手机也跟着能捏到 900dp
+/// —— 在 1080px 宽的手机上等于把直播铺满整个屏幕，用户判定明显过大。
+/// ⇒ 上限改回**按平台分开**：手机 = 本常量（320，设计原值），
+/// 桌面 = [kLiveMiniDesktopMaxWidth]。
+const double kLiveMiniMaxWidth = 320;
+
+/// **电脑端**缩放上限（900dp）。Windows 上小窗是独立铺满工作区的窗口、
+/// 画面要够清楚，所以上限比手机大一档（见 [kLiveMiniMaxWidth] 的沿革）。
+const double kLiveMiniDesktopMaxWidth = 900;
+
+/// 当前平台是否该用**桌面**那档缩放上限。
+///
+/// 判据 = 「窗口外小窗铺满整个工作区、自己管理窗口」的桌面实现
+/// （`windows/runner/live_window.cpp` + `live_window_surface.dart`）。
+/// 手机（Android）的窗口外小窗是「窗口 = 卡片」的叠加层，不需要那档大尺寸。
+bool get aylaLiveMiniUsesDesktopLimits =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+/// 当前平台应采用的缩放上限（手机 320 / 桌面 900）。
+///
+/// 组件内部的捏合、边缘拖拽、滚轮三条路径都用它，保证三种手势的上限一致。
+double aylaLiveMiniMaxWidthFor() =>
+    aylaLiveMiniUsesDesktopLimits ? kLiveMiniDesktopMaxWidth : kLiveMiniMaxWidth;
+
+/// 窗口外浮层的**默认**宽度：手机端 = 设计尺寸（168×94，与 App 内完全一致）。
+///
+/// 用户实报「小窗在手机上太大了，手机上应该还原成没有加大过的那个样子」——
+/// 这条常量（以及原生 `DEFAULT_WIDTH_DP`）都曾是 400（电脑端值）。
+/// 400 是桌面上「168 显得太小」的补偿，手机上必须回到设计尺寸。
+/// 需要更大时用户自己双指捏合（手机上限 320，见 [kLiveMiniMaxWidth]）。
+const double kLiveDetachedMiniDefaultWidth = kLiveMiniWidth;
 
 /// 手机端浮动小窗（`LiveMiniPlayer.tsx`）。
 ///
@@ -168,14 +203,31 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
   @override
   void initState() {
     super.initState();
+    _applyInitialSize();
+  }
+
+  /// 把 [AylaLiveMiniPlayer.initialSize] 收进 [_size]（clamp 到当前平台的缩放范围）。
+  void _applyInitialSize() {
     final Size? initial = widget.initialSize;
-    if (initial != null && initial.width > 0) {
-      final double w = initial.width.clamp(
-        kLiveMiniMinWidth,
-        kLiveMiniMaxWidth,
-      );
-      _size = Size(w, w * 9 / 16);
-    }
+    if (initial == null || initial.width <= 0) return;
+    final double w = initial.width.clamp(
+      kLiveMiniMinWidth,
+      aylaLiveMiniMaxWidthFor(),
+    );
+    _size = Size(w, w * 9 / 16);
+  }
+
+  /// 宿主窗口尺寸变了（Android 叠加层：窗口 = 卡片，捏合由原生改窗口）。
+  ///
+  /// ⚠️ 少了这一步，原生把窗口缩小后卡片仍按**旧尺寸**画（`_size` 只在
+  /// `initState` 读一次）⇒ 画面被压在窗口里、圆角与关闭键位置全错，
+  /// 用户看到的就是「窗口在缩、画面没跟着缩」（缩放不跟手的另一半根因）。
+  @override
+  void didUpdateWidget(covariant AylaLiveMiniPlayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.fixedPosition == null) return;
+    if (widget.initialSize == oldWidget.initialSize) return;
+    _applyInitialSize();
   }
 
   /// 拖动会话（tsx 52–59）。
@@ -301,7 +353,7 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
       // 等比 16:9：宽高同时变，所以宽度增量取位移的 2 倍才跟手。
       final double w = (_edgeResizeBase.width + grow * 2).clamp(
         kLiveMiniMinWidth,
-        kLiveMiniMaxWidth,
+        aylaLiveMiniMaxWidthFor(),
       );
       if ((w - _size.width).abs() < 0.5) return;
       final double h = w * 9 / 16;
@@ -340,7 +392,7 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
       final double scale = rawScale.isFinite && rawScale > 0 ? rawScale : 1;
       final double w = (base.width * scale).clamp(
         kLiveMiniMinWidth,
-        kLiveMiniMaxWidth,
+        aylaLiveMiniMaxWidthFor(),
       );
       final double h = (w * 9 / 16);
       setState(() {
@@ -437,7 +489,7 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
                 final double step = delta > 0 ? 0.92 : 1.08;
                 final double next = (_size.width * step).clamp(
                   kLiveMiniMinWidth,
-                  kLiveMiniMaxWidth,
+                  aylaLiveMiniMaxWidthFor(),
                 );
                 if (next == _size.width) return;
                 // 以右下角为锚点缩放（与捏合手势一致，避免窗口边缘跳动）。

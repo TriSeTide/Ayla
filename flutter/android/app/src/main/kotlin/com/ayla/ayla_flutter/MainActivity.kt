@@ -22,6 +22,9 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.util.Rational
+import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -74,6 +77,18 @@ class MainActivity : FlutterActivity() {
 
     /** 直播「脱离应用」（Android PiP）通道名 —— 与 Dart 侧 `kAylaPipChannel` 逐字一致。 */
     private val livePipChannelName = "ayla/live_pip"
+
+    /** 系统栏沉浸式通道名 —— 与 Dart 侧 `kAylaSystemUiChannel` 逐字一致。 */
+    private val systemUiChannelName = "ayla/system_ui"
+
+    /**
+     * 当前是否处于沉浸式（系统栏隐藏）。
+     *
+     * 必须记住它并在 [onWindowFocusChanged] 里**重放**：窗口失焦再回来时系统会把
+     * 系统栏恢复出来（Android 的既定行为），不重放就会出现「全屏中切一下后台
+     * 回来状态栏又冒出来」。
+     */
+    private var systemUiImmersive = false
 
     /** PiP 通道句柄（回调 `onPipChanged` / `onBallTap` 用）。 */
     private var livePipChannel: MethodChannel? = null
@@ -145,6 +160,36 @@ class MainActivity : FlutterActivity() {
                             result.success(readMediaModeState())
                         } catch (error: Exception) {
                             result.error("audio_route_failed", error.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        // ===== 系统栏沉浸式（直播全屏时隐藏状态栏/导航栏）=====
+        // 契约见 Dart 侧 lib/core/platform/system_ui.dart（**唯一** Dart↔原生契约）。
+        //
+        // ## 为什么必须有这条通道（不能只靠 Flutter 的 SystemChrome）
+        // 本工程 targetSdk = 36（Android 16，Flutter 3.47 的默认 targetSdkVersion）。
+        // 在该 target 下，Flutter 引擎的 `setSystemChromeEnabledSystemUIMode` 对
+        // leanBack / immersive / immersiveSticky **只设 legacy flags 并调
+        // View.setSystemUiVisibility**（反编译 flutter.jar 的 PlatformPlugin 可复核），
+        // 而 Android 16 已让 `View.setSystemUiVisibility` 与 SYSTEM_UI_FLAG_* 失效
+        // ⇒ 只能由原生走 **WindowInsetsController**（API 30+）/ View 标志位（24–29）。
+        //
+        // 只改「系统栏可见性」，不碰音频、不碰窗口尺寸、不参与任何内容或认知判断。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, systemUiChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "setImmersive" -> {
+                        try {
+                            result.success(
+                                setLiveFullscreenImmersive(
+                                    call.argument<Boolean>("enabled") == true,
+                                ),
+                            )
+                        } catch (error: Exception) {
+                            Log.w(TAG, "setImmersive failed: ${error.message}", error)
+                            result.error("system_ui_failed", error.message, null)
                         }
                     }
                     else -> result.notImplemented()
@@ -627,9 +672,86 @@ class MainActivity : FlutterActivity() {
 
 
 
+    /**
+     * 隐藏 / 恢复系统栏（状态栏 + 导航栏）。
+     *
+     * ## 为什么两条分支（API 30 分水岭）
+     * - **API 30+**：`WindowInsetsController.hide(WindowInsets.Type.systemBars())` 是
+     *   唯一仍生效的官方 API（Android 16 / target 36 下 legacy `SYSTEM_UI_FLAG_*` 失效）；
+     *   用 `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE` 表达「沉浸式粘性」——从边缘滑出
+     *   系统栏后它会自动消失，不把画面挤走。
+     * - **API 24–29**：`View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY` 仍是正解（与 web 全屏等价）。
+     *
+     * ⚠️ 恢复时**不要**顺手改布局标志（LAYOUT_FULLSCREEN 等）：Flutter 的 edge-to-edge
+     * 由引擎自己维护，这里多改一位就可能让 insets 报错、页面顶部留白错乱。
+     *
+     * @return true = 已应用（Dart 侧不据此做分支，仅便于排障）。
+     */
+    // ⚠️ 名字不能叫 `setImmersive`：Activity 自 API 30 起有同签名成员
+    // （`Activity.setImmersive(boolean)`），Kotlin 会报
+    // "hides member of supertype 'Activity' and needs an 'override' modifier"。
+    private fun setLiveFullscreenImmersive(enabled: Boolean): Boolean {
+        systemUiImmersive = enabled
+        return applyImmersive(enabled)
+    }
+
+    /** 真正下发系统栏可见性（[setLiveFullscreenImmersive] 与各生命周期重放共用）。 */
+    private fun applyImmersive(enabled: Boolean): Boolean {
+        val window = window ?: return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val controller = window.insetsController ?: return false
+            if (enabled) {
+                controller.systemBarsBehavior =
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsets.Type.systemBars())
+            } else {
+                controller.show(WindowInsets.Type.systemBars())
+            }
+            return true
+        }
+        @Suppress("DEPRECATION")
+        val flags = if (enabled) {
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_FULLSCREEN
+        } else {
+            0
+        }
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = flags
+        return true
+    }
+
     override fun onResume() {
         super.onResume()
         activityResumed = true
+        // 从后台回来时系统会把系统栏放出来 ⇒ 若仍在沉浸式，重放一次。
+        if (systemUiImmersive) applyImmersive(true)
+    }
+
+    /**
+     * 窗口重新获得焦点时重放沉浸式（见 [systemUiImmersive]）。
+     *
+     * 只在「已处于沉浸式」时重放，退出全屏后不再打扰系统栏。
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && systemUiImmersive) {
+            applyImmersive(true)
+        }
+    }
+
+    /**
+     * 横竖屏切换后重放沉浸式。
+     *
+     * 直播全屏的顺序是「先藏系统栏、再锁横屏」⇒ 旋转完成时系统栏有一次回弹时机，
+     * 必须在配置变更后再压一次，否则用户会看到状态栏闪回来。
+     * （Activity 声明了 `configChanges="orientation|screenSize|…"` ⇒ 不会重建，
+     *   这里收到的是同一次旋转。）
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (systemUiImmersive) applyImmersive(true)
     }
 
     override fun onPause() {

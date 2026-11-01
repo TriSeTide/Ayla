@@ -35,7 +35,12 @@ import 'package:flutter/services.dart';
 
 import '../../player/hls_player.dart';
 import '../../player/platforms/hls_platform.dart';
-import 'live_mini_player.dart' show AylaLiveMiniPlayer, kLiveCloseInset;
+import 'live_mini_player.dart'
+    show
+        AylaLiveMiniPlayer,
+        kLiveCloseInset,
+        kLiveMiniHeight,
+        kLiveMiniWidth;
 
 /// 第二引擎 ↔ 原生宿主的**私有**通道（与 `LiveMiniWindowHost.kt` 逐字一致）。
 const String kAylaAndroidLiveMiniChannel = 'ayla/live_mini_window';
@@ -74,6 +79,12 @@ class _AylaAndroidLiveMiniWindowAppState
   /// 原生给的窗口尺寸（逻辑 px）——卡片可用区 = 窗口减去关闭键外溢。
   Size _windowSize = Size.zero;
 
+  /// 捏合手势中的目标卡片宽度（dp；null = 不在捏合中，用窗口尺寸换算）。
+  ///
+  /// 捏合时窗口已一次性让到最大档，卡片按这个宽度在帧内缩放；手势结束收到新的
+  /// `size` 后清空，回到「窗口 = 卡片 + 2×inset」的常态换算。
+  double? _gestureWidthDp;
+
   @override
   void initState() {
     super.initState();
@@ -111,8 +122,21 @@ class _AylaAndroidLiveMiniWindowAppState
           final double w = (raw['width'] as num?)?.toDouble() ?? 0;
           final double h = (raw['height'] as num?)?.toDouble() ?? 0;
           if (!_disposed && w > 0 && h > 0) {
-            setState(() => _windowSize = Size(w, h));
+            setState(() {
+              _windowSize = Size(w, h);
+              // 窗口尺寸已经是权威值 ⇒ 退出「捏合中」的临时宽度。
+              _gestureWidthDp = null;
+            });
           }
+        }
+      case 'gestureScale':
+        // 捏合过程中：原生**不再改窗口**（那会让 surface 每帧重排、画面追窗口），
+        // 改为窗口一次性让到最大档，这里按手势比例在帧内缩放卡片。
+        // 卡片缩放与画面同帧出图 ⇒ 手感跟手、没有「先变窗口再追画面」。
+        final Object? rawScale = call.arguments;
+        final double? widthDp = rawScale is num ? rawScale.toDouble() : null;
+        if (!_disposed && widthDp != null && widthDp > 0) {
+          setState(() => _gestureWidthDp = widthDp);
         }
       case 'suppressTap':
         if (!_disposed) setState(() => _suppressTapTick++);
@@ -198,14 +222,21 @@ class _AylaAndroidLiveMiniWindowAppState
   @override
   Widget build(BuildContext context) {
     final Size real = MediaQuery.sizeOf(context);
-    // 窗口 = 卡片 + 关闭键外溢（右上各 kLiveCloseInset）。
-    // 卡片画在 (0, kLiveCloseInset)，于是右上角外侧的关闭键正好落在多出来的边距里。
+    // 宿主报来的是**窗口**尺寸；窗口 = 卡片 + 四边各 kLiveCloseInset（关闭键画在
+    // 卡片外侧，需要那圈余量才不会被裁）。所以卡片 = 窗口 - 2×inset，卡片画在
+    // (kLiveCloseInset, kLiveCloseInset)。
     final double winW = _windowSize.width > 0 ? _windowSize.width : real.width;
     final double winH = _windowSize.height > 0 ? _windowSize.height : real.height;
-    final double cardWidth = winW - kLiveCloseInset;
-    final double cardHeight = winH - kLiveCloseInset;
-    final double width = cardWidth > 0 ? cardWidth : 390;
-    final double height = cardHeight > 0 ? cardHeight : width * 9 / 16;
+    // 捏合中：窗口已让到最大档，卡片按手势比例在帧内缩放（见 `gestureScale`）。
+    // 非捏合：卡片 = 窗口 - 2×inset。
+    final double gestureW = _gestureWidthDp ?? 0;
+    final double cardWidth =
+        gestureW > 0 ? gestureW : winW - kLiveCloseInset * 2;
+    final double cardHeight =
+        gestureW > 0 ? gestureW * 9 / 16 : winH - kLiveCloseInset * 2;
+    // 首帧还没有 `size` 消息 ⇒ 用设计尺寸兜底（不要用视口，那会先画一个巨大窗再跳小）。
+    final double width = cardWidth > 0 ? cardWidth : kLiveMiniWidth;
+    final double height = cardHeight > 0 ? cardHeight : kLiveMiniHeight;
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -229,7 +260,16 @@ class _AylaAndroidLiveMiniWindowAppState
               AylaLiveMiniPlayer(
                 key: ValueKey<int>(_suppressTapTick),
                 // 几何归原生（窗口 = 卡片），组件只负责视觉与点击。
-                fixedPosition: Offset.zero,
+                //
+                // **缩放以卡片中心为锚点**（用户定稿）：捏合时窗口让位到最大档、
+                // 卡片始终画在窗口**正中**，于是放大/缩小时视觉中心不动，只向四周
+                // 均匀张开/收拢（与「右下角为锚点」那种往外漂的手感相反）。
+                //
+                // 非捏合时窗口正好包住卡片，居中偏移 = (窗口 - 卡片) / 2 = inset。
+                fixedPosition: Offset(
+                  gestureW > 0 ? (winW - width) / 2 : kLiveCloseInset,
+                  gestureW > 0 ? (winH - height) / 2 : kLiveCloseInset,
+                ),
                 initialSize: Size(width, height),
                 videoView: _player?.videoView,
                 channelTitle: _title ?? '直播间',
