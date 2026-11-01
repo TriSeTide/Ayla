@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -610,8 +612,21 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
       onGroupTopChanged: (double top) => unawaited(_reportGroupTop(top)),
       onHoverChanged: (bool hovering) => unawaited(_reportHover(hovering)),
       onHitRectsChanged: (List<Rect> rects) => unawaited(_reportHitRects(rects)),
-      // Android 系统叠加层的窗口尺寸 = 球组尺寸 ⇒ 走紧凑模式（见 OverlayFlutterHost.kt）。
-      compact: true,
+      // ⚠️ **必须按平台判断，不能写死 true**。
+      //
+      // 这里是 Windows 与 Android **共用**的浮层入口：
+      //   · Windows：`main.dart:464` → `_aylaOverlayWindowRoot` → 本件；
+      //   · Android：`main.dart:522` → 同一个 `_aylaOverlayWindowRoot` → 本件。
+      //
+      // 紧凑模式（`compact: true`）是**Android 专属**语义：
+      //   · 窗口尺寸 = 球组尺寸 ⇒ 组件不再画外阴影（会被窗口边界裁掉）；
+      //   · 拖动完全交给原生 `installDragHandle`，组件不改 `Positioned.top`。
+      //
+      // Windows 的浮层窗口铺满整个工作区、拖动由组件自己回传 top 驱动 —— 一旦被
+      // 强制走紧凑模式，阴影消失、拖动失灵（用户实报「整个悬浮球都出问题了」）。
+      //
+      // ⇒ Windows 必须保持 `false`（= 1.0.44 自验收以来的行为，一个字都不变）。
+      compact: !kIsWeb && defaultTargetPlatform == TargetPlatform.android,
       onCollapsedChanged: _reportCollapsed,
       suppressTapTick: _suppressTapTick,
       compactCollapseShift: _collapseShift,

@@ -91,13 +91,18 @@ bool get aylaLiveMiniUsesDesktopLimits =>
 double aylaLiveMiniMaxWidthFor() =>
     aylaLiveMiniUsesDesktopLimits ? kLiveMiniDesktopMaxWidth : kLiveMiniMaxWidth;
 
-/// 窗口外浮层的**默认**宽度：手机端 = 设计尺寸（168×94，与 App 内完全一致）。
+/// 窗口外浮层的**默认**宽度。
 ///
-/// 用户实报「小窗在手机上太大了，手机上应该还原成没有加大过的那个样子」——
-/// 这条常量（以及原生 `DEFAULT_WIDTH_DP`）都曾是 400（电脑端值）。
-/// 400 是桌面上「168 显得太小」的补偿，手机上必须回到设计尺寸。
-/// 需要更大时用户自己双指捏合（手机上限 320，见 [kLiveMiniMaxWidth]）。
-const double kLiveDetachedMiniDefaultWidth = kLiveMiniWidth;
+/// ## 两端不同，**不要统一**
+///   · **手机**：设计尺寸 168×94，与 App 内完全一致。
+///     用户实报「小窗在手机上太大了，手机上应该还原成没有加大过的那个样子」。
+///   · **电脑**：400。这是 Windows 125% 缩放下「168 只有 210 物理像素、显得太小」
+///     的补偿（commit `5f1a5b4` 定稿，用户已验收）。
+///
+/// ⚠️ 曾经把这条统一改成 168 —— 结果 Windows 小窗一并变小，用户实报
+/// 「小窗和悬浮球都不能被影响」。所以必须按平台取值。
+double get kLiveDetachedMiniDefaultWidth =>
+    aylaLiveMiniUsesDesktopLimits ? 400.0 : kLiveMiniWidth;
 
 /// 手机端浮动小窗（`LiveMiniPlayer.tsx`）。
 ///

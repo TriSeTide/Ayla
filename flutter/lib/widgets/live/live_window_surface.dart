@@ -402,8 +402,9 @@ class _AylaDetachedMiniPlayerHostState
             AylaLiveMiniPlayer(
               cardKey: _cardKey,
               closeButtonKey: _closeKey,
-              // 浮层场景用更大的默认尺寸（168×94 在桌面上偏小）。
-              initialSize: const Size(
+              // 浮层默认尺寸按平台取值：手机 168×94（设计尺寸）/ 电脑 400×225。
+              // 不能写 const —— 该 getter 依赖运行时平台判断。
+              initialSize: Size(
                 kLiveDetachedMiniDefaultWidth,
                 kLiveDetachedMiniDefaultWidth * 9 / 16,
               ),
