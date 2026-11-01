@@ -963,7 +963,26 @@ class AylaLiveRoomSession extends ChangeNotifier {
   void _onDetachedWindowClosed() {
     final bool wasDetached = _detached;
     _detached = false;
+    debugPrint('[AYLA-DETACH] windowClosed alive=$_alive'
+        ' wasDetached=$wasDetached viewDetached=$_viewDetached'
+        ' isActiveView=${identical(_activeViewSession, this)}'
+        ' suspended=$_playerSuspendedForDetached attached=$_playerAttached');
     if (_alive) {
+      // ⚠️⚠️ **必须区分「页面还在」与「页面已卸载」**（2026-11-01 实报：
+      // 「进直播间 → 点小窗 → 切换页面 → 关闭小窗 → 声音还在」）。
+      //
+      // · 页面还在（用户就站在直播间里）：恢复主窗口那一路播放，画面回到页面；
+      // · 页面已卸载（用户切到别的页面去了）：**没有人要这个画面了** ⇒
+      //   必须完整停播并销毁会话。旧实现无条件 `_resumeMainPlayerAfterDetached()`，
+      //   在页面已卸载时会把播放器重新 attach 起来、却没有任何可见面 ⇒
+      //   用户听到「关了小窗声音还在」，而且再也没有入口关掉它。
+      final bool pageStillAlive =
+          identical(_activeViewSession, this) && !_viewDetached;
+      if (!pageStillAlive) {
+        // 页面没了：小窗是唯一观看面，关掉即「不想看了」⇒ 完整收尾。
+        unawaited(stop().whenComplete(dispose));
+        return;
+      }
       unawaited(_resumeMainPlayerAfterDetached());
       // 「回到 App 内小窗」复用既有路径。只在**页面已经卸载**时登记小窗投影：
       // 用户就站在直播间页里时画面由页面自己的 videoView 接管，再挂一层小窗
@@ -989,10 +1008,13 @@ class AylaLiveRoomSession extends ChangeNotifier {
       _miniPlayerOwner = null;
       if (!_live.isDisposed) _live.setMiniPlayer(null);
     }
+    debugPrint('[AYLA-DETACH] suspend: attached=$_playerAttached '
+        'suspended=$_playerSuspendedForDetached');
     if (!_playerAttached) return;
     _playerSuspendedForDetached = true;
     _playerAttached = false;
     await _player.destroy();
+    debugPrint('[AYLA-DETACH] suspend: player destroyed');
   }
 
   /// 独立窗口关闭后重新接管（只在确实被 [enterDetachedPresentation] 停过时才重建）。
@@ -1000,6 +1022,8 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// 幂等：没挂起过就什么都不做（Android PiP 路径根本不会进入这里 ——
   /// 那边 `_suspendMainPlayerForDetached()` 从不被调用，标志恒为 false）。
   Future<void> _resumeMainPlayerAfterDetached() async {
+    debugPrint('[AYLA-DETACH] resume: suspended=$_playerSuspendedForDetached '
+        'alive=$_alive attached=$_playerAttached slot=$_pictureSlot');
     if (!_playerSuspendedForDetached) return;
     _playerSuspendedForDetached = false;
     // B6：画面回到页面手里 ⇒ 槽位恢复 inline。
@@ -1143,6 +1167,20 @@ class AylaLiveRoomSession extends ChangeNotifier {
     if (!identical(_activeViewSession, this) && !_miniWindowDismissedByUser) {
       await stop();
       dispose();
+      return;
+    }
+    // ⚠️⚠️ **脱离态（桌面小窗 / Android PiP）必须让位，不能销毁会话**
+    //（2026-11-01 用户实报：「进直播间 → 点小窗键 → 切换页面 → 关闭小窗 → 声音还在」）。
+    //
+    // 那一刻的事实是：用户点了「小窗」，画面已经在**窗口外**播着，然后他离开直播间页面
+    // 去别的页面。此时：
+    //   · 会话若被 stop()+dispose()，第二引擎的窗口还在放；
+    //   · 关掉小窗时 _onDetachedWindowClosed 看到 _alive == false ⇒ 直接 return；
+    //   · 结果：窗口没了、会话没了，但**没有任何人停过那一路播放** ⇒ 声音一直响。
+    //
+    // 正确语义：脱离态下离开页面 = 「小窗继续播，会话继续持有」，页面只是不再显示画面。
+    // 真正的结束由用户关小窗（_onDetachedWindowClosed）或退播触发。
+    if (_detached) {
       return;
     }
     // ⚠️ `!_miniWindowDismissedByUser`：用户亲手点掉过小窗 ⇒ 本次会话不再自动弹。

@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <iostream>
 #include <optional>
 #include <sstream>
 
@@ -613,10 +614,65 @@ void AylaLiveWindowHost::CreateChannel() {
           return;
         }
         if (method == "close") {
-          // Requested by the Dart side (the overlay's own X button): the Dart
-          // side already knows, so no close callback.
+          // Requested by the overlay's own X button (second engine).
+          //
+          // ⚠️⚠️ **必须通知主窗口**（2026-11-01 用户实报：「电脑端直播进入小窗
+          // 后无法退出，点小窗关闭键仍然听得到直播声音」）。
+          //
+          // 原实现注释写的是「the Dart side already knows, so no close callback」——
+          // 但那个「Dart side」是**第二引擎**，主窗口完全不知情：
+          //   · 窗口被销毁了；
+          //   · 主窗口的 miniPlayer 投影仍然非空；
+          //   · 主窗口那一路播放器（被 _suspendMainPlayerForDetached 挂起前
+          //     或在 detached 态下仍持有的音频）继续跑 ⇒ 声音还在、且再也关不掉
+          //     （因为主窗口以为小窗还开着）。
+          //
+          // 所以这里必须和 activateMain 一样，给主窗口投一条通知，让它走
+          // 「小窗被用户关掉」的收尾路径（摘牌 + 停播放器 + 清投影）。
+          // RequestClose() 里 suppress_closed_notification_ 只抑制**第二引擎→宿主**
+          // 的那条回调（避免重复），不会抑制这条 owner 通知。
           result->Success(flutter::EncodableValue(true));
-          RequestClose();
+          HWND owner = owner_window_;
+          std::cout << "[AYLA-MINI] close requested, owner="
+                    << (owner != nullptr ? "yes" : "NO") << std::endl;
+          // ⚠️⚠️ **顺序与异步性是关键**（2026-11-01 实报「关闭键完全没反应」）。
+          //
+          // 旧实现紧接着调用 RequestClose() —— 它会**同步** DestroyWindow，
+          // 而 WM_DESTROY 里的 TearDown() 会销毁 controller_，也就是
+          // **当前正在执行这段代码的第二引擎自己**。后果：
+          //   · 引擎在自身回调里被同步析构 ⇒ 后续代码与排队消息全部丢失；
+          //   · 上面刚 PostMessageW 出去的那条 WM_APP+1 可能永远不被主窗口处理
+          //     （主窗口的消息循环此刻还在等这个回调返回）；
+          //   · 表现为用户说的「关闭键完全不会引起任何事，只是关了个窗口，声音都还在」。
+          //
+          // 修法：把真正的关闭**排到消息队列尾部**，让本回调先完整返回，
+          // 主窗口有机会处理 WM_APP+1，再由 WM_CLOSE 走正常销毁流程。
+          if (owner != nullptr) {
+            ::PostMessageW(owner, WM_APP + 1, 0, 0);
+            std::cout << "[AYLA-MINI] posted WM_APP+1 to owner" << std::endl;
+          }
+          // ⚠️⚠️ **销毁窗口前必须先让第二引擎停播**（2026-11-01 实报「关了小窗
+          // 声音还在」的最终根因）。
+          //
+          // 日志证据（[AYLA-DETACH]/[AYLA-MINI]）：主窗口播放器早已 destroy
+          // （attached=false）、原生 TearDown 也确实执行（controller=released），
+          // 但第二引擎 Dart 侧 live_window_surface.dart 的 dispose() **从未运行**
+          // —— DestroyWindow 直接拆 Flutter 树，widget 生命周期不保证走。
+          // 而 media_kit 的 Player 是 Dart 对象、持有独立 mpv 与音频线程
+          // ⇒ 引擎没了、Player 没 dispose ⇒ 声音继续播。
+          //
+          // 这里同步调一次 stopPlayback，让 Dart 立刻释放 mpv，再排 WM_CLOSE。
+          if (channel_ != nullptr) {
+            channel_->InvokeMethod("stopPlayback", nullptr);
+            std::cout << "[AYLA-MINI] sent stopPlayback" << std::endl;
+          }
+          if (window_handle_ != nullptr) {
+            suppress_closed_notification_ = true;
+            ::PostMessageW(window_handle_, WM_CLOSE, 0, 0);
+            std::cout << "[AYLA-MINI] posted WM_CLOSE (async)" << std::endl;
+          } else {
+            TearDown();
+          }
           return;
         }
         if (method == "setHitRect") {
@@ -771,8 +827,15 @@ void AylaLiveWindowHost::CreateChannel() {
 void AylaLiveWindowHost::TearDown() {
   // Order is load-bearing: |channel_| holds the engine's messenger, which the
   // controller destroys with the engine. Channel first, controller second.
+  std::cout << "[AYLA-MINI] TearDown begin, has_controller="
+            << (controller_ != nullptr ? "yes" : "no") << std::endl;
   channel_.reset();
   controller_.reset();
+  // ⚠️ 用户实报「关了小窗还有声音」：controller_.reset() 只销毁 view/engine 句柄，
+  // 若第二引擎里 media_kit 的 Player 没有 dispose，音频线程仍在跑。
+  // 这里显式确认 engine 已释放（controller 为 null 即代表引擎随之析构）。
+  std::cout << "[AYLA-MINI] TearDown done, controller="
+            << (controller_ != nullptr ? "STILL_ALIVE" : "released") << std::endl;
 }
 
 /// Applies the interactive/click-through state of the floating-ball window.

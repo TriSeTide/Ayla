@@ -122,11 +122,24 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
     }
     // 宿主在收到 `ready` 之后才会把播放地址发过来：这样 `play` 不可能早于
     // handler 注册（平台→Dart 的消息在 handler 未挂时会被丢弃）。
-    _channel.setHandler((String url, String title) {
-      if (_disposed) return;
-      setState(() => _title = title.isEmpty ? _title : title);
-      unawaited(_open(url));
-    });
+    _channel.setHandler(
+      (String url, String title) {
+        if (_disposed) return;
+        setState(() => _title = title.isEmpty ? _title : title);
+        unawaited(_open(url));
+      },
+      // 宿主在销毁窗口**之前**要求停播：这里必须**同步**把 mpv 实例释放掉，
+      // 否则引擎被 DestroyWindow 拆掉后 Player 泄漏、音频线程继续跑
+      // （2026-11-01 用户实报「关了小窗声音还在」，日志证据见 setHandler 的说明）。
+      onStopPlayback: () {
+        final Player? player = _player;
+        _player = null;
+        _videoController = null;
+        debugPrint('[AYLA-DETACH] secondEngine stopPlayback '
+            'player=${player != null ? 'yes' : 'null'}');
+        if (player != null) unawaited(player.dispose());
+      },
+    );
     final String? initialUrl = widget.initialUrl;
     if (initialUrl != null && initialUrl.isNotEmpty) {
       // 兜底路径：不等宿主指令，直接起播（重复的 `play` 由 `_open` 的
@@ -194,6 +207,8 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
     final Player? player = _player;
     _player = null;
     _videoController = null;
+    debugPrint('[AYLA-DETACH] secondEngine dispose '
+        'player=${player != null ? 'yes' : 'null'}');
     if (player != null) {
       unawaited(player.dispose());
     }
@@ -526,9 +541,27 @@ class AylaDetachedWindowChannel {
     }
   }
 
-  /// 注册宿主 → 本引擎的指令回调（`play` / `ballPayload`）。
-  void setHandler(void Function(String url, String title) onPlay) {
+  /// 注册宿主 → 本引擎的指令回调（`play` / `ballPayload` / `stopPlayback`）。
+  ///
+  /// ## `stopPlayback` 为什么必须存在（2026-11-01 用户实报「关了小窗声音还在」）
+  ///
+  /// 实测链路（`[AYLA-DETACH]` / `[AYLA-MINI]` 日志）：
+  /// - 主窗口那一路播放器在进入脱离态时就被 destroy 了（`attached=false`）；
+  /// - 原生 `TearDown()` 确实执行了（`controller=released`）；
+  /// - **但本文件的 `dispose()` 从未执行**（日志里没有 `secondEngine dispose`）。
+  ///
+  /// 原因：原生 `DestroyWindow` 直接把 Flutter 树拆掉，Dart 的 widget
+  /// `dispose()` 生命周期**不保证运行**。而 media_kit 的 `Player` 是 Dart 侧对象、
+  /// 持有独立的 mpv 实例与音频线程 ⇒ 引擎没了、Player 没被 dispose ⇒ **声音继续播**。
+  ///
+  /// 所以销毁窗口之前必须由原生**主动要求**本引擎停播，让 Dart 有机会同步 dispose。
+  void setHandler(void Function(String url, String title) onPlay,
+      {void Function()? onStopPlayback}) {
     _channel.setMethodCallHandler((MethodCall call) async {
+      if (call.method == 'stopPlayback') {
+        onStopPlayback?.call();
+        return null;
+      }
       if (call.method != 'play') return null;
       final Object? raw = call.arguments;
       String url = '';
