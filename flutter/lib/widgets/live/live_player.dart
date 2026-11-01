@@ -379,6 +379,10 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
   void _syncFullscreenLayer() {
     final OverlayEntry? entry = _fsEntry;
     if (entry == null) return;
+    // ⚠️ dispose 之后帧末回调仍可能跑到这里（_syncFullscreen 排的 post-frame 回调），
+    // 此时 _fsRevision 已 dispose ⇒ 再赋值会抛 "A ValueNotifier was used after
+    // being disposed"（debug 直接红屏/崩溃）。mounted 是这里的唯一可靠判据。
+    if (!mounted) return;
     entry.markNeedsBuild();
     _fsRevision.value += 1;
   }
@@ -692,11 +696,20 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     // 若此时不同步 overlay 子树，全屏层**仍然渲染重建前的那个 videoView**（旧纹理已随
     // `dispose()` 释放）⇒ 全屏永久黑屏，而 inline 侧是正常的。
     //
-    // 判据取「播放器相关输入是否变了」而不是无条件同步：`_syncFullscreen` 走帧末
-    // post-frame 回调，每帧都排一次没有意义（弹幕叠加层等变化由上面的静态分支覆盖）。
+    // ⚠️⚠️ **判据绝对不能用 `identical(oldWidget.videoView, widget.videoView)`**
+    //（2026-11-01 实报「进直播间直接卡死闪退」的根因）：
+    // `AylaLiveRoomSession.videoView` 的实现是 `_player.videoView`，而
+    // `HlsPlaybackController.videoView` → `buildView()` **每次调用都构造一个新的
+    // `Video` widget**（`media_kit_impl.dart` 的 `Video(key: ObjectKey(vc), ...)`）
+    // ⇒ `identical` **恒为 false** ⇒ 每帧都 force 同步 ⇒ `_fsRevision.value += 1`
+    // ⇒ ValueListenableBuilder 重�建 ⇒ 父级再次 setState ⇒ **无限自激**，
+    // 表现为进直播间立刻卡死/闪退（Windows 直接进程崩溃）。
+    //
+    // 正确判据：只比较**值语义**的输入（比例 / SRS 状态 / 错误），它们是可空的
+    // 基本类型，稳定且不会每帧变化；videoView 的「是不是同一个控制器」由
+    // 播放器状态机自己保证（重建时 state/error 一定跟着变，走 `_setStateAndSync` 那条路）。
     final bool playerInputsChanged =
-        !identical(oldWidget.videoView, widget.videoView) ||
-            oldWidget.videoAspectRatio != widget.videoAspectRatio ||
+        oldWidget.videoAspectRatio != widget.videoAspectRatio ||
             oldWidget.srsStatus != widget.srsStatus ||
             oldWidget.playerError != widget.playerError;
     _syncFullscreen(force: playerInputsChanged);

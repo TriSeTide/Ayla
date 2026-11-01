@@ -17,8 +17,24 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 /// 自愈参数（web 端 liveSessionRuntime.ts STALL_TIMEOUT_MS / REBUILD_COOLDOWN_MS）
-const int kStallTimeoutMs = 2000;
-const int kRebuildCooldownMs = 4000;
+///
+/// ## 为什么从 2000ms 放宽到 6000ms（2026-11-01 用户实报「画面断断续续」）
+///
+/// 2 秒判死对低延时 HLS 直播是错的：
+/// - 分片本身 1s（hls_fragment 1），播放器必须缓存 2~3 片才能连续出帧；
+/// - 网络抖动（实测 RTT 18~105ms、带宽波动数倍）会让某次分片请求超过 2s；
+/// - 此时 mpv 状态是 buffering=true，但它是在正常补数据，不是卡死。
+///
+/// 2 秒就判死 ⇒ 每次网络稍有波动就重建播放器 ⇒ 重建要重新握手 + 拉 playlist
+/// （几秒黑屏）⇒ 用户看到「播放一会又黑，过一会才稳定」。
+///
+/// 6 秒依据：一次完整分片轮询（拉 m3u8 + 拉 1~2 个 ts）在实测抖动下最坏约 3~4s，
+/// 留 50% 余量。真正卡死（流断 / 地址不可达）依然会在 6s 内被发现并进入有界重建
+/// （B2 的时间窗重置保证不会永久卡住）。
+const int kStallTimeoutMs = 6000;
+/// 重建冷却同样放宽：重建一次要重新握手（volx 实测 TLS 握手 0.4~4.9s），
+/// 4s 冷却会让两次重建叠在一起。8s 覆盖「一次重建真正完成」的时间。
+const int kRebuildCooldownMs = 8000;
 
 /// 连续自动重建上限（**本项目新增，web 无对应**）。
 ///

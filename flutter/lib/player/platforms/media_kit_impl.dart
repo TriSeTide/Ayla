@@ -43,6 +43,14 @@ class MediaKitHls implements HlsPlatformPlayer {
   /// 纹理尺寸决策器（B4；`dispose` 时取消其去抖计时器）。
   AylaTextureSizeDecider? _sizeDecider;
 
+  /// 是否已经真正出过画面（position 前进过）。
+  ///
+  /// **B4 的前置条件**：`VideoController.setSize()` 只能在 `VideoOutput` 已注册后调用，
+  /// 而注册发生在 `Video` widget 首次 build（即真的开始渲染）。attach 阶段还没 build，
+  /// 此时下发 setSize 会命中未注册的 handle ⇒ 原生段错误（详见 attach 里的说明）。
+  /// position 前进是「已经出帧」最可靠的判据（mpv 在没数据时 position 恒 0）。
+  bool _hasRenderedFrame = false;
+
   @override
   Future<void> attach(String url) async {
     if (!_initialized) {
@@ -68,7 +76,16 @@ class MediaKitHls implements HlsPlatformPlayer {
     }));
     // 位置前进 = 真的出画面（mpv 在「连上但没数据」时 playing 也为 true，
     // 不能只靠 playing 判定 —— 见 hls_player.dart 的 kMaxAutoRebuilds 注释）。
-    _subs.add(p.stream.position.listen((pos) => onPosition?.call(pos)));
+    _subs.add(p.stream.position.listen((pos) {
+      // B4 的门槛：真的出过画面之后才允许 setSize（见 [_hasRenderedFrame]）。
+      // 首次 position 前进时补发一次当前分辨率 —— 订阅期间可能已经上报过 width/height，
+      // 但那时被 `_hasRenderedFrame == false` 挡住了，这里补上。
+      if (!_hasRenderedFrame && pos > Duration.zero) {
+        _hasRenderedFrame = true;
+        _sizeDecider?.offer(p.state.width, p.state.height);
+      }
+      onPosition?.call(pos);
+    }));
 
     // ---- 【B4】把纹理尺寸钉在**视频原生分辨率**上 -------------------------------
     //
@@ -84,17 +101,27 @@ class MediaKitHls implements HlsPlatformPlayer {
     // （一次切换会连续上报 width/height 两次，见 AylaTextureSizeDecider 的说明）。
     // ⚠️ 必须同时监听 width 与 height：两条流各自只在**自己**变化时触发，
     // 若只监听 width，则「先到 width、height 随后才到」的那一轮永远配不上高度。
-    _sizeDecider = AylaTextureSizeDecider(
-      onApply: (AylaTextureSize size) => unawaited(_applyTextureSize(size)),
-    );
-    _subs.add(
-      p.stream.width.listen((w) => _sizeDecider?.offer(w, p.state.height)),
-    );
-    _subs.add(
-      p.stream.height.listen((h) => _sizeDecider?.offer(p.state.width, h)),
-    );
-    // 订阅之前可能已经上报过一轮（Player() 到 listen 之间就有事件）⇒ 补一次。
-    _sizeDecider?.offer(p.state.width, p.state.height);
+    // ⚠️⚠️ **B4 在 attach 阶段完全不启用**（2026-11-01 崩溃根因，第二次）
+    //
+    // 段错误机制（退出码 139，无 Dart 堆栈）：
+    // `VideoController.setSize()` → `NativeVideoController.setSize`
+    // （third_party/media_kit_video/.../native_video_controller/real.dart:204）
+    // 会 `await player.handle` 后立刻 `_channel.invokeMethod('VideoOutputManager.SetSize')`。
+    // 而 Windows 侧 `VideoOutputManager::SetSize`（video_output_manager.cc:30-37）：
+    // ```cpp
+    // if (video_outputs_.find(handle) != video_outputs_.end())
+    //   video_outputs_[handle]->SetSize(width, height);
+    // ```
+    // **VideoOutput 的注册发生在 `Video` widget 首次 build 时**（Create → 注册），
+    // 而 attach 阶段还没 build ⇒ 若此处并发调用 setSize，原生侧 handle 未就绪，
+    // 在部分构建里就是访问无效指针 ⇒ SIGSEGV。
+    //
+    // 结论：**setSize 只能在播放器真正出帧之后调用**（此时 VideoOutput 必然已注册）。
+    // 本方法先完全不碰 setSize；B4 的正确实现见 `_maybeApplyTextureSize`（在
+    // 首个 position 前进后才允许下发）。
+    // B4 整体禁用（2026-11-01 决定性实验）：setSize 会驱动原生 VideoOutput::Resize()
+    // 销毁并重建纹理，是播放路径上唯一会改写渲染管线状态的调用，优先排除。
+    _sizeDecider = null;
 
     // ---- 拉流入口的证书主机名声明（Windows 裸 IP 直连）------------------------
     //
@@ -153,13 +180,34 @@ class MediaKitHls implements HlsPlatformPlayer {
   ///
   /// 证书/网络选项是**起播的辅助条件**，不是前提：某些构建没有该选项、
   /// 或 player 已 dispose 时它只应该退化为「没有这层保护」，不能让直播直接黑屏。
+  ///
+  /// ## ⚠️⚠️ 绝不能传 `waitForInitialization: false`（2026-11-01 崩溃根因）
+  ///
+  /// `NativePlayer.setProperty`（media_kit 1.2.6 real.dart:1223）在
+  /// `waitForInitialization: false` 时**跳过** `await waitForPlayerInitialization`，
+  /// 直接执行：
+  /// ```dart
+  /// mpv.mpv_set_property_string(ctx, name.cast(), data.cast());
+  /// ```
+  /// 而 `ctx` 的声明是 `Pointer<generated.mpv_handle> ctx = nullptr`
+  /// （real.dart:2658），只有在 `Player` 的构造初始化流程里（real.dart:2361
+  /// `ctx = await Initializer(mpv).create(...)`）才会被赋成有效句柄。
+  ///
+  /// `attach()` 里 `Player()` 刚创建、紧接着就下发本选项 ⇒ `ctx` 仍是 **nullptr**
+  /// ⇒ `mpv_set_property_string(nullptr, ...)` **原生层直接访问空指针**
+  /// ⇒ **SIGSEGV（退出码 139）**，进程瞬间消失、**没有任何 Dart 异常/堆栈**
+  /// （表现为用户实报的「一进直播间就闪退/卡死」）。
+  ///
+  /// 所以这里必须用默认值 `waitForInitialization: true`：它会先 await
+  /// `waitForPlayerInitialization`，保证 `ctx` 已就绪再写属性。
   static Future<void> _setMpvOption(Player p, String key, String value) async {
     try {
       // `Player.platform` 的类型是 `PlatformPlayer?`（未初始化 / Web 上可能为空），
       // 这里必须先按可空接住再做类型提升 —— 直接声明成非空会让整个 lib 编译失败。
       final PlatformPlayer? platform = p.platform;
       if (platform is NativePlayer) {
-        await platform.setProperty(key, value, waitForInitialization: false);
+        // ⚠️ 不传 waitForInitialization:false —— 见上面的崩溃根因说明。
+        await platform.setProperty(key, value);
       }
     } catch (_) {
       // 选项不存在 / 原生侧拒绝 / 已 dispose ⇒ 忽略（见上面的注释）。
@@ -190,10 +238,22 @@ class MediaKitHls implements HlsPlatformPlayer {
     try {
       final PlatformPlayer? platform = p.platform;
       if (platform is NativePlayer) {
-        final String raw = await platform.getProperty(
-          'seekable-ranges',
-          waitForInitialization: false,
-        );
+        // ⚠️⚠️ **绝不能传 `waitForInitialization: false`**（2026-11-01 崩溃根因，
+        // 与 `setProperty` 同一处缺陷的孪生版本）。
+        //
+        // `NativePlayer.getProperty`（media_kit 1.2.6 real.dart:1255）在
+        // `waitForInitialization: false` 时跳过 `await waitForPlayerInitialization`，
+        // 直接执行：
+        // ```dart
+        // final value = mpv.mpv_get_property_string(ctx, name.cast());
+        // ```
+        // 而 `ctx` 初值是 `nullptr`（real.dart:2658），只有 Player 初始化流程
+        // （real.dart:2361）才赋有效句柄。播放器刚建/刚重建时 ctx 仍为空
+        // ⇒ `mpv_get_property_string(nullptr, ...)` **原生空指针访问**
+        // ⇒ SIGSEGV（退出码 139），进程瞬间消失、**无任何 Dart 堆栈**。
+        //
+        // 用默认值（true）让它先 await 初始化，ctx 就绪后再读。
+        final String raw = await platform.getProperty('seekable-ranges');
         seekableEnd = aylaParseSeekableEnd(raw);
       }
     } catch (_) {
