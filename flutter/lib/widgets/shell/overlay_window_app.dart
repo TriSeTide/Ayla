@@ -534,7 +534,7 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
   /// surface buffer，旧内容在新 buffer 里按原原点渲染一帧 ⇒ 斜向位置伪影（DE23）。
   /// 每帧把窗口应右移的 dp 报给原生（由组件动画值驱动，见 session_activity.dart）。
   void _reportWindowOffset(double offsetDp) {
-    if (_disposed) return
+    if (_disposed) return;
     _channel.invokeMethod<bool>('setWindowOffset', offsetDp).catchError((Object _) => false);
   }
 
@@ -607,7 +607,6 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
       onCollapsedChanged: _reportCollapsed,
       suppressTapTick: _suppressTapTick,
       compactCollapseShift: _collapseShift,
-      onWindowOffsetChanged: _reportWindowOffset,
       onOpenSession: (AylaActivitySession session) {
         // 组件只回传会话（web 的真实口径），种类要在这里按 id 反查：
         // 直播球的 id 与语音球的 id 不会相同（一个房间只有一个身份）。
