@@ -39,11 +39,17 @@ import 'package:flutter/services.dart'
     show DeviceOrientation, LogicalKeyboardKey, SystemChrome;
 import 'package:window_manager/window_manager.dart';
 
+import '../../core/platform/system_ui.dart'
+    show aylaSetImmersive, aylaUnlockOrientation;
+import '../../layout/app_back.dart'
+    show AylaLiveFullscreenBackHandler, aylaLiveFullscreenBackHandler;
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
 import 'live_hall.dart' show AylaLiveStatus;
+import 'video_contain.dart'
+    show AylaVideoContain, kAylaLiveVideoAspectRatio;
 import '../base/overlays.dart';
 
 /// SRS 直播服务状态（web `LiveSrsStatus`；null = 尚未查到）。
@@ -134,6 +140,28 @@ class _AylaWindowManagerController extends AylaDesktopWindowController {
       windowManager.setTitleBarStyle(TitleBarStyle.normal);
 }
 
+/// 系统栏（状态栏 / 导航栏）的隐藏与恢复 —— 可注入，便于测试断言「进/退全屏各做了什么」。
+///
+/// 为什么抽成接口而不是直接调 [aylaSetImmersive]（与 [AylaDesktopWindowController]
+/// 同一理由）：组件测试跑在 Windows 本机，`defaultTargetPlatform` 天然是 windows
+/// ⇒ 直接调真实实现会让「移动端是否隐藏了状态栏」变得不可测；注入替身后
+/// 既能覆盖移动端路径，又不需要在每个用例里改平台标志（会被 binding 的
+/// `debugAssertAllFoundationVarsUnset` 判为失败）。
+abstract class AylaSystemUiController {
+  const AylaSystemUiController();
+
+  /// 进入（true）/ 退出（false）沉浸式：隐藏或恢复状态栏与导航栏。
+  Future<void> setImmersive(bool enabled);
+}
+
+/// 生产实现：[aylaSetImmersive]（Android 走原生通道，iOS 走 SystemChrome）。
+class _MobileSystemUiController extends AylaSystemUiController {
+  const _MobileSystemUiController();
+
+  @override
+  Future<void> setImmersive(bool enabled) => aylaSetImmersive(enabled);
+}
+
 /// 本件是否走「窗口级真·全屏」。
 ///
 /// 只对 `window_manager` 真正支持的桌面平台为真（Windows / macOS / Linux）；
@@ -164,6 +192,7 @@ class AylaLivePlayer extends StatefulWidget {
     this.optimisticStatus,
     this.playerError,
     this.videoView,
+    this.videoAspectRatio,
     this.onRetry,
     this.onRefresh,
     this.onSendDanmaku,
@@ -175,6 +204,7 @@ class AylaLivePlayer extends StatefulWidget {
     this.onEnterMiniPlayer,
     this.desktopWindow,
     this.desktopFullscreen,
+    this.systemUi,
     this.flat = false,
   });
 
@@ -189,6 +219,29 @@ class AylaLivePlayer extends StatefulWidget {
 
   /// 视频视图（页面注入 `HlsPlaybackController.videoView`；null = 无画面）。
   final Widget? videoView;
+
+  /// 画面宽高比（页面注入 `HlsPlaybackController.videoAspectRatio`）。
+  ///
+  /// ## 🔒 语义：**限死**，不是「有就用、没有就铺满」（2026-11-01 用户第二轮反馈）
+  /// 用户原话：「还是有概率拉伸，直接把全屏播放器的长宽比限死不就行了」——
+  /// 上一版写成「null ⇒ 不套等比盒、原样铺满」，于是只要比例**晚于进全屏**上报
+  /// （刚进房 / 播放器刚自愈重建）就必然拉伸一次。现在：
+  ///
+  /// | 注入值 | 用哪个比例 |
+  /// |---|---|
+  /// | null（默认 / 未上报 / media_kit 不报） | [kAylaLiveVideoAspectRatio]（16:9，锁死） |
+  /// | 有效值 | 用它（真实流比例，比 16:9 更准） |
+  /// | 非有限 / ≤0 | [kAylaLiveVideoAspectRatio]（不产出 NaN 尺寸） |
+  ///
+  /// ⇒ **任何时刻都有确定的等比盒**，最坏是「非 16:9 的流按 16:9 收盒」（画面略小 +
+  /// 四周留黑），永远不会是拉伸。
+  ///
+  /// ## 为什么由页面注入而不是组件自己查
+  /// 组件只拿得到 [videoView]（一个 Widget），拿不到它背后的控制器；而
+  /// `video_player` 的 `Texture` **没有** `fit` 能力（`RenderTexture` 是
+  /// RenderProxyBox，尺寸 = 父约束）。实现 `HlsVideoMetrics` 的平台播放器
+  /// （Android/iOS）上报的比例就是 `<video>.videoWidth / videoHeight` 的等价物。
+  final double? videoAspectRatio;
 
   /// 重试（tsx 356）。
   final VoidCallback? onRetry;
@@ -233,6 +286,12 @@ class AylaLivePlayer extends StatefulWidget {
   /// 是否走窗口级真·全屏；null = 按 [aylaUsesDesktopFullscreen] 依当前平台判定。
   final bool? desktopFullscreen;
 
+  /// 系统栏控制器（默认 = 生产实现；测试注入替身断言「进了几次/什么值」）。
+  ///
+  /// 只在**移动端**全屏时使用：桌面端的系统栏由窗口级全屏吞掉（见
+  /// [AylaDesktopWindowController]），不需要这一层。
+  final AylaSystemUiController? systemUi;
+
   /// **扁平档**：圆角与边框交给外层 stage 裁剪（web `.live-room-swipe-item .live-player
   /// { border-radius: 0; border: none }`，live.css 747–751）——窄屏沉浸式用，
   /// 由 `.live-room-stage` 统一收 `--radius-input` 圆角（live.css 825–828）。
@@ -251,8 +310,45 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
   OverlayEntry? _fsEntry;
   bool _desktopFsActive = false;
 
+  /// 返回键处理器的**稳定实例**（注册与注销必须用同一份引用）。
+  ///
+  /// 每次求值 tear-off 都会产生新对象；存一份字段后用 [identical] 判定，
+  /// 注册/注销的语义就没有任何歧义。
+  late final AylaLiveFullscreenBackHandler _backHandler =
+      _handleSystemBackInFullscreen;
+
   bool get _showVideo =>
       widget.srsStatus == AylaLiveSrsStatus.live && widget.playerError == null;
+
+  /// setState 并**同步刷新全屏层**。
+  ///
+  /// 全屏层插在 root Overlay 里，是**独立于本 State 的一棵子树** —— 本件
+  /// `setState` 只会重建 inline 侧；overlay 子树必须显式 [OverlayEntry.markNeedsBuild]
+  /// 才会跟着这一帧重建（否则它读到的永远是进全屏那一刻的快照，
+  /// 详见 [_toggleFullscreen] 里的根因记录）。
+  void _setStateAndSync(VoidCallback change) {
+    setState(change);
+    // 事件回调 / 计时器回调里调用，不在 build 阶段 ⇒ markNeedsBuild 合法
+    _fsEntry?.markNeedsBuild();
+  }
+
+  /// 下次重建是否已经排好（[_syncFullscreen] 去重）。
+  bool _fsSyncQueued = false;
+
+  /// 只刷新全屏层（[widget] 换了新值但没有本地状态变化时）。
+  ///
+  /// ⚠️ 必须**排到帧末**：本方法在 [didUpdateWidget] 里被调用，而那时正处于
+  /// build 阶段 —— 直接对另一个 Element 调 @{markNeedsBuild} 会被框架丢弃
+  /// （实测：比例迟到时全屏层仍是旧快照）。帧末排一次即可收敛，且不会自激。
+  void _syncFullscreen() {
+    if (_fsEntry == null || _fsSyncQueued) return;
+    _fsSyncQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fsSyncQueued = false;
+      if (!mounted) return;
+      _fsEntry?.markNeedsBuild();
+    });
+  }
 
   /// 是否走窗口级真·全屏（桌面平台）。
   bool get _desktopFullscreen =>
@@ -265,6 +361,10 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
   void dispose() {
     _hideTimer?.cancel();
     _spinTimer?.cancel();
+    // 全屏中直接离开页面 ⇒ 返回键处理器必须注销，否则它指向已销毁的 State。
+    if (identical(aylaLiveFullscreenBackHandler, _backHandler)) {
+      aylaLiveFullscreenBackHandler = null;
+    }
     _fsEntry?.remove();
     _fsEntry = null;
     // 用户在全屏中直接离开页面 ⇒ 窗口必须还原，否则整个 App 卡在无边框全屏。
@@ -273,6 +373,9 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
       _desktopFsActive = false;
       unawaited(_applyDesktopFullscreen(false));
     }
+    // 全屏中直接离开页面 ⇒ 系统栏必须恢复，否则整个 App 留在「没有状态栏」的形态。
+    // （与 `_fsEntry.remove()` 同一档：dispose 里不能等异步，实现内部吞异常只记日志。）
+    if (_fullscreen && !_desktopFullscreen) _applyImmersive(false);
     _unlockOrientation();
     super.dispose();
   }
@@ -324,18 +427,18 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
   void _armHideTimer() {
     _clearHideTimer();
     _hideTimer = Timer(kLivePlayerAutoHide, () {
-      if (mounted) setState(() => _controlsVisible = false);
+      if (mounted) _setStateAndSync(() => _controlsVisible = false);
     });
   }
 
   void _showControls() {
-    setState(() => _controlsVisible = true);
+    _setStateAndSync(() => _controlsVisible = true);
     _armHideTimer();
   }
 
   void _hideControls() {
     if (!mounted) return;
-    setState(() => _controlsVisible = false);
+    _setStateAndSync(() => _controlsVisible = false);
     _clearHideTimer();
   }
 
@@ -343,11 +446,11 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
   void _handleRefresh() {
     _armHideTimer();
     if (_spinning) return;
-    setState(() => _spinning = true);
+    _setStateAndSync(() => _spinning = true);
     widget.onRefresh?.call();
     _spinTimer?.cancel();
     _spinTimer = Timer(kLivePlayerSpinReset, () {
-      if (mounted) setState(() => _spinning = false);
+      if (mounted) _setStateAndSync(() => _spinning = false);
     });
   }
 
@@ -365,8 +468,31 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     }
   }
 
-  void _unlockOrientation() {
-    unawaited(SystemChrome.setPreferredOrientations(DeviceOrientation.values));
+  /// 恢复朝向 —— 与 [aylaUnlockOrientation] 同一实现（统一到 core/platform，见那里）。
+  void _unlockOrientation() => unawaited(aylaUnlockOrientation());
+
+  /// 进/退「沉浸式」（隐藏/恢复状态栏与导航栏）。
+  ///
+  /// ## 为什么是独立的一步（2026-11-01 用户实报「全屏时顶部状态栏要隐藏」）
+  ///
+  /// 此前全屏只做了「插 root Overlay + 锁横屏」，**从没碰过系统栏** ⇒ 状态栏一直
+  /// 压在画面上（横屏时那一截就是黑边里的一块白字）。
+  ///
+  /// ⚠️ 光调 `SystemChrome.setEnabledSystemUIMode` 在**本工程上无效**：
+  /// `targetSdk = 36`（Android 16）下 Flutter 引擎对 `leanBack/immersive/immersiveSticky`
+  /// 只是设 legacy flags + `View.setSystemUiVisibility`，而该 API 在 Android 16 已失效
+  /// ⇒ 必须走原生 `WindowInsetsController`。完整依据见 `core/platform/system_ui.dart`。
+  ///
+  /// 顺序：**先**藏系统栏再锁横屏 —— 旋转期间系统栏会自己回弹，藏得早一点能让
+  /// 「旋转完成时状态栏已不在」；退出时反过来：先恢复系统栏再解锁朝向。
+  ///
+  /// 实现可注入（见 [AylaSystemUiController]）：测试用替身断言「进/退各下发了一次」，
+  /// 不必改 `defaultTargetPlatform`（会被 binding
+  /// 的 `debugAssertAllFoundationVarsUnset` 判为失败）。
+  void _applyImmersive(bool enabled) {
+    final AylaSystemUiController ui =
+        widget.systemUi ?? const _MobileSystemUiController();
+    unawaited(ui.setImmersive(enabled));
   }
 
   void _toggleFullscreen() {
@@ -377,6 +503,8 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     }
     setState(() => _fullscreen = true);
     widget.onFullscreenChanged?.call(true);
+    // 移动端：藏掉状态栏/导航栏（桌面端由窗口级全屏承担，见下）
+    if (!_desktopFullscreen) _applyImmersive(true);
     _lockLandscape();
     // **桌面端真·全屏**：窗口本身跳出应用边框（覆盖整块显示器、无标题栏/任务栏）。
     // 移动端这一步是 no-op，仍是原来的「root Overlay + 锁横屏」。
@@ -400,12 +528,27 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     // · 注入了 [overlayHostBuilder] ⇒ 调用方负责（测试/画布用它替换宿主）；
     // · 未注入 ⇒ 用库内 [aylaOverlayEntry] 的**具名 builder** 形式（自动套文本作用域，
     //   否则 overlay 子树的 Text 会落到 `DefaultTextStyle.fallback` 的红/黄双下划线）。
-    final Widget fullscreen = _buildFullscreen();
+    // ⚠️⚠️ **这里曾有一个「还是有概率拉伸」的真根因**（2026-11-01 用户复报）：
+    //
+    // 旧写法把 `_buildFullscreen()` 的**结果**（一个已经构建好的 Widget 实例）captured
+    // 进 overlay 的 builder 闭包：
+    //     final Widget fullscreen = _buildFullscreen();
+    //     aylaOverlayEntry(builder: (ctx) => fullscreen)
+    // ⇒ overlay 子树**永远渲染那一份快照**，State 再 setState 也不会重建它。
+    //
+    // 后果（全部是「看起来偶发」的确定性缺陷）：
+    // · `widget.videoAspectRatio` 在**点全屏那一刻**还没上报（刚进房 / HLS 刚自愈重建
+    //   播放器）⇒ 全屏层永远停在「比例未知」⇒ 原样铺满 ⇒ **拉伸**，之后再也不会自愈；
+    // · `_controlsVisible` 永远停在进全屏那一刻（= true）⇒ 3s 自动隐藏在全屏里**从不生效**；
+    // · `_spinning` 同理 ⇒ 全屏里点刷新不转圈。
+    //
+    // ⇒ 正确形状：builder **每次重建都重新求值**（读当前 widget / 当前 State 字段），
+    // 再由 [setState] 统一通过 [markNeedsBuild] 把独立子树拉进这一帧。
     final OverlayEntry Function(Widget child)? custom = widget.overlayHostBuilder;
     final OverlayEntry entry = custom != null
-        ? custom(fullscreen)
+        ? custom(_buildFullscreen())
         : aylaOverlayEntry(
-            builder: (BuildContext ctx) => fullscreen,
+            builder: (BuildContext ctx) => _buildFullscreen(),
           );
     _fsEntry = entry;
     // ⚠️⚠️ **必须插根 Overlay，不能用最近的那个**（2026-10-31 用户实报「全屏后顶部导航栏
@@ -430,9 +573,26 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
       root = null;
     }
     (root ?? Overlay.of(context)).insert(entry);
+    // 登记「全屏期间的返回键」处理器（见 `layout/app_back.dart` 的
+    // [AylaLiveFullscreenBackHandler]）：手机返回键先退全屏、**不**关直播间。
+    aylaLiveFullscreenBackHandler = _backHandler;
+  }
+
+  /// 系统返回键落在全屏里时：只退出全屏，返回 true 表示「本次已处理」。
+  ///
+  /// ⚠️ 必须返回 true：返回 false 会把事件交回框架 ⇒ 走 `context.pop()`
+  /// ⇒ 用户直接被弹出直播间（正是修复前实报的现象）。
+  bool _handleSystemBackInFullscreen() {
+    if (!mounted || !_fullscreen) return false;
+    _exitFullscreen();
+    return true;
   }
 
   void _exitFullscreen() {
+    // 先注销返回键处理器：退全屏之后返回键应当恢复「离开直播间」的正常语义。
+    if (identical(aylaLiveFullscreenBackHandler, _backHandler)) {
+      aylaLiveFullscreenBackHandler = null;
+    }
     _fsEntry?.remove();
     _fsEntry = null;
     // 先还原窗口（含 frameless 复位），再解方向锁 —— 顺序固定，便于测试断言。
@@ -440,6 +600,8 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
       _desktopFsActive = false;
       unawaited(_applyDesktopFullscreen(false));
     }
+    // 移动端：恢复系统栏（与进全屏的 [_applyImmersive] 成对，绝不遗留隐藏态）
+    if (!_desktopFullscreen) _applyImmersive(false);
     _unlockOrientation();
     widget.onFullscreenChanged?.call(false);
     if (mounted) setState(() => _fullscreen = false);
@@ -457,6 +619,15 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
   }
 
   @override
+  void didUpdateWidget(covariant AylaLivePlayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 父级把新值（画面比例 / SRS 状态 / 弹幕叠加层 / 播放错误…）喂进来了 ⇒
+    // 全屏那棵独立子树必须跟着重建，否则它停在旧快照上（= 「还是有概率拉伸」的
+    // 后半段：比例后来才上报，而全屏层从不重读）。
+    _syncFullscreen();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MouseRegion(
       cursor: SystemMouseCursors.basic,
@@ -471,14 +642,39 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     );
   }
 
-  /// 播放器内容（inline 与全屏共用；全屏时外层是黑底铺满）。
+  /// 播放器内容（inline 与全屏共用）。
+  ///
+  /// ## 两档容器（事实源 `app.css:3517–3525` 与 `:3639–3646`）
+  /// - **inline**：`.live-player { aspect-ratio: 16/9; radius-card; 1px 亮边 }`；
+  /// - **全屏**：`.live-player:fullscreen { width:100vw; height:100vh;
+  ///   aspect-ratio:auto; border-radius:0; border:none; background:#000 }`
+  ///   ⇒ **容器铺满整屏**（不再受 16:9 限制），画面在其中 letterbox。
+  ///
+  /// ⚠️ 此前全屏用的是 `AspectRatio(aspectRatio: 1)`（正方形占位），在展开约束下
+  /// 虽被拉伸成整屏、但语义是错的（一旦父级不再强制 expand 就会变成正方形黑块）。
+  /// 现在全屏档直接返回「铺满 + 黑底」，比例交给画面自己（见 [_surface] 里的
+  /// [AylaVideoContain]）。
   Widget _content({required bool fullscreen}) {
+    final Widget surface = _surface(fullscreen: fullscreen);
+    if (fullscreen) {
+      return ColoredBox(color: Colors.black, child: surface);
+    }
     return AspectRatio(
-      // `.live-player { aspect-ratio: 16 / 9 }`（全屏时由宿主铺满，不再受 16:9 限制）
-      aspectRatio: fullscreen ? 1 : 16 / 9,
-      child: DecoratedBox(
+      // `.live-player { aspect-ratio: 16 / 9 }`
+      aspectRatio: 16 / 9,
+      child: surface,
+    );
+  }
+
+  /// 播放面：视频（含等比收盒）+ 飘弹幕 + 悬浮控件。
+  Widget _surface({required bool fullscreen}) {
+    return DecoratedBox(
         decoration: BoxDecoration(
-          color: const Color(0x1F465B92), // rgba(70,91,146,.12)
+          // 全屏档的底色是**纯黑**（web `.live-player:fullscreen { background: #000 }`，
+          // app.css:3639–3646）—— 留黑的那一圈必须是 #000，不能是页面主色的 12% 叠色。
+          color: fullscreen
+              ? Colors.black
+              : const Color(0x1F465B92), // rgba(70,91,146,.12)
           borderRadius: (fullscreen || widget.flat)
               ? BorderRadius.zero
               : BorderRadius.circular(AylaRadii.rCard),
@@ -496,14 +692,21 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
               // 视频（`.live-player-video`：width/height 100% + object-fit contain + #000 底）；
               // 全屏期间 inline 不再挂视频。
               //
-              // ⚠️ 不要在这里再套 `FittedBox`（2026-10-01 直播黑屏根因）：web 的 `object-fit:
-              // contain` 挂在 `<video>` 元素**自身**（app.css:3528–3533），元素铺满 100%×100%、
-              // 由元素内部做 letterbox，外层没有缩放容器。media_kit 的 `Video` widget 即
-              // `<video>` 等价物，其自带 `fit`（默认 BoxFit.contain）就是 object-fit。
-              // 外层再包 FittedBox 会把无界约束传给 media_kit 内部的 `Stack(fit: expand)`，
-              // 展开出 Infinity 尺寸 → 缩放矩阵算出 NaN → Flutter 每帧报
-              // `TransformLayer is constructed with an invalid matrix.` 且该层不绘制 ⇒ 黑屏
-              // （实测：mpv 侧解码/纹理均正常，rect 已到 1920×1080，唯独此层报错刷屏）。
+              // ⚠️ 不要在 `videoView` 外面**裸**套 `FittedBox`（2026-10-01 直播黑屏根因）：
+              // web 的 `object-fit: contain` 挂在 `<video>` 元素**自身**
+              // （app.css:3528–3533），元素铺满 100%×100%、由元素内部做 letterbox。
+              // media_kit 的 `Video` widget 即 `<video>` 等价物，其自带 `fit`（默认
+              // BoxFit.contain）就是 object-fit。裸包 FittedBox 会把无界约束传给 media_kit
+              // 内部的 `Stack(fit: expand)`，展开出 Infinity 尺寸 → 缩放矩阵算出 NaN →
+              // Flutter 每帧报 `TransformLayer is constructed with an invalid matrix.`
+              // 且该层不绘制 ⇒ 黑屏（实测：mpv 侧解码/纹理均正常，rect 已到 1920×1080，
+              // 唯独此层报错刷屏）。
+              //
+              // ✅ 移动端必须补的那一步（2026-11-01「不要拉伸屏幕」）由
+              // [AylaVideoContain] 承担：它先算出**有界等比盒**再交给平台视图
+              // （`Texture` 是 RenderProxyBox、无 `fit` 能力，不补就按容器拉伸）。
+              // 判据是注入的 [widget.videoAspectRatio]：null（media_kit 不报 / 未初始化）
+              // ⇒ 原样直传，既不收盒也不会踩上面那条无界约束的坑。
               // ⚠️ **同一时刻只允许挂一处**（对齐 web 的「video 元素原子迁移」语义）。
               //
               // web 的 video 元素由 liveSessionRuntime **唯一持有**，挂在 fixed 暂存容器里
@@ -521,8 +724,16 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
               if (_showVideo && fullscreen == _fullscreen)
                 ColoredBox(
                   color: Colors.black,
-                  child: widget.videoView ??
-                      const SizedBox(width: 160, height: 90),
+                  // **恒收盒**：比例缺失时用 [kAylaLiveVideoAspectRatio] 兜底（锁死），
+                  // 所以任何平台、任何时刻都不会出现「铺满父约束 = 拉伸」那条分支。
+                  // `AylaVideoContain` 用 LayoutBuilder 给**有界**尺寸，不传导无界约束，
+                  // 对 media_kit 同样安全（见该文件头）。
+                  child: AylaVideoContain(
+                    aspectRatio:
+                        widget.videoAspectRatio ?? kAylaLiveVideoAspectRatio,
+                    child: widget.videoView ??
+                        const SizedBox(width: 160, height: 90),
+                  ),
                 ),
               // 调用方的叠加层（飘弹幕）
               if (widget.children != null) widget.children!,
@@ -531,7 +742,6 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
             ],
           ),
         ),
-      ),
     );
   }
 

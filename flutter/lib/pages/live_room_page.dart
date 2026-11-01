@@ -288,6 +288,7 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
         currentUserId: selfId,
       )),
       videoView: session.videoView,
+      videoAspectRatio: session.videoAspectRatio,
       onOpenProfile: (AylaLiveViewerItem item) =>
           context.push('/user/${Uri.encodeComponent(item.userId)}'),
       // 头像导航（web `DanmakuList.tsx:52–58` 弹幕发送者 + `LiveHostAvatar.tsx:44–49` 主播）：

@@ -167,8 +167,32 @@ class AylaExitConfirm {
   bool get armed => _armedAt != null;
 }
 
+/// 直播全屏期间接管返回键的处理器（由 `AylaLivePlayer` 在进全屏时登记）。
+///
+/// ## 为什么必须有这一档（2026-11-01 用户实报）
+/// > 「手机端进入全屏直播时返回键不是返回到主页，而是返回没全屏的状态的直播间」
+///
+/// 修复前：全屏层只是**插进 root Overlay 的一个浮层**，路由仍在 `/live/:channelId`
+/// ⇒ 按返回键走 [AylaBackAction.popRoute]（进房是 push）⇒ **直接退出直播间**，
+/// 而用户预期是「先退出全屏、回到未全屏的直播间」。
+///
+/// 全屏不是路由，页面级 `PopScope` 也到不了（见文件头第 3 条机制链），
+/// 因此只能由**当前活着的那一个全屏宿主**登记处理器，返回键宿主在最前面问它。
+///
+/// 返回 **true = 本次已处理**（只是退出了全屏，不关页面）。
+typedef AylaLiveFullscreenBackHandler = bool Function();
+
+/// 当前是否有直播处于全屏（null = 没有全屏）。
+///
+/// 登记/注销点全部在 `widgets/live/live_player.dart` 的 `_AylaLivePlayerState`
+/// （进全屏登记、退全屏与 dispose 注销）—— 同一时刻最多一个全屏宿主。
+AylaLiveFullscreenBackHandler? aylaLiveFullscreenBackHandler;
+
 /// 逐级返回的档位（自上而下，先命中者胜）。
 enum AylaBackAction {
+  /// 直播全屏中 ⇒ 先退出全屏（不离开直播间）。
+  liveFullscreen,
+
   /// 有可 pop 的路由（详情 / 二级页）⇒ 交回框架 `context.pop()`。
   popRoute,
 
@@ -205,7 +229,11 @@ AylaBackAction aylaBackActionFor({
   required bool canPop,
   required String pathname,
   bool hasEntryOrigin = false,
+  bool hasLiveFullscreen = false,
 }) {
+  // 直播全屏**排在最前面**：全屏是浮层、不是路由，此时按返回的语义是「退出全屏」，
+  // 与「当前在哪个路由 / 能不能 pop」都无关（群内直播同样适用）。
+  if (hasLiveFullscreen) return AylaBackAction.liveFullscreen;
   // 群场景：5 条群路由都由 `GroupPage` 承担（见 `group_page.dart` 的 `_handleSystemBack`）。
   if (_isGroupScene(pathname)) return AylaBackAction.groupScene;
   if (canPop) return AylaBackAction.popRoute;
@@ -316,7 +344,18 @@ class _AylaBackButtonHostState extends State<AylaBackButtonHost> {
       canPop: widget.canPop,
       pathname: widget.pathname,
       hasEntryOrigin: hasOrigin,
+      hasLiveFullscreen: aylaLiveFullscreenBackHandler != null,
     )) {
+      case AylaBackAction.liveFullscreen:
+        // 只退出全屏，**不** pop 路由（用户要的是「回到没全屏的直播间」）。
+        _confirm.reset();
+        final AylaLiveFullscreenBackHandler? exitFullscreen =
+            aylaLiveFullscreenBackHandler;
+        if (exitFullscreen == null) {
+          // 竞态兜底（登记刚被注销）：交回框架，按正常返回处理。
+          return false;
+        }
+        return exitFullscreen();
       case AylaBackAction.popRoute:
         // 交回 go_router 自己 pop（不重复实现）。
         return false;

@@ -73,6 +73,18 @@ abstract class HlsPlatformPlayer {
   Future<void> dispose();
 }
 
+/// 可选能力：平台播放器能报出**画面宽高比**（= web `<video>.videoWidth/videoHeight`）。
+///
+/// ## 为什么是独立接口而不是给 [HlsPlatformPlayer] 加成员
+/// [HlsPlatformPlayer] 有 5 个测试替身用 `implements` 实现它 —— 给抽象类加成员会让
+/// 那些替身全部编译失败。这里用**可选能力接口**：实现了就报，没实现就当「不知道」，
+/// 调用方一律按 null 处理（`media_kit` 就是这一类：它自己的 `Video` 已经
+/// `BoxFit.contain`，不需要外部再收一次，见 `widgets/live/video_contain.dart`）。
+abstract class HlsVideoMetrics {
+  /// 当前画面宽高比（宽 / 高）；未知（未初始化 / 无画面）⇒ null。
+  double? get videoAspectRatio;
+}
+
 /// 事件回调
 class HlsPlayerCallbacks {
   void Function(HlsState state)? onStateChange;
@@ -110,6 +122,18 @@ class HlsPlaybackController {
 
   /// 当前视频渲染视图（平台实现给出；未挂载返回 null）。
   Widget? get videoView => _player?.buildView();
+
+  /// 当前画面宽高比（平台实现实现 [HlsVideoMetrics] 才有值；见该接口说明）。
+  ///
+  /// 消费者：`AylaLivePlayer` 用它把播放面收成等比盒（= `object-fit: contain`），
+  /// 避免全屏时把 16:9 的画面拉伸成手机屏幕比例。
+  double? get videoAspectRatio {
+    // 声明成 `Object?`：这样 `is HlsVideoMetrics` 才能把它提升成该类型
+    // （两个抽象类互不为子类，声明成 `HlsPlatformPlayer?` 时不会发生提升）
+    final Object? player = _player;
+    if (player is HlsVideoMetrics) return player.videoAspectRatio;
+    return null;
+  }
 
   String? _lastPositionKey; // 上一次 position 快照（自愈判定用）
   Timer? _stallTimer;

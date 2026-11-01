@@ -189,6 +189,7 @@ class AylaLiveRoomBody extends StatefulWidget {
     this.favoriteController,
     this.onShare,
     this.videoView,
+    this.videoAspectRatio,
     this.directoryFooter,
     this.onOpenProfile,
     this.onOpenSenderProfile,
@@ -318,6 +319,12 @@ class AylaLiveRoomBody extends StatefulWidget {
   /// 视频视图（页面注入同一 `HlsPlaybackController.videoView`）。
   final Widget? videoView;
 
+  /// 画面宽高比（页面注入 `HlsPlaybackController.videoAspectRatio`）。
+  ///
+  /// 全屏时播放面收成等比盒（= `object-fit: contain`）；null = 未知 ⇒ 不收盒
+  /// （Windows 的 media_kit 不报比例，它自己的 `Video` 已经是 contain）。
+  final double? videoAspectRatio;
+
   /// 侧栏目录分页槽。
   final Widget? directoryFooter;
   final Widget? railDirectoryFooter;
@@ -419,6 +426,9 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     optimisticStatus: _statusOf(widget.data.channel),
     playerError: widget.data.playerError,
     videoView: widget.videoView,
+    // 画面比例（⚠️ 中间层必须透传：漏传 = 全屏仍拉伸 —— skill 第五批「加了参数 ≠
+    // 接通了线」的同一类缺陷）。
+    videoAspectRatio: widget.videoAspectRatio,
     onRetry: widget.onRetryPlayer,
     onRefresh: widget.onRefreshPlayer,
     // 「小窗」键（桌面端才有；null ⇒ 不渲染，移动端走「退出页面自动续」）。

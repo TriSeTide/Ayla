@@ -11,7 +11,7 @@ import 'package:video_player/video_player.dart';
 
 import '../hls_player.dart';
 
-class VideoPlayerHls implements HlsPlatformPlayer {
+class VideoPlayerHls implements HlsPlatformPlayer, HlsVideoMetrics {
   @override
   void Function(HlsState state)? onStateChange;
 
@@ -101,6 +101,28 @@ class VideoPlayerHls implements HlsPlatformPlayer {
     } catch (_) {
       return false;
     }
+  }
+
+  /// 画面宽高比（= web `<video>.videoWidth / .videoHeight`）。
+  ///
+  /// ## 为什么不用 `value.aspectRatio`
+  /// ① 它**不可空**：未初始化时返回 `1.0` —— 那会让调用方把「不知道比例」
+  ///    当成「正方形画面」，在全屏里收出一个正方形黑块（本文件的语义是 null = 不知道）；
+  /// ② 它**不含旋转**：而 `VideoPlayer` widget 自己会套
+  ///    `RotatedBox(quarterTurns: rotationCorrection ~/ 90)`
+  ///    （`video_player/lib/video_player.dart:1207–1229`）⇒ 渲染出来的盒子在
+  ///    90°/270° 时是 `h×w`。本 getter 描述的必须是**渲染后**的比例，
+  ///    否则等比盒与实际画面差 90°（直播流基本恒为 0，但不能靠这个假设）。
+  @override
+  double? get videoAspectRatio {
+    final VideoPlayerValue? v = _controller?.value;
+    if (v == null || !v.isInitialized) return null;
+    final Size size = v.size;
+    if (size.width <= 0 || size.height <= 0) return null;
+    final bool swapped = v.rotationCorrection % 180 == 90;
+    final double ratio =
+        swapped ? size.height / size.width : size.width / size.height;
+    return ratio.isFinite && ratio > 0 ? ratio : null;
   }
 
   @override
