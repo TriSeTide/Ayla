@@ -55,6 +55,9 @@ app.*.map.json
 # 是 AGP 的临时诊断产物；根 .gitignore 的 `/build/` 只锚定仓库根，
 # `dist/` 也不覆盖这里 ⇒ 曾长期以未跟踪状态挂在 `git status` 里）。
 **/third_party/**/android/build/
+# 本工程自己的 android/build（同上：AGP 诊断产物 reports/problems，
+# 不是源码。`flutter build apk` 会生成，不该入库）。
+/android/build/
 # Widget Preview related
 .widget_preview/
 

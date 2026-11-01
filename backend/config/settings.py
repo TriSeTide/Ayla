@@ -323,6 +323,13 @@ VOICE_MEMBER_TIMEOUT_SECONDS = env.int("VOICE_MEMBER_TIMEOUT_SECONDS", default=1
 SRS_API_URL = env.str("SRS_API_URL", default="http://127.0.0.1:1985")
 SRS_RTMP_URL = env.str("SRS_RTMP_URL", default="rtmp://127.0.0.1:1935/live")
 SRS_PLAY_URL = env.str("SRS_PLAY_URL", default="http://127.0.0.1:8080/live")
+# 拉流的**实际可用入口**（2026-11-01）：SRS_PLAY_URL 指向的 live.trise.top:7882 在
+# 阿里云侧按 SNI 拦截未备案域名（实测 SNI 含 trise.top 即 RST），客户端连不上。
+# 裸 IP 不发 SNI ⇒ 不触发过滤，是当前唯一可用的直连形态。
+# 换线路只需改环境变量，不必改代码：优先 LIVE_PULL_BASE_URL，否则 HOST+PORT。
+LIVE_PULL_BASE_URL = env.str("LIVE_PULL_BASE_URL", default="")
+LIVE_PULL_HOST = env.str("LIVE_PULL_HOST", default="47.108.85.223")
+LIVE_PULL_PORT = env.int("LIVE_PULL_PORT", default=7882)
 SRS_QUERY_TIMEOUT = env.float("SRS_QUERY_TIMEOUT", default=2.0)
 # 新进直播间历史弹幕条数（默认 50）
 LIVE_DANMAKU_HISTORY_LIMIT = env.int("LIVE_DANMAKU_HISTORY_LIMIT", default=50)

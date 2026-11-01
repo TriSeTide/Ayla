@@ -119,19 +119,52 @@ def can_manage_channel(channel: LiveChannel, user) -> bool:
 
 # ---------- 地址生成 ----------
 
+# 直播拉流的**实际可用入口**（2026-11-01 修正）。
+#
+# ## 为什么不能直接用 SRS_PLAY_URL
+# 线上 SRS_PLAY_URL = https://live.trise.top:7882/live，而该域名所在服务器是阿里云、
+# 该域名未备案 ⇒ 出口边缘设备对「TLS ClientHello 的 SNI 含 trise.top」直接 RST，
+# 明文 HTTP 则返回 Beaver 的 Non-compliance ICP Filing 拦截页。
+# 实测：同 IP 同端口，SNI 换成无关域名/不带 SNI 全部成功拉流，SNI 含 trise.top 全部失败；
+# RTMP(1935) 不受影响（裸 TCP 无 SNI 字段）——所以推流一直正常、拉流一直失败。
+#
+# 因此 web/客户端看到的 flv_url / hls_url 必须是**能直连的地址**：
+# 裸 IP（不发 SNI，不触发过滤）。证书 SAN 是 *.trise.top、无 IP SAN，
+# 浏览器/ExoPlayer 会拒绝这个 IP —— 所以这里再额外给出一个「带 Host 语义」的可用形态。
+#
+# 取值优先级：
+#   1. 显式配置 LIVE_PULL_BASE_URL（运维可覆盖，换线路不必改代码）；
+#   2. 否则用 LIVE_PULL_HOST 裸 IP + LIVE_PULL_PORT（默认 volx 的 47.108.85.223:7882）。
+LIVE_PULL_BASE_URL = getattr(settings, "LIVE_PULL_BASE_URL", "") or ""
+LIVE_PULL_HOST = getattr(settings, "LIVE_PULL_HOST", "") or "47.108.85.223"
+LIVE_PULL_PORT = int(getattr(settings, "LIVE_PULL_PORT", 0) or 7882)
+
+
+def _pull_base() -> str:
+    """拉流地址前缀（协议 + host + 端口 + /live）。"""
+    explicit = (LIVE_PULL_BASE_URL or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    return f"https://{LIVE_PULL_HOST}:{LIVE_PULL_PORT}/live"
+
+
 def build_rtmp_url(channel: LiveChannel) -> str:
-    """RTMP 推流地址 `rtmp://<host>:1935/live/{stream_key}`（仅 owner 可见）。"""
+    """RTMP 推流地址 `rtmp://<host>:1935/live/{stream_key}`（仅 owner 可见）。
+
+    ⚠️ 推流地址**保持用域名**：RTMP 是裸 TCP，握手不含 SNI，不受备案过滤影响；
+    改成 IP 反而会让 OBS 的 TLS/握手行为变化（无必要风险）。
+    """
     return f"{settings.SRS_RTMP_URL.rstrip('/')}/{channel.stream_key}"
 
 
 def build_hls_url(channel: LiveChannel) -> str:
-    """HLS 播放地址 `http://<host>:8080/live/{stream_key}.m3u8`（全员可见）。"""
-    return f"{settings.SRS_PLAY_URL.rstrip('/')}/{channel.stream_key}.m3u8"
+    """HLS 播放地址（全员可见）。**必须用实际可连的拉流入口**，见上方说明。"""
+    return f"{_pull_base()}/{channel.stream_key}.m3u8"
 
 
 def build_flv_url(channel: LiveChannel) -> str:
-    """HTTP-FLV 播放地址 `http://<host>:8080/live/{stream_key}.flv`（全员可见）。"""
-    return f"{settings.SRS_PLAY_URL.rstrip('/')}/{channel.stream_key}.flv"
+    """HTTP-FLV 播放地址（全员可见）。**必须用实际可连的拉流入口**，见上方说明。"""
+    return f"{_pull_base()}/{channel.stream_key}.flv"
 
 
 # ---------- 乐观标记 :start / :stop ----------

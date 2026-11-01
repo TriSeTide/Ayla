@@ -13,8 +13,14 @@ def _create_via_api(client, title="爱莉的午后"):
 @pytest.mark.django_db
 def test_create_channel_returns_stream_urls(auth_client, settings):
     """创建 → 201，返回 stream_key/rtmp/hls/flv；status=idle。"""
+    # 拉流地址（2026-11-01）：hls/flv 走 LIVE_PULL_* 而不是 SRS_PLAY_URL #
+    # 线上 SRS_PLAY_URL 指向的 live.trise.top:7882 被阿里云按 SNI 拦截未备案域名，
+    # 因此 hls_url/flv_url 必须来自「裸 IP 直连」配置；这里固定它以便断言。
     settings.SRS_RTMP_URL = "rtmp://127.0.0.1:1935/live"
     settings.SRS_PLAY_URL = "http://127.0.0.1:8080/live"
+    settings.LIVE_PULL_BASE_URL = ""
+    settings.LIVE_PULL_HOST = "47.108.85.223"
+    settings.LIVE_PULL_PORT = 7882
     client, user = auth_client()
     resp = _create_via_api(client)
     assert resp.status_code == 201, resp.content
@@ -26,8 +32,9 @@ def test_create_channel_returns_stream_urls(auth_client, settings):
     assert data["is_owner"] is True
     assert len(data["stream_key"]) == 48
     assert data["rtmp_url"] == f"rtmp://127.0.0.1:1935/live/{data['stream_key']}"
-    assert data["hls_url"] == f"http://127.0.0.1:8080/live/{data['stream_key']}.m3u8"
-    assert data["flv_url"] == f"http://127.0.0.1:8080/live/{data['stream_key']}.flv"
+    # hls/flv 必须是「实际可连的裸 IP 入口」，不是 SRS_PLAY_URL（见 settings.py 说明）
+    assert data["hls_url"] == f"https://47.108.85.223:7882/live/{data['stream_key']}.m3u8"
+    assert data["flv_url"] == f"https://47.108.85.223:7882/live/{data['stream_key']}.flv"
 
 
 @pytest.mark.django_db
