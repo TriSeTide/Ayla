@@ -7,8 +7,8 @@
  *   liveSyncPlaybackRate 默认 1.0），"倍速"观感一律留给用户手动刷新跳边，避免画面自动加速；
  * - 错误恢复：networkError → startLoad() 重试；mediaError → recoverMediaError()；
  *   fatal 且不可恢复 → onFatalError 回调（UI 显示"播放失败 + 重试"，重试 = 销毁重建实例）；
- * - refreshToLiveEdge()：跳到直播最新画面（hls.js → liveSyncPosition；原生/兜底 → seekable 末尾，
- *   再兜底 reload + play）；
+ * - refreshToLiveEdge()：跳到直播最新画面并返回是否贴边成功（hls.js → liveSyncPosition；
+ *   原生/兜底 → seekable 末尾回退一个安全分片，再兜底 reload + play）；
  * - 播放错误与"未开播"由编排层区分（以 /status/ 的 SRS 判定为准），本封装只上报播放层事实；
  * - destroy 幂等：重复调用不抛错（退房销毁清单允许重复执行）。
  */
@@ -110,15 +110,20 @@ export class HlsPlayer {
   }
 
   /**
-   * 跳到直播最新画面（左下角"刷新"键）。
+   * 跳到直播最新画面（左下角"刷新"键）。返回**是否成功贴边**（R1：供后续 UI 反馈使用，
+   * 本帧只做接口，不做任何视觉改动）。
    *
-   * - hls.js：优先用 liveSyncPosition（直播边缘精确秒数）；
-   * - 通用兜底：seek 到 seekable 末尾（原生 HLS 直播的边缘）；
-   * - 最终兜底：reload + play（原生分支强制重新拉流刷新到边缘）。
-   * 幂等：未挂载/已销毁/无流时静默返回，不抛错。
+   * - hls.js：优先用 liveSyncPosition（直播边缘精确秒数，已含 liveSyncDurationCount 安全距离）；
+   * - 通用兜底：seek 到 seekable 末尾**回退一个安全分片**。原因：seekable 的 end 是
+   *   playlist 最后一个分片的边界，直接 seek 到 end 会落在尚未写完/尚未解码的位置
+   *   （表现为卡住或黑屏）；回退量取 hls 实例的 liveSyncDurationCount × 分片时长，
+   *   拿不到则退化为 2s；
+   * - 最终兜底：reload + play（原生分支强制重新拉流刷新到边缘），此路径无法证明贴边，
+   *   返回 false。
+   * 幂等：未挂载/已销毁/无流时静默返回 false，不抛错。
    */
-  refreshToLiveEdge() {
-    if (this.destroyed || !this.video) return;
+  refreshToLiveEdge(): boolean {
+    if (this.destroyed || !this.video) return false;
     const video = this.video;
 
     if (this.mode === "hls.js" && this.hls) {
@@ -126,7 +131,7 @@ export class HlsPlayer {
       if (edge !== null && Number.isFinite(edge) && edge > 0) {
         video.currentTime = edge;
         void video.play().catch(() => {});
-        return;
+        return true;
       }
     }
 
@@ -134,9 +139,12 @@ export class HlsPlayer {
       if (video.seekable.length > 0) {
         const end = video.seekable.end(video.seekable.length - 1);
         if (Number.isFinite(end)) {
-          video.currentTime = end;
+          // R1：回退一个安全分片，避免贴到尚未写完的边缘
+          const back = this.liveEdgeBackoff();
+          const target = end - back;
+          video.currentTime = target > 0 ? target : end;
           void video.play().catch(() => {});
-          return;
+          return true;
         }
       }
     } catch {
@@ -145,6 +153,30 @@ export class HlsPlayer {
 
     video.load();
     void video.play().catch(() => {});
+    return false;
+  }
+
+  /**
+   * seekable 兜底分支的回退量（秒）：hls 实例的 liveSyncDurationCount × 当前分片时长
+   * （targetduration，缺失时用 averagetargetduration）；二者任一取不到则退化为 2s。
+   */
+  private liveEdgeBackoff(): number {
+    const fallback = 2;
+    const hls = this.hls;
+    if (!hls) return fallback;
+    const count = hls.config?.liveSyncDurationCount;
+    const level = hls.levels?.[hls.currentLevel >= 0 ? hls.currentLevel : 0];
+    const details = level?.details;
+    const segment =
+      typeof details?.targetduration === "number" && details.targetduration > 0
+        ? details.targetduration
+        : typeof details?.averagetargetduration === "number" && details.averagetargetduration > 0
+          ? details.averagetargetduration
+          : null;
+    if (typeof count === "number" && count > 0 && segment !== null) {
+      return count * segment;
+    }
+    return fallback;
   }
 }
 

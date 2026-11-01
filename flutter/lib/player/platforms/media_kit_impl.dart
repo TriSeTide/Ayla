@@ -13,7 +13,11 @@ import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../../core/net/live_play_url.dart'
+    show aylaIsVolxPullHost, kAylaVolxPullSniHost;
 import '../hls_player.dart';
+import '../live_edge.dart';
+import '../texture_size.dart';
 
 class MediaKitHls implements HlsPlatformPlayer {
   @override
@@ -35,6 +39,9 @@ class MediaKitHls implements HlsPlatformPlayer {
   VideoController? _videoController;
   final List<StreamSubscription> _subs = [];
   bool _initialized = false;
+
+  /// 纹理尺寸决策器（B4；`dispose` 时取消其去抖计时器）。
+  AylaTextureSizeDecider? _sizeDecider;
 
   @override
   Future<void> attach(String url) async {
@@ -63,8 +70,100 @@ class MediaKitHls implements HlsPlatformPlayer {
     // 不能只靠 playing 判定 —— 见 hls_player.dart 的 kMaxAutoRebuilds 注释）。
     _subs.add(p.stream.position.listen((pos) => onPosition?.call(pos)));
 
+    // ---- 【B4】把纹理尺寸钉在**视频原生分辨率**上 -------------------------------
+    //
+    // 为什么必须做（开发文档 §3 B4，Flutter 独有）：media_kit_video 的
+    // VideoOutput::CheckAndResize() 在「视频要求尺寸 ≠ 当前纹理尺寸」时会
+    // UnregisterTexture + 新建纹理（third_party/media_kit_video/windows/
+    // video_output.cc:241–266），而 GetVideoWidth() 在 width_ 为空时读的是
+    // video-out-params 的 dw/dh ⇒ 窗口尺寸变化让 mpv 重算输出参数 ⇒ 纹理被注销重建
+    // ⇒ 用户看到「窗口一动就闪黑/黑屏」。显式 setSize() 之后 required 恒定
+    // ⇒ CheckAndResize 恒走 early-return（:261–264）⇒ 不再重建纹理。
+    //
+    // 只在**分辨率真的变化时**调（同分辨率重复调 setSize 无意义），并做 200ms 去抖
+    // （一次切换会连续上报 width/height 两次，见 AylaTextureSizeDecider 的说明）。
+    // ⚠️ 必须同时监听 width 与 height：两条流各自只在**自己**变化时触发，
+    // 若只监听 width，则「先到 width、height 随后才到」的那一轮永远配不上高度。
+    _sizeDecider = AylaTextureSizeDecider(
+      onApply: (AylaTextureSize size) => unawaited(_applyTextureSize(size)),
+    );
+    _subs.add(
+      p.stream.width.listen((w) => _sizeDecider?.offer(w, p.state.height)),
+    );
+    _subs.add(
+      p.stream.height.listen((h) => _sizeDecider?.offer(p.state.width, h)),
+    );
+    // 订阅之前可能已经上报过一轮（Player() 到 listen 之间就有事件）⇒ 补一次。
+    _sizeDecider?.offer(p.state.width, p.state.height);
+
+    // ---- 拉流入口的证书主机名声明（Windows 裸 IP 直连）------------------------
+    //
+    // 背景见 core/net/live_play_url.dart：Windows 的直播地址被重写到 volx 裸 IP
+    // （47.108.85.223:7882），而那里的证书 SAN 是 *.trise.top ⇒ 用 IP 连接必然
+    // hostname mismatch。
+    //
+    // ⚠️ 实测结论（2026-11-01，直接驱动本仓库打包的 libmpv-2.dll）：这个
+    // ffmpeg/mbedTLS 构建**默认就不校验证书**（expired / self-signed / wrong-host
+    // 三个必坏证书全部握手通过）；反过来打开校验（tls_verify=1）连 example.com 都
+    // 握手失败，因为该构建没有可用的 CA 源。所以裸 IP 本来就是通的，
+    // **这里不是靠 tls_verify=0 才生效的**。
+    //
+    // 那为什么还要设？这里只设 verifyhost：
+    // 1. 它是 lavf 里**唯一**能「在仍校验证书链的前提下，把比对的主机名换成证书
+    //    真正覆盖的名字」的入口（tls_host_name 在本构建中并不存在，实测被当作未知
+    //    选项静默忽略）。裸 IP 的证书比对必然失败，声明 verifyhost=live.trise.top
+    //    之后，证书若真被校验，比对的是域名而不是 IP。
+    // 2. 将来换一版「默认开启校验」的 ffmpeg 时，这行不会变成死代码，也不会因为
+    //    IP 不匹配而直接黑屏。
+    //
+    // **刻意不设 tls_verify=0**：那会在真能校验的构建上把校验关掉，属于安全降级；
+    // 当前构建本来就不校验，设了等于没设，却会误导后人以为「为了连上才关的」。
+    // 也不追加 tls-ca-file：实测导出的 Windows 根证书被
+    // mbedtls_x509_crt_parse_file ... returned 2 拒绝，写进去只会制造假象。
+    if (_isVolxPullUrl(url)) {
+      await _setMpvOption(p, 'stream-lavf-o', 'verifyhost=$kAylaVolxPullSniHost');
+    }
+
     onStateChange?.call(HlsState.loading);
     await p.open(Media(url), play: true);
+  }
+
+  /// 下发纹理尺寸（B4；`VideoController.setSize` 内部会 await 平台实例，
+  /// 失败（含已 dispose）不得让调用方崩 —— 尺寸固定是**优化**，不是播放的前提）。
+  Future<void> _applyTextureSize(AylaTextureSize size) async {
+    final VideoController? vc = _videoController;
+    if (vc == null) return;
+    try {
+      await vc.setSize(width: size.width, height: size.height);
+    } catch (_) {
+      // 视频输出已销毁 / 平台不支持 ⇒ 忽略：纹理跟随视频分辨率，只是少了 B4 的保护。
+    }
+  }
+
+  /// [url] 是否指向 volx 裸 IP 拉流入口（见 `core/net/live_play_url.dart`）。
+  ///
+  /// 只对裸 IP 生效：其他来源（含已经收敛到樱花的移动端地址）一律不碰 mpv 的
+  /// lavf 选项，避免把「本来好好的普通 HTTPS 流」也加上主机名覆盖。
+  static bool _isVolxPullUrl(String url) {
+    final Uri? parsed = Uri.tryParse(url.trim());
+    return parsed != null && aylaIsVolxPullHost(parsed.host);
+  }
+
+  /// 给内部 mpv 实例下发一个选项；失败**不得**让 attach 抛出去。
+  ///
+  /// 证书/网络选项是**起播的辅助条件**，不是前提：某些构建没有该选项、
+  /// 或 player 已 dispose 时它只应该退化为「没有这层保护」，不能让直播直接黑屏。
+  static Future<void> _setMpvOption(Player p, String key, String value) async {
+    try {
+      // `Player.platform` 的类型是 `PlatformPlayer?`（未初始化 / Web 上可能为空），
+      // 这里必须先按可空接住再做类型提升 —— 直接声明成非空会让整个 lib 编译失败。
+      final PlatformPlayer? platform = p.platform;
+      if (platform is NativePlayer) {
+        await platform.setProperty(key, value, waitForInitialization: false);
+      }
+    } catch (_) {
+      // 选项不存在 / 原生侧拒绝 / 已 dispose ⇒ 忽略（见上面的注释）。
+    }
   }
 
   @override
@@ -72,17 +171,43 @@ class MediaKitHls implements HlsPlatformPlayer {
     await _player?.play();
   }
 
+  /// 跳到直播真实边缘（开发文档 §3 R1）。
+  ///
+  /// 改前：`seek(duration)` —— 而直播的 `duration` 是**整个 playlist 的总长**
+  /// （实测 ≈66s），不是直播边缘 ⇒ 点刷新等于跳到 playlist 末尾（还会触发重新缓冲）。
+  ///
+  /// 改后：读 mpv 的 `seekable-ranges`，取最后一段的 `end`，回退 1 个分片
+  /// （[kLiveEdgeSeekBackoff]）。解析不到 ⇒ `duration - 1 分片` 兜底
+  /// （且 `duration` 必须 > [kLiveEdgeMinDuration]，否则视为「不是直播」）。
+  /// 两者都不成立 ⇒ 返回 false，由 `HlsPlaybackController.refreshToLiveEdge`
+  /// 走「重建」兜底（顺序固定：**先 seek，失败才 rebuild**）。
   @override
   Future<bool> seekToLiveEdge() async {
-    final p = _player;
+    final Player? p = _player;
     if (p == null) return false;
+    // seekable-ranges：优先问 mpv（直播边缘的唯一真实来源）。
+    Duration? seekableEnd;
     try {
-      final dur = p.state.duration;
-      if (dur > Duration.zero) {
-        await p.seek(dur);
-        return true;
+      final PlatformPlayer? platform = p.platform;
+      if (platform is NativePlayer) {
+        final String raw = await platform.getProperty(
+          'seekable-ranges',
+          waitForInitialization: false,
+        );
+        seekableEnd = aylaParseSeekableEnd(raw);
       }
-      return false;
+    } catch (_) {
+      // 平台不提供 / 已 dispose ⇒ 退回 duration 兜底（不抛给调用方）
+      seekableEnd = null;
+    }
+    final Duration? target = aylaLiveEdgeSeekTarget(
+      seekableEnd: seekableEnd,
+      duration: p.state.duration,
+    );
+    if (target == null) return false;
+    try {
+      await p.seek(target);
+      return true;
     } catch (_) {
       return false;
     }
@@ -105,11 +230,27 @@ class MediaKitHls implements HlsPlatformPlayer {
       key: ObjectKey(vc),
       controller: vc,
       controls: NoVideoControls,
+      // ---- 【B5】后台/前台的生命周期必须成对 ------------------------------------
+      //
+      // media_kit_video 的 `Video` 默认值（video_texture.dart:132–133）是
+      // pauseUponEnteringBackgroundMode = true、resumeUponEnteringForegroundMode = false，
+      // Ayla 此前两个都没传 ⇒ **进后台暂停、回前台不恢复**
+      // ⇒ 回到前台是黑屏，必须手动点刷新（需求 §3.1 B5 / G3「切后台再回来自动恢复」）。
+      //
+      // 取值（开发文档 §3 B5）：保持 pause = true（后台继续解码纯耗电，直播没必要），
+      // 但 **resume 必须显式置 true**，否则那条「恢复」分支永远不会走
+      // （video_texture.dart:291–297 只在 resume 为真且确实是本组件暂停的才 play）。
+      pauseUponEnteringBackgroundMode: true,
+      resumeUponEnteringForegroundMode: true,
     );
   }
 
   @override
   Future<void> dispose() async {
+    // 先去抖计时器：它持有 `_applyTextureSize` 闭包，晚取消会在已释放的
+    // controller 上打一次 setSize（被 catch 吞掉，但没必要）。
+    _sizeDecider?.dispose();
+    _sizeDecider = null;
     for (final s in _subs) {
       await s.cancel();
     }

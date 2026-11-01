@@ -27,7 +27,26 @@ const int kRebuildCooldownMs = 4000;
 /// 永远停在「黑屏 + 转圈」，用户看不到错误也无从重试（2026-10-18 用户实报截图）。
 /// 现在：连续 [kMaxAutoRebuilds] 次仍未起播 ⇒ 上报错误 ⇒ UI 显示「播放失败 + 重试」；
 /// 人手重试会重置计数（不设上限）。
+///
+/// ⚠️ **封顶 ≠ 永久放弃**：封顶只是「本轮不再盲试」，随后由
+/// [kRebuildCountResetWindow] 的时间窗重置 + 延迟重试重新开一轮
+/// （开发文档 §3 B2；需求 §5.1 S2「自愈失败后必须有界重试，不得永久放弃」）。
 const int kMaxAutoRebuilds = 2;
+
+/// 连续失败的时间窗重置窗口（开发文档 §3 B2 的 `kRebuildCountResetWindow`）。
+///
+/// ## 为什么必须有（用户实报「过一会才恢复**甚至不恢复**」的 B2 那一半）
+/// 旧实现（`hls_player.dart` 改前的 `_autoRebuild`）在
+/// `_autoRebuilds >= maxAutoRebuilds` 时**只**调 `onError` 后 `return`：
+/// - `_autoRebuilds` 只在真正起播（position 前进）时清零；
+/// - 一旦封顶，**没有任何后续重试路径** ⇒ 网络抖动几秒就永久停在「播放失败」，
+///   必须用户手动点重试（需求 §3.1 B2 / §5.1 S2）。
+///
+/// ## 语义
+/// 距**上次失败**超过本窗口 ⇒ 视为新一轮，计数归零（不是永久封顶）；
+/// 封顶时再排一个本窗口后的延迟重试（[_scheduleRetryAfterCooldown]）。
+/// 60s 的选择来自开发文档 §3 B2 / §5.3：强于一次瞬时抖动、弱于用户放弃的耐心。
+const Duration kRebuildCountResetWindow = Duration(seconds: 60);
 
 /// 播放器对外状态
 enum HlsState { idle, loading, playing, buffering, error }
@@ -101,6 +120,7 @@ class HlsPlaybackController {
     this.stallTimeout = const Duration(milliseconds: kStallTimeoutMs),
     this.rebuildCooldown = const Duration(milliseconds: kRebuildCooldownMs),
     this.maxAutoRebuilds = kMaxAutoRebuilds,
+    this.rebuildCountResetWindow = kRebuildCountResetWindow,
   });
 
   final HlsPlatformPlayer Function() _makePlatform;
@@ -114,6 +134,9 @@ class HlsPlaybackController {
 
   /// 连续自动重建上限（默认 [kMaxAutoRebuilds]）。
   final int maxAutoRebuilds;
+
+  /// 连续失败计数的时间窗重置窗口（默认 [kRebuildCountResetWindow]）。
+  final Duration rebuildCountResetWindow;
 
   HlsPlatformPlayer? _player;
   String? _currentUrl;
@@ -142,8 +165,39 @@ class HlsPlaybackController {
   /// 连续自动重建次数（真正起播即清零；见 [kMaxAutoRebuilds]）。
   int _autoRebuilds = 0;
 
+  /// 上一次「失败」（一次自动重建 / 封顶上报）发生的时刻。
+  ///
+  /// 判据是 [rebuildCountResetWindow]：距此超过窗口 ⇒ 视为新一轮、计数归零
+  /// （B2；见 [kRebuildCountResetWindow] 的根因说明）。
+  DateTime _lastFailureAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 封顶后的延迟重试计时器（B2；[destroy] / [dispose] 必须取消）。
+  Timer? _retryTimer;
+
+  /// 正在重建（防重入）。
+  ///
+  /// 为什么需要：封顶后的延迟重试与「卡顿计时器重排」「fatal 自动重建」三条路径可能
+  /// 在同一时刻撞上 —— 旧实现没有防重入，两个并发的 `rebuild()` 会各自
+  /// `dispose()` 一次、再各建一个平台播放器 ⇒ 前者刚挂上就被后者 dispose，
+  /// 表现为「刚有画面又黑了」（B2/B3 共同的假象来源）。
+  bool _rebuilding = false;
+
   /// 本次挂载是否已真正出过画面（位置前进过）。
   bool _started = false;
+
+  /// 平台播放器实例是否**健康**（B3）。
+  ///
+  /// ## 为什么幂等条件不能只比 URL（开发文档 §3 B3）
+  /// 旧实现：`if (_player != null && _currentUrl == url) return;`
+  /// —— URL 没变但**平台实例已经死了**（mpv 进程侧 EOF/错误、ExoPlayer 的
+  /// Source error 之后内部播放器处于不可用状态）时，attach 永远幂等跳过
+  /// ⇒ 永久黑屏，点刷新、退出重进以外的任何操作都不恢复（需求 §3.1 B3）。
+  ///
+  /// 置 true 的时机：平台真的出过画面 —— [onPosition] 上报位置前进，
+  /// 或 [onStateChange] 进入 playing（见 [_onPlatformState] 的说明：
+  /// playing 单独不足以判定"有画面"，但**足以判定"实例还活着"**）。
+  /// 置 false 的时机：[attach] 新建实例、[rebuild]、[destroy]、平台 fatal。
+  bool _platformHealthy = false;
 
   void _log(String line) => _events.onLog?.call('[hls] $line');
 
@@ -152,14 +206,29 @@ class HlsPlaybackController {
     _events.onStateChange?.call(s);
   }
 
-  /// 挂载播放器并开始播放。幂等：相同 url 已挂载 → 直接返回（不重建）。
+  /// 挂载播放器并开始播放。
+  ///
+  /// ## 幂等条件（B3，开发文档 §3 B3）
+  /// **相同 url 且平台实例仍健康** ⇒ 直接返回（切场景零黑屏）；
+  /// 相同 url 但实例**不健康** ⇒ 必须强制重建，否则永久黑屏（需求 §5.1 S3
+  /// 「播放器实例失效必须能被检测并强制重建」）。
+  ///
+  /// ⚠️ 走的是「先释放再新建」的完整路径，**不递归调用自己** —— 健康标志在
+  /// 本方法开头就复位成 false，跑完这条路径自然就是"重建"；若在这里回调
+  /// [rebuild] 会再次进入 attach（rebuild 内部也调 attach），可能无限递归。
   Future<void> attach(String url) async {
     if (_player != null && _currentUrl == url) {
-      _log('attach 幂等跳过（$url 已挂载）');
-      return;
+      if (_platformHealthy) {
+        _log('attach 幂等跳过（$url 已挂载且实例健康）');
+        return;
+      }
+      // B3：URL 没变但实例已死 ⇒ 幂等命中也要真的重建。
+      _log('attach 幂等命中但实例不健康 ⇒ 强制重建（$url）');
     }
     await _player?.dispose();
     _player = null;
+    // B3：新实例的健康状态一律从 false 起算 —— 只有真的出画面/进 playing 才置真。
+    _platformHealthy = false;
     _currentUrl = url;
     _lastRebuildAt = DateTime.now();
     _clearStallTimer();
@@ -183,6 +252,10 @@ class HlsPlaybackController {
 
   void _onPlatformState(HlsState s) {
     _setState(s);
+    // B3：playing 说明平台实例**还活着**（能推进播放状态机）——
+    // 它不足以证明「有画面」（mpv 连上但没数据时 playing 同样为真），
+    // 但对 attach 的幂等判定来说，这个证据已经足够：实例死了不会报 playing。
+    if (s == HlsState.playing) _platformHealthy = true;
     // ⚠️ **不要**在 playing 时无条件 `_onResume()`：mpv 在「连上但没数据」时同样
     // `playing=true`，把它当恢复会取消卡顿计时器 ⇒ 永远停在转圈（用户实报现象）。
     // 恢复只由「位置前进」或「已起播后缓冲结束」驱动。
@@ -194,21 +267,78 @@ class HlsPlaybackController {
 
   /// 位置前进 = 真的出画面（[HlsPlatformPlayer.onPosition]）。
   void _markStarted() {
+    // B3：位置前进是最强证据 —— 实例不仅活着，而且真的在出画面。
+    _platformHealthy = true;
     if (_started) return;
     _started = true;
     _autoRebuilds = 0;
   }
 
-  /// 自动重建（带次数上限；超限改为上报错误）。
+  /// 自动重建（带次数上限；超限上报错误 + **排延迟重试**，不再永久放弃）。
+  ///
+  /// ## B2（开发文档 §3 B2；需求 §3.1 B2 / §5.1 S2）
+  /// 旧实现封顶后只 `onError` 就 `return`：没有时间窗重置、没有后续重试
+  /// ⇒ 「连续 2 次自动重建仍无画面」就永久停在「播放失败」，
+  /// 网络抖动几秒也会触发（用户实报「过一会才恢复**甚至不恢复**」）。
+  ///
+  /// 现在两条出路：
+  /// 1. **时间窗重置**：距上次失败 ≥ [rebuildCountResetWindow] ⇒ 本轮计数归零；
+  /// 2. **封顶后延迟重试**：`onError`（UI 照常显示「播放失败 + 重试」，人不必干等）
+  ///    **并且**排一个窗口后的 [_scheduleRetryAfterCooldown]，到点自己再来一轮。
+  ///
+  /// `_rebuilding` 是防重入闸门（见该字段注释）：并发进入时后来者直接放弃 ——
+  /// 它要做的重建已经有人在做。
   Future<void> _autoRebuild(String url, String reason) async {
+    if (_rebuilding) {
+      _log('已有重建在进行中，跳过本次自动重建：$reason');
+      return;
+    }
+    // 时间窗重置：距上次失败超过窗口 ⇒ 视为新一轮，计数归零（不是永久封顶）。
+    final bool newRound =
+        DateTime.now().difference(_lastFailureAt) >= rebuildCountResetWindow;
+    if (newRound) {
+      if (_autoRebuilds > 0) {
+        _log('距上次失败已超过 ${rebuildCountResetWindow.inSeconds}s ⇒ 重建计数归零');
+      }
+      _autoRebuilds = 0;
+    }
+    _lastFailureAt = DateTime.now();
     if (_autoRebuilds >= maxAutoRebuilds) {
-      _log('自动重建已达上限（$maxAutoRebuilds）→ 上报错误：$reason');
+      _log('自动重建已达上限（$maxAutoRebuilds）→ 上报错误并排延迟重试：$reason');
       _events.onError?.call(reason);
+      // ★ B2 的关键：不再 `return` 了事，窗口后再来一轮。
+      _scheduleRetryAfterCooldown(url);
       return;
     }
     _autoRebuilds += 1;
     _log('第 $_autoRebuilds/$maxAutoRebuilds 次自动重建：$reason');
     await rebuild(url);
+  }
+
+  /// 封顶后的延迟重试（B2；开发文档 §3 B2 的 `_scheduleRetryAfterCooldown`）。
+  ///
+  /// 为什么延后一个 [rebuildCountResetWindow] 而不是立刻重试：
+  /// 1. 封顶意味着「短时间内连续失败」，立刻再来只会继续失败并刷日志/刷错误；
+  /// 2. 等一个窗口后 [_autoRebuild] 的时间窗重置会**天然**把计数归零，
+  ///    于是这一轮重试又是一次完整的「有界」尝试（有界 + 可恢复，需求 §5.2）。
+  ///
+  /// 幂等：重复调用只保留最后一个计时器（`_retryTimer?.cancel()`）。
+  /// URL 变了 / 会话销毁了 ⇒ 到点直接放弃（不再替新地址重建）。
+  void _scheduleRetryAfterCooldown(String url) {
+    _retryTimer?.cancel();
+    _retryTimer = Timer(rebuildCountResetWindow, () {
+      _retryTimer = null;
+      if (_currentUrl != url) return;
+      _autoRebuilds = 0;
+      _log('时间窗后自动重试：$url');
+      unawaited(_autoRebuild(url, '时间窗后自动重试'));
+    });
+  }
+
+  /// 取消封顶后的延迟重试（[destroy] / [dispose] / 手动重试成功时调用）。
+  void _clearRetryTimer() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
   }
 
   /// 卡顿信号（isBuffering=true / 无新帧）。
@@ -247,16 +377,31 @@ class HlsPlaybackController {
   }
 
   /// fatal 且不可恢复（web：冷却期外自动重建，冷却期内报播放失败）。
+  ///
+  /// ⚠️ B2：**冷却期外一律交给 [_autoRebuild]**（不再自己带「次数未超上限」的判定）
+  /// —— 封顶判定与「封顶后排延迟重试」只允许有**一处**。
+  /// 旧实现在这里提前走到 `else → onError` 就返回了，于是「fatal 打满上限」这条最常见的
+  /// 失败路径**永远排不出重试**（用户看到的就是永久「播放失败」，需求 §3.1 B2）。
   void _onFatal(String detail) {
     _clearStallTimer();
-    if (DateTime.now().difference(_lastRebuildAt) >= rebuildCooldown &&
-        _autoRebuilds < maxAutoRebuilds) {
-      _log('fatal: $detail → 自动重建');
-      final url = _currentUrl;
-      if (url != null) unawaited(_autoRebuild(url, detail));
-    } else {
+    // B3：fatal = 平台实例已经不可用；幂等条件必须随之失效，
+    // 否则下一次同 URL 的 attach 会被 `_currentUrl == url` 挡住（永久黑屏）。
+    _platformHealthy = false;
+    final String? url = _currentUrl;
+    if (url == null) {
       _events.onError?.call(detail);
+      return;
     }
+    if (DateTime.now().difference(_lastRebuildAt) >= rebuildCooldown) {
+      _log('fatal: $detail → 自动重建');
+      unawaited(_autoRebuild(url, detail));
+      return;
+    }
+    // 冷却期内不重建，但先报错给 UI；若已封顶还要排上延迟重试，
+    // 保证「任何失败路径都有后续」（B2 的不变量）。
+    _lastFailureAt = DateTime.now();
+    if (_autoRebuilds >= maxAutoRebuilds) _scheduleRetryAfterCooldown(url);
+    _events.onError?.call(detail);
   }
 
   void _clearStallTimer() {
@@ -268,39 +413,105 @@ class HlsPlaybackController {
   ///
   /// [manual] = 用户点「重试」：**重置自动重建计数**（人手重试不设上限；
   /// 否则自动封顶后手动重试也会立刻报错）。
+  ///
+  /// ## 三重防护（B2 + B3）
+  /// 1. **防重入**：重建期间再有请求进来直接返回（否则两个并发 rebuild 会互相
+  ///    dispose 对方的实例，画面刚出来又黑）；
+  /// 2. **B3 健康标志复位**：新实例在真的出画面之前一律按「不健康」算 ⇒ 这段时间里
+  ///    若有人再用同一 URL 调 attach，不会被幂等跳过；
+  /// 3. 清理 B2 的延迟重试计时器：既然现在就在重建，那个「窗口后再试」已经多余
+  ///    （留着会在窗口后凭空再来一次重建，等于双倍抖动）。
   Future<void> rebuild(String url, {bool manual = false}) async {
-    if (manual) {
-      _autoRebuilds = 0;
-      _started = false;
+    if (_rebuilding) {
+      _log('已在重建中，忽略重复的 rebuild 请求（$url）');
+      return;
     }
-    await _player?.dispose();
-    _player = null;
-    await attach(url);
+    _rebuilding = true;
+    try {
+      _clearRetryTimer();
+      if (manual) {
+        _autoRebuilds = 0;
+        _started = false;
+      }
+      // B3：实例即将被释放，健康标志必须立刻失效。
+      _platformHealthy = false;
+      await _player?.dispose();
+      _player = null;
+      await attach(url);
+    } finally {
+      _rebuilding = false;
+    }
   }
 
   /// 用户主动重试（重置自愈计数后重建）。
   Future<void> retry(String url) => rebuild(url, manual: true);
 
-  /// 跳到直播最新画面。duration 有效 → seekTo 末尾；否则重建兜底。
-  Future<void> refreshToLiveEdge() async {
-    final p = _player;
+  /// 让平台播放器继续播（App 回到前台时用；B5 的**移动端**那一半）。
+  ///
+  /// ## 为什么需要（开发文档 §3 B5 / 需求 §5.1 S5 / G3）
+  /// Windows 侧靠 media_kit `Video` 的 resumeUponEnteringForegroundMode 自动恢复
+  /// （见 `media_kit_impl.dart` 的 buildView）。但**移动端没有这对参数**：
+  /// `video_player` 的 `VideoPlayer` widget 不接受生命周期配置，切后台后
+  /// ExoPlayer/AVPlayer 会被系统停下或丢掉 surface ⇒ 回到前台是一张黑画面。
+  ///
+  /// 这里只做最小动作：让平台层 play() 一次；**不重建**（重建是几秒黑屏 + 重新握手，
+  /// 只在确实播不动时由自愈状态机 / 刷新键来做）。已经 playing 时是 no-op。
+  Future<void> resumePlayback() async {
+    final HlsPlatformPlayer? p = _player;
     if (p == null) return;
-    final ok = await p.seekToLiveEdge();
-    if (!ok) {
-      _log('跳边兜底：重建播放器');
-      final url = _currentUrl;
-      if (url != null) await rebuild(url);
+    if (_state == HlsState.playing) return;
+    try {
+      await p.play();
+    } catch (_) {
+      // 平台实例已不可用 ⇒ 交给自愈状态机（卡顿计时器）/ B3 健康判定兜底。
     }
   }
 
+  /// 跳到直播**真实边缘**（刷新键）。
+  ///
+  /// ## R1（开发文档 §3 R1；需求 §3.3 R1 / §5.3 I1）
+  /// 语义落在平台实现的 [HlsPlatformPlayer.seekToLiveEdge] 上：
+  /// · media_kit：读 mpv 的 `seekable-ranges`，目标 = 最后一段 `end - 2s`；
+  /// · video_player：Dart 侧没有 seekable API ⇒ `duration - 2s` 兜底。
+  /// 两者都由 `lib/player/live_edge.dart` 的纯函数算出目标（可单测）。
+  ///
+  /// **兜底顺序固定为「先 seek，失败才 rebuild」**（开发文档 §3 R3）：
+  /// 顺手重建一次就是几秒黑屏 + 重新握手，能 seek 就不要重建。
+  ///
+  /// ⚠️ 旧实现的第一行是 `if (p == null) return;` —— 播放器实例缺失时刷新键
+  /// **什么都不做**（用户点了没反应）。现在改为走重建兜底：那正是「实例没了」
+  /// 的唯一正确处置（与 B3 的强制重建同一个语义）。
+  Future<void> refreshToLiveEdge() async {
+    final HlsPlatformPlayer? p = _player;
+    if (p != null) {
+      final bool ok = await p.seekToLiveEdge();
+      if (ok) return;
+      _log('贴边 seek 失败 ⇒ 重建兜底（先 seek 失败才 rebuild）');
+    } else {
+      _log('播放器实例缺失 ⇒ 刷新走重建兜底');
+    }
+    final String? url = _currentUrl;
+    if (url == null) return;
+    // 走「手动」语义：用户亲手点刷新，计数归零（同 retry）。
+    await rebuild(url, manual: true);
+  }
+
   /// 销毁（幂等）。
+  ///
+  /// ⚠️ **必须取消 B2 的延迟重试计时器**：它是 60s 级别的 Timer，句柄挂在
+  /// 本对象上；不取消的话，会话已经销毁 60s 后它仍会触发一次重建 —— 轻则白白
+  /// 起一个平台播放器再 immediately 被丢（日志噪音 + 一次真实拉流），重则
+  /// 在已 dispose 的会话上写状态（`used after being disposed`）。
   Future<void> destroy() async {
     _clearStallTimer();
+    _clearRetryTimer();
     await _player?.dispose();
     _player = null;
     _currentUrl = null;
     _autoRebuilds = 0;
     _started = false;
+    // B3：没有实例了 ⇒ 健康状态回到「未知/不健康」。
+    _platformHealthy = false;
     _setState(HlsState.idle);
   }
 

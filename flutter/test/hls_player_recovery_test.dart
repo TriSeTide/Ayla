@@ -62,6 +62,8 @@ void main() {
     Duration stall = const Duration(milliseconds: 40),
     Duration cooldown = const Duration(milliseconds: 10),
     int maxRebuilds = kMaxAutoRebuilds,
+    // B2：测试用极短的时间窗（生产 = kRebuildCountResetWindow = 60s）
+    Duration resetWindow = kRebuildCountResetWindow,
   }) {
     created = <_FakePlatform>[];
     errors = <String>[];
@@ -75,6 +77,7 @@ void main() {
       stallTimeout: stall,
       rebuildCooldown: cooldown,
       maxAutoRebuilds: maxRebuilds,
+      rebuildCountResetWindow: resetWindow,
     );
   }
 
@@ -156,11 +159,104 @@ void main() {
     expect(created.single.disposeCalls, 1);
   });
 
-  test('attach 幂等：同 URL 不重建', () async {
+  // ---- B3：attach 幂等条件必须包含「实例健康」（开发文档 §3 B3）----
+
+  test('B3：同 URL 且实例健康 ⇒ 幂等跳过（不重建）', () async {
     final HlsPlaybackController c = build();
     await c.attach('https://x/live/a.m3u8');
+    // 实例真的活了（playing 或 position 前进任一即可，见 _platformHealthy）
+    created.single.onStateChange?.call(HlsState.playing);
     await c.attach('https://x/live/a.m3u8');
     expect(created.length, 1);
     expect(created.single.playCalls, 1);
+  });
+
+  test('B3：同 URL 但实例不健康 ⇒ 强制重建（否则永久黑屏）', () async {
+    final HlsPlaybackController c = build();
+    await c.attach('https://x/live/a.m3u8');
+    // 平台实例已死（从未上报 playing/position，或刚 fatal 过）⇒ URL 相同也不许跳过
+    created.single.onFatal?.call('mpv EOF');
+    await c.attach('https://x/live/a.m3u8');
+    expect(
+      created.length,
+      2,
+      reason: 'URL 相同但实例死了仍幂等跳过 = 永久黑屏（需求 §3.1 B3 / §5.1 S3）',
+    );
+    expect(created.first.disposeCalls, 1, reason: '旧实例必须先释放');
+    await c.destroy();
+  });
+
+  test('B3：position 前进后实例健康 ⇒ 幂等跳过', () async {
+    final HlsPlaybackController c = build();
+    await c.attach('https://x/live/a.m3u8');
+    created.single.onPosition?.call(const Duration(seconds: 3));
+    await c.attach('https://x/live/a.m3u8');
+    expect(created.length, 1);
+    await c.destroy();
+  });
+
+  // ---- B2：封顶后不得永久放弃（开发文档 §3 B2）----
+
+  test('B2：封顶后仍会排一个时间窗后的延迟重试（不永久放弃）', () async {
+    final HlsPlaybackController c = build(
+      stall: const Duration(milliseconds: 20),
+      cooldown: const Duration(milliseconds: 1),
+      maxRebuilds: 1,
+      // 测试用极短窗口（生产是 60s）
+      resetWindow: const Duration(milliseconds: 80),
+    );
+    await c.attach('https://x/live/a.m3u8');
+    // 连续失败直到封顶（每次新实例立刻 fatal）
+    for (int i = 0; i < 12; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      created.last.onFatal?.call('boom');
+      if (errors.isNotEmpty) break;
+    }
+    expect(errors, isNotEmpty, reason: '封顶先报错给 UI（人要能立刻点重试）');
+    final int afterCap = created.length;
+    // 时间窗过后必须自己再来一轮：不依赖任何外部事件
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(
+      created.length,
+      greaterThan(afterCap),
+      reason: '封顶后必须有后续重试路径（需求 §3.1 B2 / §5.1 S2）',
+    );
+    await c.destroy();
+  });
+
+  test('B2：destroy 会取消延迟重试计时器（不留 60s 级悬挂 Timer）', () async {
+    final HlsPlaybackController c = build(
+      stall: const Duration(milliseconds: 20),
+      cooldown: const Duration(milliseconds: 1),
+      maxRebuilds: 1,
+      resetWindow: const Duration(milliseconds: 150),
+    );
+    await c.attach('https://x/live/a.m3u8');
+    for (int i = 0; i < 12; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      created.last.onFatal?.call('boom');
+      if (errors.isNotEmpty) break;
+    }
+    final int before = created.length;
+    await c.destroy();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(
+      created.length,
+      before,
+      reason: '会话销毁后仍重建 = 白拉起一个播放器再丢弃（还会写已 dispose 的状态）',
+    );
+  });
+
+  // ---- 防重入 ----
+
+  test('重建期间防重入：并发触发不会互相 dispose', () async {
+    final HlsPlaybackController c = build();
+    await c.attach('https://x/live/a.m3u8');
+    await Future.wait(<Future<void>>[
+      c.rebuild('https://x/live/a.m3u8'),
+      c.rebuild('https://x/live/a.m3u8'),
+    ]);
+    expect(created.length, 2, reason: '第二次并发 rebuild 必须被防重入闸门挡住');
+    await c.destroy();
   });
 }

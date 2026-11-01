@@ -30,6 +30,17 @@ const LIVE_VIEWER_PREVIEW = 12;
 const STALL_TIMEOUT_MS = 2_000;
 /** 自动重建冷却（防 fatal 错误死循环） */
 const REBUILD_COOLDOWN_MS = 4_000;
+/**
+ * 自愈连续失败计数的时间窗（B2，与 Flutter 端 kRebuildCountResetWindow 同语义）：
+ * 距上次自愈失败超过该时长 ⇒ 视为新一轮，连续失败计数归零。**没有它就会永久放弃**：
+ * 计数只涨不落，一旦封顶，之后任何一次失败都进不了重建分支，直播停在"播放失败"。
+ */
+const REBUILD_COUNT_RESET_WINDOW_MS = 60_000;
+/**
+ * 自动重建连续失败上限（B2）：达到上限 = 本次自愈封顶，此时不再无限重建，
+ * 但**不放弃**——安排 REBUILD_COUNT_RESET_WINDOW_MS 后的有界重试。
+ */
+const MAX_CONSECUTIVE_REBUILDS = 3;
 
 export interface LiveSessionOptions {
   activityRoute?: string;
@@ -60,6 +71,15 @@ class LiveSessionRuntime {
   private offFrame: (() => void) | null = null;
   private alive = false;
   private lastRebuildAt = 0;
+  /** 连续自动重建失败次数（B2）：播放恢复出帧时归零，进入新时间窗时也归零 */
+  private consecutiveRebuilds = 0;
+  /** 最近一次自愈失败时刻（B2 时间窗判定基准） */
+  private lastFailureAt = 0;
+  /**
+   * 封顶后的延迟重试定时器（B2，有界、防重入）：同一时间至多一个；
+   * 只在当前仍是同一路流、且仍不健康时执行一次重建。
+   */
+  private healRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private tracksOwnerActivity = false;
   private stallTimer: ReturnType<typeof setTimeout> | null = null;
   private watchdogCleanup: (() => void) | null = null;
@@ -348,6 +368,9 @@ class LiveSessionRuntime {
     this.offStatusFrame = null;
     this.clearSrsRetry();
     this.clearStallTimer();
+    this.clearHealRetry();
+    this.consecutiveRebuilds = 0;
+    this.lastFailureAt = 0;
     const shouldKeepActivity =
       this.tracksOwnerActivity && useLiveStore.getState().current.channel?.status === "live";
     useLiveStore.getState().clearCurrent();
@@ -384,17 +407,64 @@ class LiveSessionRuntime {
     return this.videoEl;
   }
 
-  /** 挂载播放器：销毁旧实例 → 重新 attach（startLoad(-1) 从直播边缘起播 = 跳到最新）。
-   *  幂等：相同 hls_url 已挂载 → 直接返回（小窗点回/StrictMode 重复触发时**不重建**，
-   *  播放状态完全复用，切换零黑屏）。 */
-  attachPlayer(): boolean {
-    const video = this.ensureVideo();
+  /**
+   * 挂载播放器：销毁旧实例 → 重新 attach（startLoad(-1) 从直播边缘起播 = 跳到最新）。
+   *
+   * 幂等（**URL + 实例健康**双条件，缺陷 B3）：相同 hls_url 已挂载且实例健康 → 直接返回
+   * （小窗点回/StrictMode 重复触发时**不重建**，播放状态完全复用，切换零黑屏）；
+   * 实例已死（无画面 / video 报错 / 已 ended）但 URL 没变 → 幂等命中否决，销毁后重建。
+   * 只看 URL 会让"实例已死但 URL 未变"永久黑屏：任何操作都不再触发重建。
+   *
+   * 画面槽位守卫（缺陷 B6）：小窗态（miniPlayer 投影非空）画面归小窗，本方法**不动 video
+   * 元素、也不做首次挂载**——refreshSrsStatus 读到 live 就 attach 时，若把 video
+   * append 回大窗容器就是与小窗抢流（小窗黑 + 主窗口黑屏）。
+   */
+  attachPlayer(opts: { force?: boolean } = {}): boolean {
     const hlsUrl = useLiveStore.getState().current.channel?.hls_url ?? null;
     if (!hlsUrl) return false;
-    if (this.player && this.player.getMode() !== null && this.currentHlsUrl === hlsUrl) {
-      // 防御：video 未在播放则恢复（容器迁移不应发生，兜底）
-      if (video.paused) void video.play()?.catch(() => {});
-      return true;
+    if (this.miniPlayerActive) {
+      // 小窗态：画面槽位不在大窗（B6）。大窗侧一律不接管——不重建、不碰 video 元素、
+      // 也不销毁小窗正在用的实例；video 的落点只由 attachVideoTo/stashVideo 决定。
+      return false;
+    }
+    const video = this.ensureVideo();
+    if (
+      !opts.force &&
+      this.player &&
+      this.player.getMode() !== null &&
+      this.currentHlsUrl === hlsUrl
+    ) {
+      // 健康 = 有帧；或"刚建实例、还在出帧宽限内"（新实例本来就没有帧，不能因此反复重建）
+      if (this.isVideoHealthy(video) || this.withinRebuildGrace()) {
+        // 防御：video 未在播放则恢复（容器迁移不应发生，兜底）
+        if (video.paused) void video.play()?.catch(() => {});
+        return true;
+      }
+      // 幂等命中但实例不健康且已过宽限 ⇒ 实例已死（B3）：落到重建，不能只比 URL 就 return
+    }
+    return this.rebuildPlayer(video, hlsUrl);
+  }
+
+  /**
+   * 出帧宽限：距上次重建不足 REBUILD_COOLDOWN_MS。
+   * 新实例从 attach 到出帧需要一段时间，这期间 video.readyState 必然 < HAVE_CURRENT_DATA；
+   * 自动挂载路径（页面 effect / 状态补拉）若把它当成"实例已死"就会反复拆掉刚建好的实例
+   * （HLS 重新握手、越修越黑）。显式用户动作（重试/刷新）走 force，不受宽限限制。
+   */
+  private withinRebuildGrace(): boolean {
+    return Date.now() - this.lastRebuildAt < REBUILD_COOLDOWN_MS;
+  }
+
+  /**
+   * 播放器重建（内部路径，不做幂等判定）：销毁旧实例 → attach → 重新布防 watchdog。
+   * 画面槽位守卫（B6）放在这里，使所有重建入口（首次挂载 / 实例死亡 / 自愈 / 重试）
+   * 都受同一守卫约束：小窗态下画面归小窗，大窗侧不得重挂（否则与小窗抢流）。
+   */
+  private rebuildPlayer(video: HTMLVideoElement, hlsUrl: string): boolean {
+    if (this.miniPlayerActive) {
+      // 小窗态：画面槽位属于小窗。video 元素的落点由 attachVideoTo/stashVideo 的
+      // 原子迁移决定，这里既不重新挂载、也不 destroy 小窗正在用的实例。
+      return false;
     }
     this.currentHlsUrl = hlsUrl;
     this.lastRebuildAt = Date.now();
@@ -404,43 +474,121 @@ class LiveSessionRuntime {
     this.player.attach(video, hlsUrl, {
       onFatalError: (detail) => {
         if (!this.alive) return;
-        if (Date.now() - this.lastRebuildAt >= REBUILD_COOLDOWN_MS) {
-          this.attachPlayer(); // fatal 自动重建（黑屏自动恢复）
-        } else {
-          // 冷却期内连续 fatal → 播放失败
-          useLiveStore.getState().setCurrentPlayerError(detail);
-        }
+        // 冷却期内外的 fatal 都走自愈调度（B2：计数 → 封顶 → 60s 后重试），
+        // 不再"冷却期内直接报错、此后永不重建"（那就是封顶后永久放弃）。
+        this.scheduleHealRebuild(detail);
       },
     });
     this.armWatchdog(video);
     return true;
   }
 
+  /** 用当前会话的 hls_url 强制重建（自愈/延迟重试路径；不复用 attachPlayer 的幂等判定） */
+  private rebuildFromCurrent(): boolean {
+    const hlsUrl = useLiveStore.getState().current.channel?.hls_url ?? null;
+    if (!hlsUrl) return false;
+    return this.rebuildPlayer(this.ensureVideo(), hlsUrl);
+  }
+
+  /** 自动重建冷却是否已过（自愈入口的防抖：同一冷却期内不重复重建） */
+  private canAutoRebuild(): boolean {
+    return Date.now() - this.lastRebuildAt >= REBUILD_COOLDOWN_MS;
+  }
+
+  /**
+   * 自愈调度（B2，双端同语义）：
+   * - 进入新时间窗（距上次失败 ≥ REBUILD_COUNT_RESET_WINDOW_MS）⇒ 连续失败计数归零；
+   * - 计数未封顶且冷却已过 ⇒ 立即重建；
+   * - 封顶或冷却未过 ⇒ 记录播放失败（UI 显示"重试"），**并安排延迟重试**，
+   *   不永久放弃（这是 B2 的核心：封顶后必须有后续重试路径）。
+   */
+  private scheduleHealRebuild(reason: string): void {
+    if (!this.alive) return;
+    // 小窗态不消耗自愈预算：画面槽位属于小窗（B6），大窗侧不重建；用户点回直播间时
+    // enter 退出小窗、页面重新 attach，B3 的健康判定会接手恢复。
+    if (this.miniPlayerActive) return;
+    const now = Date.now();
+    if (now - this.lastFailureAt >= REBUILD_COUNT_RESET_WINDOW_MS) {
+      this.consecutiveRebuilds = 0;
+    }
+    this.lastFailureAt = now;
+    if (this.consecutiveRebuilds < MAX_CONSECUTIVE_REBUILDS && this.canAutoRebuild()) {
+      this.consecutiveRebuilds += 1;
+      this.rebuildFromCurrent();
+      return;
+    }
+    useLiveStore.getState().setCurrentPlayerError(reason);
+    this.scheduleHealRetry();
+  }
+
+  /**
+   * 封顶/冷却期内的有界延迟重试（B2）：REBUILD_COUNT_RESET_WINDOW_MS 后重置计数重试一次。
+   * 防重入：同一时间至多一个定时器；执行时校验会话存活、仍是同一路流、实例仍不健康，
+   * 三重条件任一不满足即放弃（不制造多余重建）。
+   */
+  private scheduleHealRetry(): void {
+    if (this.healRetryTimer !== null) return;
+    this.healRetryTimer = setTimeout(() => {
+      this.healRetryTimer = null;
+      if (!this.alive) return;
+      const video = this.videoEl;
+      const hlsUrl = useLiveStore.getState().current.channel?.hls_url ?? null;
+      if (!video || !hlsUrl || hlsUrl !== this.currentHlsUrl) return;
+      if (this.miniPlayerActive) return; // 小窗态画面归小窗，本轮不抢
+      // 已自行恢复（实例在且有帧）⇒ 不重建；实例缺失/已销毁即便 video 还有残帧也要重建
+      const instanceAlive = this.player !== null && this.player.getMode() !== null;
+      if (instanceAlive && this.isVideoHealthy(video)) return;
+      this.consecutiveRebuilds = 0;
+      this.lastRebuildAt = 0; // 时间窗已过，忽略冷却
+      this.rebuildFromCurrent();
+    }, REBUILD_COUNT_RESET_WINDOW_MS);
+  }
+
+  /**
+   * video 元素是否已出画（符号判据）：有当前帧数据、未结束、无错误。
+   * attachPlayer 的实例健康判定与延迟重试复用同一判据。
+   */
+  private isVideoHealthy(video: HTMLVideoElement): boolean {
+    return video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !video.ended && !video.error;
+  }
+
+  private clearHealRetry(): void {
+    if (this.healRetryTimer !== null) {
+      clearTimeout(this.healRetryTimer);
+      this.healRetryTimer = null;
+    }
+  }
+
   destroyPlayer(): void {
     this.player?.destroy();
     this.player = null;
     this.clearStallTimer();
+    this.clearHealRetry();
+    this.consecutiveRebuilds = 0;
+    this.lastFailureAt = 0;
     this.currentHlsUrl = null;
   }
 
+  /** 播放失败"重试"：用户显式动作 ⇒ 强制重建，不受出帧宽限限制（B3） */
   retryPlayer(): void {
-    this.attachPlayer();
+    this.attachPlayer({ force: true });
   }
 
-  /** 左下角刷新键：健康播放跳边秒跳、黑屏/实例缺失重建兜底 */
-  refreshPlayer(): void {
+  /** 左下角刷新键：健康播放跳边秒跳、黑屏/实例缺失重建兜底。
+   *  小窗态（画面槽位属于小窗）不在这里抢流：重新挂载交回页面侧（B6）。 */
+  refreshPlayer(): boolean {
     const video = this.videoEl;
     const hlsUrl = useLiveStore.getState().current.channel?.hls_url ?? null;
-    if (!video || !hlsUrl) return;
+    if (!video || !hlsUrl || this.miniPlayerActive) return false;
     if (
       this.player &&
       this.player.getMode() !== null &&
       video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
     ) {
-      this.player.refreshToLiveEdge();
-      return;
+      return Boolean(this.player.refreshToLiveEdge());
     }
-    this.attachPlayer();
+    // 刷新键是显式用户动作：黑屏/实例缺失时强制重建，不受出帧宽限限制
+    return this.attachPlayer({ force: true });
   }
 
   // ---------- 事件驱动黑屏/卡死自动重建（替代轮询） ----------
@@ -449,9 +597,10 @@ class LiveSessionRuntime {
   private armWatchdog(video: HTMLVideoElement): void {
     this.clearStallTimer();
     const rebuildIfStuck = () => {
-      if (Date.now() - this.lastRebuildAt < REBUILD_COOLDOWN_MS) return;
+      // 冷却期内不重复重建（防抖）；小窗态画面归小窗，不抢流（B6）
+      if (!this.canAutoRebuild() || this.miniPlayerActive) return;
       if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.paused) {
-        this.attachPlayer();
+        this.scheduleHealRebuild("stalled");
       }
     };
     const onStall = () => {
@@ -464,6 +613,9 @@ class LiveSessionRuntime {
     };
     const onResume = () => {
       this.clearStallTimer();
+      // 出帧 = 自愈成功：连续失败计数归零、撤销封顶后的延迟重试（B2，有界语义闭环）
+      this.consecutiveRebuilds = 0;
+      this.clearHealRetry();
       // 播放恢复（SRS 恢复/开播）→ 补拉一次 SRS 实时判定
       if (this.channelId !== null) void this.refreshSrsStatus(this.channelId);
     };

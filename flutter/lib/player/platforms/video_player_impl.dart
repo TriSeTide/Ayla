@@ -2,14 +2,15 @@
 ///
 /// - 状态监听：value.isBuffering → stall 信号（自愈上游判定）；
 ///   value.hasError → fatal；position 前进 → resume 信号。
-/// - live 贴边：play 前先 seekTo(duration)（等价 web 端 startLoad(-1) 从边缘起播）。
-/// - 跳边：seekTo(duration) + play（等价 refreshToLiveEdge 的 seekable 末尾分支）。
+/// - live 贴边：play 前先 seek 到 `duration - 1 分片`（开发文档 §3 R1，见下）。
+/// - 跳边：同一条目标计算 + play（等价 refreshToLiveEdge 的 seekable 末尾分支）。
 library;
 
 import 'package:flutter/widgets.dart';
 import 'package:video_player/video_player.dart';
 
 import '../hls_player.dart';
+import '../live_edge.dart';
 
 class VideoPlayerHls implements HlsPlatformPlayer, HlsVideoMetrics {
   @override
@@ -75,29 +76,52 @@ class VideoPlayerHls implements HlsPlatformPlayer, HlsVideoMetrics {
     onStateChange?.call(buffering ? HlsState.buffering : HlsState.playing);
   }
 
+  /// live 起播贴边目标（开发文档 §3 R1）。
+  ///
+  /// video_player 的 Dart 侧**没有** seekable 范围的 API（ExoPlayer 的
+  /// `seekableRanges` 没有暴露到插件）⇒ 只能退回 `duration - 1 分片`。
+  /// `duration` 在直播里同样是**整个 playlist 的总长**，直接 seek 到它会落到末尾
+  /// （旧实现 `seekTo(duration)` 的语义错误，需求 §3.3 R1）⇒ 必须回退 1 个分片，
+  /// 且 `duration` 必须大于 [kLiveEdgeMinDuration]（短视频/VOD 不该被"贴边"倒回去）。
+  Duration? _liveEdgeTarget() {
+    final c = _controller;
+    if (c == null) return null;
+    return aylaLiveEdgeSeekTarget(duration: c.value.duration);
+  }
+
   @override
   Future<void> play() async {
     final c = _controller;
     if (c == null) return;
-    // live 贴边：先 seek 到末尾（等价 startLoad(-1)），再 play
-    if (c.value.duration > Duration.zero) {
-      await c.seekTo(c.value.duration);
+    // live 贴边：先 seek 到边缘（等价 web 端 startLoad(-1) 从边缘起播），再 play。
+    final Duration? target = _liveEdgeTarget();
+    if (target != null) {
+      await c.seekTo(target);
     }
     await c.play();
   }
 
+  /// 跳到直播边缘（开发文档 §3 R1）。
+  ///
+  /// 成功判据 = **seek 之后 `value.isBuffering == false`**（用户方案明确要求）：
+  /// ExoPlayer 的 `seekTo` 只保证「seek 请求被接受」，不一定已经在目标位置出画面；
+  /// 若目标落在还没下载的分片里，它会进入 buffering 并可能停留很久。
+  /// 此时返回 false 让调用方走「重建」兜底（顺序固定：先 seek，失败才 rebuild），
+  /// 比让用户对着转圈等下去更可靠。
   @override
   Future<bool> seekToLiveEdge() async {
     final c = _controller;
     if (c == null) return false;
+    final Duration? target = _liveEdgeTarget();
+    if (target == null) return false;
     try {
-      final d = c.value.duration;
-      if (d > Duration.zero) {
-        await c.seekTo(d);
-        await c.play();
-        return true;
-      }
-      return false;
+      await c.seekTo(target);
+      await c.play();
+      // 给播放器一帧时间更新 value（seekTo 之后 isBuffering 才是目标位置的判定）。
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      final VideoPlayerController? current = _controller;
+      if (current == null || !identical(current, c)) return false;
+      return !c.value.isBuffering && !c.value.hasError;
     } catch (_) {
       return false;
     }

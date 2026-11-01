@@ -124,6 +124,28 @@ class AylaDetachedLivePresenter {
 }
 
 /// 直播会话 owner（页面级；见文件头「与 web 的结构差异」）。
+/// 直播**画面槽位**：当前是哪一路在持有那块画面（开发文档 §3 B6）。
+///
+/// ## 为什么需要（需求 §3.1 B6 / §5.1 S6「任何时刻只能有一个画面槽位持有播放器」）
+/// [AylaLiveRoomSession.refreshSrsStatus] 读到 SRS = live 就无条件 `_attachPlayer()`，
+/// **没有判断当前画面归谁**。于是「小窗 / 脱离态期间收到一次 SRS 状态更新」就会把页面
+/// 那一路播放器重新拉起来：两路同时拉同一个 HLS 流会抢流（表现为主窗口黑屏），
+/// 而小窗那边也可能被挤掉（用户实报「小窗和主窗口互相抢」）。
+///
+/// ## 取值语义
+/// | 值 | 谁在画 | 页面能不能 attach |
+/// |---|---|---|
+/// | [none] | 没人（未进房 / 已退出） | 否 |
+/// | [inline] | 页面内嵌播放器 | **是** |
+/// | [fullscreen] | 页面播放器的全屏层（同一个控制器） | **是**（全屏仍归页面持有） |
+/// | [desktopMini] | 窗口外独立小窗（第二引擎 + 第二个播放器） | 否 |
+/// | [mobileMini] | App 内小窗 / 系统画中画 | 否 |
+///
+/// ⚠️ **全屏不改变画面归属**：`AylaLivePlayer` 的全屏只是把同一个 `videoView` 挂到
+/// root Overlay（见 `widgets/live/live_player.dart` 文件头），播放器仍由本会话持有 ⇒
+/// 进 / 退全屏**不切换槽位**（切换反而会让 refreshSrsStatus 误判）。
+enum AylaPictureSlot { none, inline, fullscreen, desktopMini, mobileMini }
+
 class AylaLiveRoomSession extends ChangeNotifier {
   AylaLiveRoomSession({
     required this.channelId,
@@ -213,6 +235,15 @@ class AylaLiveRoomSession extends ChangeNotifier {
 
   /// 播放器当前是否已挂载（`/status/` = live 时才挂）。
   bool _playerAttached = false;
+
+  /// 当前画面槽位（B6；见 [AylaPictureSlot] 的语义表）。
+  ///
+  /// 默认 [AylaPictureSlot.none]：会话刚构造、还没进房 ⇒ 任何 `_attachPlayer()`
+  /// 都该被挡住（那时 `currentChannel.hlsUrl` 还没拿到）。
+  AylaPictureSlot _pictureSlot = AylaPictureSlot.none;
+
+  /// 当前画面槽位（只读；测试与 UI 可用）。
+  AylaPictureSlot get pictureSlot => _pictureSlot;
 
   bool get alive => _alive;
   int get epoch => _epoch;
@@ -392,6 +423,9 @@ class AylaLiveRoomSession extends ChangeNotifier {
     }
     // 本会话接管页面视图（[detachView] 的代际防御用：迟到的旧会话不得再进小窗）。
     _activeViewSession = this;
+    // B6：进房 = 画面归**页面**（见 [AylaPictureSlot]）。此后的 `_attachPlayer()`
+    // （进房拉状态读到 live / 状态事件补拉 / 脱离态恢复 / 小窗恢复）才被允许执行。
+    _pictureSlot = AylaPictureSlot.inline;
     final AylaLiveState store = _live;
     store.clearCurrent();
     store.setCurrentLoading(true);
@@ -622,8 +656,24 @@ class AylaLiveRoomSession extends ChangeNotifier {
     _srsRetryCount = 0;
   }
 
-  /// 挂载播放器（幂等：同 URL 不重建，见 `hls_player.dart` 的 attach 幂等）。
+  /// 挂载播放器（幂等：同 URL 且实例健康不重建，见 `hls_player.dart` 的 attach）。
+  ///
+  /// ## B6：只有**页面槽位**才能挂（开发文档 §3 B6；需求 §3.1 B6 / §5.1 S6）
+  /// 这个方法此前是「只要被调用就挂」——而 [refreshSrsStatus] 在读到 SRS = live 时
+  /// 无条件调它。于是小窗 / 脱离态期间收到一次状态更新，页面那一路播放器就被重新
+  /// 拉起来，与窗口外小窗的第二个播放器抢同一路流（主窗口黑屏）。
+  ///
+  /// 守卫放在**这里**而不是只放在 refreshSrsStatus：
+  /// `_attachPlayer` 有 4 个调用点（进房、refreshSrsStatus、脱离态恢复、小窗恢复），
+  /// 只要有一个漏判就会退回旧 bug；放在唯一出口上不可能漏。
+  ///
+  /// 允许的槽位只有 [AylaPictureSlot.inline]；[AylaPictureSlot.fullscreen] 在当前实现
+  /// 下不出现（全屏不改变归属），保留该枚举值是为了语义完整与将来扩展。
   Future<void> _attachPlayer() async {
+    if (_pictureSlot != AylaPictureSlot.inline) {
+      // 小窗 / 脱离态 / 未进房 ⇒ 画面不归页面，绝不抢流。
+      return;
+    }
     // 主窗口要放画面 ⇒ 之前的「脱离态挂起」到此结束。
     //
     // 场景：小窗开着时又进了直播间。播放器在进入脱离态时被 destroy 过，
@@ -759,6 +809,9 @@ class AylaLiveRoomSession extends ChangeNotifier {
     );
     if (ok) {
       _detached = true;
+      // B6：画面交给原生呈现（窗口外小窗 / PiP）⇒ 页面槽位让出，
+      // 此后 refreshSrsStatus 读到 live 也不许把页面播放器再拉起来（会抢流）。
+      _pictureSlot = AylaPictureSlot.desktopMini;
       // ⚠️ **只有 Windows 需要停主窗口那一路播放**：那边是第二个 Flutter engine +
       // 第二个 HLS 播放器，不停就会两路音频叠在一起（独立小窗旁边还能听见主窗口回声）。
       //
@@ -780,6 +833,12 @@ class AylaLiveRoomSession extends ChangeNotifier {
   Future<void> closeDetachedPresentation() async {
     if (!_detached) return;
     _detached = false;
+    // B6：脱离呈现结束 ⇒ 画面交回页面槽位。
+    // ⚠️ 必须在这里（不是只靠下面的 _resumeMainPlayerAfterDetached）：那个方法以
+    // `_playerSuspendedForDetached` 为开关，而 Android PiP 那条路径**从不挂起**
+    // 主播放器（PiP 显示的就是本 engine 这张画面）⇒ 开关恒为 false ⇒ 若只在那里
+    // 恢复槽位，Android 上退出 PiP 后槽位永远停在 desktopMini，页面再也 attach 不了。
+    if (_alive) _pictureSlot = AylaPictureSlot.inline;
     await _detachedPresenter.close();
     // ⚠️ **不能只 close 就走**：原生侧「被 Dart 要求关闭」的那条路径**故意不回调**
     // `onLiveWindowClosed`（关窗是 Dart 自己发起的，回传只会绕一圈）。
@@ -889,6 +948,8 @@ class AylaLiveRoomSession extends ChangeNotifier {
       _miniPlayerFromBackground = false;
       _unbindMiniWindowLifecycle();
       if (!_live.isDisposed) _live.setMiniPlayer(null);
+      // B6：用户收起小窗但人就站在直播间里 ⇒ 画面还给页面（槽位恢复由
+      // _resumeMainPlayerAfterDetached 统一处理，它在 attach 之前置 inline）。
       unawaited(_resumeMainPlayerAfterDetached());
       if (!_disposed) notifyListeners();
       return;
@@ -941,6 +1002,10 @@ class AylaLiveRoomSession extends ChangeNotifier {
   Future<void> _resumeMainPlayerAfterDetached() async {
     if (!_playerSuspendedForDetached) return;
     _playerSuspendedForDetached = false;
+    // B6：画面回到页面手里 ⇒ 槽位恢复 inline。
+    // ⚠️ 必须**在** `_attachPlayer()` 之前：否则下面那一句会被自己的槽位守卫挡掉，
+    // 主窗口永远黑着（这正是「从脱离态回来不恢复」会呈现的形态）。
+    _pictureSlot = AylaPictureSlot.inline;
     if (!_alive || _playerAttached) return;
     if (_live.currentPlayerError != null) return;
     await _attachPlayer();
@@ -952,6 +1017,9 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// 本方法是「App 回到前台、页面重新接管画面」，会话与观看登记都要继续。
   void releaseMiniPlayerForForeground() {
     final bool wasBackgroundAuto = _miniPlayerFromBackground;
+    // B6：小窗让位 ⇒ 画面回到页面（回前台的恢复路径随后会 `_attachPlayer()`，
+    // 那一步要能通过槽位守卫）。
+    if (_alive) _pictureSlot = AylaPictureSlot.inline;
     if (!_ownsMiniPlayer) return;
     _miniPlayerOwner = null;
     _miniPlayerFromBackground = false;
@@ -1164,6 +1232,9 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// 并把本会话登记为小窗宿主 —— **唯一 owner**：已有别的会话挂着小窗时先完整销毁它。
   void _enterMiniPlayer({bool fromBackground = false}) {
     _miniPlayerFromBackground = fromBackground;
+    // B6：画面交给 App 内小窗 / 系统画中画 ⇒ 页面槽位让出（见 [AylaPictureSlot]）。
+    // 两条入口（离开直播间页面 / App 切后台）都汇到这里，所以只在这里改一次。
+    _pictureSlot = AylaPictureSlot.mobileMini;
     // 先取快照：销毁旧 owner 的 `stop()` 会 `clearCurrent()`（否则这里读到 null）。
     final AylaLiveChannelSnapshot? channel = _live.currentChannel;
     final AylaLiveRoomSession? previous = _miniPlayerOwner;
@@ -1234,12 +1305,26 @@ class AylaLiveRoomSession extends ChangeNotifier {
     _ws.disconnect();
   }
 
-  /// 回到前台：重新连上弹幕 WS（重新登记在看、恢复心跳）。
+  /// 回到前台：重新连上弹幕 WS（重新登记在看、恢复心跳）+ 让画面继续播。
+  ///
+  /// ## 【B5 移动端那一半】（开发文档 §3 B5 / 需求 §5.1 S5、G3）
+  /// Windows 侧由 media_kit `Video` 的 `resumeUponEnteringForegroundMode` 自动恢复
+  /// （见 `media_kit_impl.dart` 的 buildView）。**移动端没有等价参数**：
+  /// `video_player` 的 `VideoPlayer` widget 不接受生命周期配置，而 App 进后台时
+  /// 系统会停下 ExoPlayer / AVPlayer 并可能回收 surface ⇒ 回到前台是黑画面。
+  /// `main.dart` 的生命周期收口（[aylaHandleLiveViewingLifecycle]）本来就会在
+  /// resumed 时调到这里 ⇒ 在这里补一次「继续播」即可，**不动平台插件**。
+  ///
+  /// ⚠️ 只在**页面持有画面**时做（B6 的槽位守卫）：小窗 / 脱离态期间画面归别人，
+  /// 这里再 play 一次会与第二路播放器抢流。
   void resumeViewerPresence() {
     if (!_alive || !_backgroundPaused) return;
     _backgroundPaused = false;
     _ws.connect(channelId);
     unawaited(refreshViewers());
+    if (_pictureSlot == AylaPictureSlot.inline && _playerAttached) {
+      unawaited(_player.resumePlayback());
+    }
   }
 
   /// 是否因 App 进后台而暂停了观看登记（[resumeViewerPresence] 的守卫）。
@@ -1273,6 +1358,8 @@ class AylaLiveRoomSession extends ChangeNotifier {
     _ws.disconnect();
     _clearSrsRetry();
     _playerAttached = false;
+    // B6：会话结束 ⇒ 画面槽位归零（此后任何迟到的生命周期/状态事件都不该再挂播放器）。
+    _pictureSlot = AylaPictureSlot.none;
     _history?.removeListener(_onHistoryChanged);
     _historyRelayed = false;
     _history?.dispose();

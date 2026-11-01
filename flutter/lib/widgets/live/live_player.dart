@@ -329,25 +329,58 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
   void _setStateAndSync(VoidCallback change) {
     setState(change);
     // 事件回调 / 计时器回调里调用，不在 build 阶段 ⇒ markNeedsBuild 合法
-    _fsEntry?.markNeedsBuild();
+    _syncFullscreenLayer();
   }
 
   /// 下次重建是否已经排好（[_syncFullscreen] 去重）。
   bool _fsSyncQueued = false;
 
+  /// 全屏层的**重建代号**（B1）。
+  ///
+  /// ## 为什么光有 markNeedsBuild 还不够（自定义宿主那条路径）
+  /// markNeedsBuild 会让 OverlayEntry 的 builder 重跑，但 builder 里返回的是
+  /// overlayHostBuilder 捕获的那个 child —— **同一个 Widget 实例**。而 Flutter 的
+  /// Element.updateChild 在「新旧 widget identical」时会直接短路返回、**不重建子树**。
+  /// ⇒ 自定义宿主路径下 markNeedsBuild 完全无效，全屏层仍是旧快照。
+  ///
+  /// 所以自定义宿主拿到的不是 _buildFullscreen() 的结果，而是一个挂着本 notifier
+  /// 的 ValueListenableBuilder：代号一变，它自己就会重新调用 _buildFullscreen()
+  /// 取到**当前**的 videoView / 比例 / 控件状态。
+  final ValueNotifier<int> _fsRevision = ValueNotifier<int>(0);
+
   /// 只刷新全屏层（[widget] 换了新值但没有本地状态变化时）。
   ///
   /// ⚠️ 必须**排到帧末**：本方法在 [didUpdateWidget] 里被调用，而那时正处于
-  /// build 阶段 —— 直接对另一个 Element 调 @{markNeedsBuild} 会被框架丢弃
+  /// build 阶段 —— 直接对另一个 Element 调 `markNeedsBuild` 会被框架丢弃
   /// （实测：比例迟到时全屏层仍是旧快照）。帧末排一次即可收敛，且不会自激。
-  void _syncFullscreen() {
-    if (_fsEntry == null || _fsSyncQueued) return;
+  ///
+  /// [force] = 播放器输入（videoView / 比例 / SRS 状态 / 错误）变了（B1）：此时
+  /// 即使本帧已经排过一次也要再排一次 —— 排的那一次可能发生在**换视图之前**，
+  /// 它拉起来的那一帧读到的还是旧 videoView（全屏黑屏），必须补排。
+  /// 仍走帧末回调，所以不会踩「build 阶段改别人 Element」的坑。
+  void _syncFullscreen({bool force = false}) {
+    if (_fsEntry == null) return;
+    if (_fsSyncQueued && !force) return;
     _fsSyncQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fsSyncQueued = false;
       if (!mounted) return;
-      _fsEntry?.markNeedsBuild();
+      _syncFullscreenLayer();
     });
+  }
+
+  /// 让全屏层重建一次（B1 的唯一出口：markNeedsBuild + 代号自增）。
+  ///
+  /// 两条路径各自生效：
+  /// · 默认宿主（aylaOverlayEntry 的 WidgetBuilder）⇒ markNeedsBuild 就够；
+  /// · 自定义宿主 ⇒ 靠 [_fsRevision] 让那个 ValueListenableBuilder 自己重建
+  ///   （markNeedsBuild 会因 identical 短路而无效，见该字段说明）。
+  /// 两个都做是幂等的：任一先到达都能拿到最新画面，连做两次只是多一次 setState。
+  void _syncFullscreenLayer() {
+    final OverlayEntry? entry = _fsEntry;
+    if (entry == null) return;
+    entry.markNeedsBuild();
+    _fsRevision.value += 1;
   }
 
   /// 是否走窗口级真·全屏（桌面平台）。
@@ -367,6 +400,8 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     }
     _fsEntry?.remove();
     _fsEntry = null;
+    // B1：全屏层的重建代号随 State 一起释放（它被那棵 overlay 子树监听）。
+    _fsRevision.dispose();
     // 用户在全屏中直接离开页面 ⇒ 窗口必须还原，否则整个 App 卡在无边框全屏。
     // 不 await：dispose 不能等异步；实现内部是 HWND 变换，异常只打日志不上抛。
     if (_desktopFsActive) {
@@ -544,9 +579,34 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     //
     // ⇒ 正确形状：builder **每次重建都重新求值**（读当前 widget / 当前 State 字段），
     // 再由 [setState] 统一通过 [markNeedsBuild] 把独立子树拉进这一帧。
+    //
+    // ---- 【B1】全屏层必须是「活」的，不能是捕获时刻的快照（开发文档 §3 B1）----
+    //
+    // 用户实报：「全屏中黑屏，点刷新/重试都无效，必须退出全屏再进」（需求 §3.1 B1）。
+    // 根因与上一段同源，但**只修默认路径不够**：
+    // · 默认路径（aylaOverlayEntry）本来就要求 WidgetBuilder，天然动态；
+    // · 自定义路径（[overlayHostBuilder]，测试/画布/宿主替换用）拿的是 `Widget child`，
+    //   于是旧写法 `custom(_buildFullscreen())` 又把**已构建实例**交出去 ⇒ 宿主把它塞进
+    //   自己的 builder 闭包里 ⇒ 播放器自愈重建、`widget.videoView` 换成新视图后，
+    //   全屏层仍渲染**旧 videoView**（旧纹理早已随 rebuild 释放）⇒ 全屏永久黑屏，
+    //   而 inline 侧是好的 ⇒ 用户只能「退出全屏再进」才能看到画面。
+    //
+    // 修法：交给自定义宿主的**也是一个 Builder**（不是构建结果）—— 宿主无论怎么包，
+    // 真正的 `_buildFullscreen()` 都要等那棵子树被重建时才求值 ⇒ 两条路径一致。
+    // 再配合 [_setStateAndSync] / [_syncFullscreen] 里的 `_fsEntry?.markNeedsBuild()`
+    // （播放器状态变化时把 overlay 子树拉进同一帧），自愈重建后全屏层立刻换成新画面。
     final OverlayEntry Function(Widget child)? custom = widget.overlayHostBuilder;
     final OverlayEntry entry = custom != null
-        ? custom(_buildFullscreen())
+        // ⚠️ 这里交出去的**不能**是 `_buildFullscreen()` 的结果，也不能只是 Buffer/Builder：
+        // 宿主的 builder 闭合了那个 child 实例 ⇒ Flutter 的 identical 快路径会让
+        // markNeedsBuild 空转（见 [_fsRevision] 的说明）。挂上重建代号之后，
+        // 宿主怎么包都能在代号变化时重新取到当前画面。
+        ? custom(
+            ValueListenableBuilder<int>(
+              valueListenable: _fsRevision,
+              builder: (BuildContext _, int __, Widget? ___) => _buildFullscreen(),
+            ),
+          )
         : aylaOverlayEntry(
             builder: (BuildContext ctx) => _buildFullscreen(),
           );
@@ -624,7 +684,22 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     // 父级把新值（画面比例 / SRS 状态 / 弹幕叠加层 / 播放错误…）喂进来了 ⇒
     // 全屏那棵独立子树必须跟着重建，否则它停在旧快照上（= 「还是有概率拉伸」的
     // 后半段：比例后来才上报，而全屏层从不重读）。
-    _syncFullscreen();
+    //
+    // ---- 【B1】播放器状态变化 ⇒ 立刻刷新全屏层（开发文档 §3 B1）----
+    //
+    // 这一条覆盖用户实报的「全屏中黑屏、点刷新/重试都无效」出现频率最高的那条路径：
+    // HLS 自愈重建后 `watch` 到的是新的 [videoView]，父级 setState ⇒ 本方法被调用。
+    // 若此时不同步 overlay 子树，全屏层**仍然渲染重建前的那个 videoView**（旧纹理已随
+    // `dispose()` 释放）⇒ 全屏永久黑屏，而 inline 侧是正常的。
+    //
+    // 判据取「播放器相关输入是否变了」而不是无条件同步：`_syncFullscreen` 走帧末
+    // post-frame 回调，每帧都排一次没有意义（弹幕叠加层等变化由上面的静态分支覆盖）。
+    final bool playerInputsChanged =
+        !identical(oldWidget.videoView, widget.videoView) ||
+            oldWidget.videoAspectRatio != widget.videoAspectRatio ||
+            oldWidget.srsStatus != widget.srsStatus ||
+            oldWidget.playerError != widget.playerError;
+    _syncFullscreen(force: playerInputsChanged);
   }
 
   @override
