@@ -28,7 +28,6 @@ import 'package:archive/archive_io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../storage/ayla_storage_paths.dart';
 import 'update_api.dart';
 import 'update_install_launcher.dart';
 import 'update_downloader.dart';

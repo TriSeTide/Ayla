@@ -106,7 +106,8 @@ class AylaFlutterSecureStore implements AylaSecureStore {
 
   Future<void> _writeAll(Map<String, String> data) async {
     final File file = await _file();
-    final Uint8List encrypted = aylaDpapiProtect(jsonEncode(data));
+    final Uint8List encrypted =
+        aylaDpapiProtect(utf8.encode(jsonEncode(data)));
     await file.writeAsBytes(encrypted, flush: true);
   }
 }
@@ -117,12 +118,10 @@ class AylaFlutterSecureStore implements AylaSecureStore {
 
 /// `CRYPT_INTEGER_BLOB`（`DATA_BLOB`）：`{DWORD cbData; BYTE* pbData;}`。
 final class _CryptIntegerBlob extends Struct {
-  @external
   @Uint32()
-  int cbData;
+  external int cbData;
 
-  @external
-  Pointer<Uint8> pbData;
+  external Pointer<Uint8> pbData;
 }
 
 typedef _CryptProtectDataNative = Int32 Function(

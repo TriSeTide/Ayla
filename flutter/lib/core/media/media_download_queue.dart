@@ -48,7 +48,6 @@ import 'package:flutter/foundation.dart';
 import '../models/media_kind.dart';
 import '../storage/ayla_storage_paths.dart';
 import 'media_cache.dart';
-import 'media_cache_paths.dart';
 import 'media_signer.dart' show MediaExpiredError;
 
 /// 任务状态。

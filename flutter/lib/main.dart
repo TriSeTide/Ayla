@@ -30,6 +30,8 @@ import 'package:go_router/go_router.dart';
 import 'package:window_manager/window_manager.dart' show windowManager;
 
 import 'core/media/media_cache.dart';
+import 'core/storage/ayla_storage_paths.dart';
+import 'core/update/update_retention.dart';
 import 'core/platform/detached_live.dart';
 import 'core/media/media_download_keepalive.dart';
 import 'core/media/media_download_queue.dart';
@@ -100,7 +102,16 @@ void _installJankProbe() {
   }
 
   try {
-    log = File('ayla_jank.log');
+    // 2026-11-02：落数据根（Windows = `<exe目录>/data/ayla_jank.log`），
+    // 不再用相对路径 —— 相对路径随启动 CWD 漂移，可能写进安装目录甚至 C 盘根。
+    // 同步取根：探针安装在 `main()` 早期，此时 `aylaEnsureDataRoot()` 已 await 过；
+    // 未就绪则退回「不落盘」，绝不写相对路径。
+    final String? dataRoot = aylaDataRootOrNull;
+    if (dataRoot == null) {
+      debugPrint('[AYLA-FRAME] 数据根未就绪，本次不落盘');
+      return;
+    }
+    log = File('$dataRoot${Platform.pathSeparator}ayla_jank.log');
     log.writeAsStringSync(
       '--- session ${DateTime.now().toIso8601String()} ---\n',
       mode: FileMode.append,
@@ -295,9 +306,24 @@ void main() {
   // 体内读的是 `DioClient.instance.refreshAccessToken()` 与 `instance.accessToken`，
   // init 之后 `_tokens` 才被接上（init 前调用会拿到恒 null 的令牌存取件）。
   // 语义对齐 web：先静默续期，**成功才取最新 access token**；续期失败返回 null
-  // 本地媒体缓存（漫游缓存）启动预热：解析缓存根 + 探测可写性（不可写则降级到
-  // 应用支持目录并记日志）+ 清理上次崩溃残留的 `.tmp`。
-  // 语义见 `docs/architecture/flutter-local-media-cache.md` §3.2 / §6；
+  // ===== 存储根接线（2026-11-02 用户定稿：绝不写 C 盘）=====
+  // ① 解析数据根（Windows = `<exe目录>/data`，不可写即报错、**没有 C 盘回退**）；
+  // ② 一次性把旧落点 `%APPDATA%\com.ayla\ayla_flutter` 的数据搬过来并**删掉旧目录**；
+  // ③ 回收 `<data>/updates` 里历史版本的安装包与解包体（每版 150~320 MB，
+  //    曾累积到 7.79 GB —— 这正是本次整改要解决的原始问题）。
+  // 三者都不 await：存储是增强项，绝不能拖慢首帧；内部失败只记日志。
+  unawaited(() async {
+    try {
+      final String root = await aylaEnsureDataRoot();
+      debugPrint('[AylaStorage] 数据根 = $root（来源=$aylaDataRootSource）');
+      await aylaMigrateLegacyAppData();
+      await aylaPruneUpdateStaging();
+    } catch (error) {
+      debugPrint('[AylaStorage] 数据根初始化失败（本次运行不落盘）：$error');
+    }
+  }());
+  // 本地媒体缓存（漫游缓存）启动预热：解析缓存根 + 探测可写性
+  //（不可写 ⇒ **不缓存**，绝不回退到 C 盘）+ 清理上次崩溃残留的 `.tmp`。
   // **不 await**：缓存是增强项，绝不能拖慢首帧（媒体真正被请求时也会 lazy 再走一遍，
   // 两条路径由 `ensureReady()` 的幂等 future 收敛，不会重复探测）。
   unawaited(AylaMediaCache.instance.ensureReady());

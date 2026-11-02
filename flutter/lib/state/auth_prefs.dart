@@ -24,33 +24,15 @@
 library;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-/// 安全存储的最小契约（**注入点**：测试用内存实现，生产用 [AylaFlutterSecureStore]）。
-abstract interface class AylaSecureStore {
-  Future<String?> read(String key);
+import '../core/storage/ayla_dpapi_secure_store.dart';
 
-  Future<void> write(String key, String value);
-
-  Future<void> delete(String key);
-}
-
-/// `flutter_secure_storage` 的生产实现。
-class AylaFlutterSecureStore implements AylaSecureStore {
-  const AylaFlutterSecureStore([this._storage = const FlutterSecureStorage()]);
-
-  final FlutterSecureStorage _storage;
-
-  @override
-  Future<String?> read(String key) => _storage.read(key: key);
-
-  @override
-  Future<void> write(String key, String value) =>
-      _storage.write(key: key, value: value);
-
-  @override
-  Future<void> delete(String key) => _storage.delete(key: key);
-}
+// 安全存储的契约与生产实现已迁到 `core/storage/ayla_dpapi_secure_store.dart`：
+// Windows 改为**自管 DPAPI 文件**（落 `<exe目录>/data/profile`），因为
+// `flutter_secure_storage` 的 Windows 实现固定写 `%APPDATA%\...`（C 盘）且无法配置。
+// 这里 re-export，保持既有 import（`state/auth_bootstrap.dart` 等）不变。
+export '../core/storage/ayla_dpapi_secure_store.dart'
+    show AylaSecureStore, AylaFlutterSecureStore;
 
 /// 凭据 + 开关的只读快照。
 @immutable

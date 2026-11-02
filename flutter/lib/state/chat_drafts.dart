@@ -19,7 +19,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import '../core/storage/ayla_storage_paths.dart';
 
 /// 读草稿（注入以便测试）。
 typedef AylaChatDraftsReader = Future<Map<String, String>> Function();
@@ -105,7 +105,8 @@ class AylaChatDraftsController extends ChangeNotifier {
   }
 
   static Future<File> _file() async {
-    final Directory dir = await getApplicationSupportDirectory();
+    // 2026-11-02：统一落 `<exe目录>/data/profile`（Windows），**绝不写 C 盘**。
+    final Directory dir = await aylaProfileDirectory();
     return File(dir.path + Platform.pathSeparator + fileName);
   }
 
