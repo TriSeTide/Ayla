@@ -116,8 +116,21 @@ final RegExp _liveStreamPath = RegExp(r'^/live/[^/]+\.(?:m3u8|flv|ts)$');
 /// ExoPlayer / AVPlayer / 浏览器都强制校验 ⇒ 那三者保持 API 同源（樱花）。
 /// 移动端待 volx 换 IP SAN 证书后再切，见文件头「移动端边界」。
 bool aylaUsesVolxPullDirect() {
-  if (kIsWeb) return false;
-  return defaultTargetPlatform == TargetPlatform.windows;
+  // ⚠️⚠️ **已停用（2026-11-03 用户裁定：拉流全部统一走樱花）**
+  //
+  // 用户原话：「全部统一成 s.ayla.trise.top:26211。因为他很快。不需要改写。」
+  //
+  // 为什么停用裸 IP 直连（实测结论）：
+  // · 裸 IP 出示的证书 SAN 只有域名（*.trise.top / s.ayla.trise.top / trise.top），
+  //   **没有 IP** ⇒ 浏览器（Web hls.js）与 ExoPlayer/AVPlayer 强制校验必然失败；
+  // · 只有 mpv/ffmpeg 默认不校验证书，所以此前**只有 Windows 能靠裸 IP 播**，
+  //   Web 端直接加载不出来（用户实报「web 端完全加载不出来」的根因）；
+  // · 樱花链路实测反而更快：TLS 38ms vs 裸 IP 118ms。
+  //
+  // 现在拉流入口由**后端统一下发**（`LIVE_PULL_BASE_URL`），客户端不再改写，
+  // 三端拿到的都是 s.ayla.trise.top:26211 ⇒ 证书有效、行为一致。
+  // 保留了常量与判定函数（`aylaIsVolxPullHost` 仍被引用），但恒返回 false。
+  return false;
 }
 
 /// [host] 是否就是 volx 拉流入口（幂等判定用）。
