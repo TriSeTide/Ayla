@@ -31,6 +31,7 @@
 library;
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, TargetPlatform, kIsWeb;
@@ -192,6 +193,8 @@ class AylaLivePlayer extends StatefulWidget {
     this.optimisticStatus,
     this.playerError,
     this.videoView,
+    this.lastFrame,
+    this.captureKey,
     this.videoAspectRatio,
     this.onRetry,
     this.onRefresh,
@@ -219,6 +222,26 @@ class AylaLivePlayer extends StatefulWidget {
 
   /// 视频视图（页面注入 `HlsPlaybackController.videoView`；null = 无画面）。
   final Widget? videoView;
+
+  /// 末帧占位（页面注入 `HlsPlaybackController.lastFrame`；null = 没有占位）。
+  ///
+  /// ## 为什么需要（实测数据，不是推断）
+  /// 播放器被 `stop()` 后画面会**被清成纯黑**（本机逐像素实测：
+  /// stop 前 3238/3388 个采样点非黑，stop 后立刻 0/3388，600ms 后仍是 0）。
+  /// 于是「唤出小窗后主窗口」「关小窗回页面」这两条路径上，用户看到的是：
+  /// · 主窗口：整个小窗停留期间都是黑；
+  /// · 回页面：383~388ms 纯黑（重新 open 到出首帧）。
+  ///
+  /// 把 stop 前那一帧抓下来铺在这里，用户看到的是**定格画面**而不是黑屏。
+  /// 抓取走 Flutter 侧 `RepaintBoundary.toImage()`（实测 46~86ms、不打断播放），
+  /// 抓到后由控制器在「新画面出首帧」时清掉。
+  final Uint8List? lastFrame;
+
+  /// 播放面 `RepaintBoundary` 的 GlobalKey（页面抓末帧用；null = 不需要抓）。
+  ///
+  /// 页面把它交给会话的 `captureFrameKey`，控制器在 `stop()` 前调用抓取钩子。
+  /// 必须挂在**包含真实视频节点**的那一层，抓到的才是用户看到的画面。
+  final GlobalKey? captureKey;
 
   /// 画面宽高比（页面注入 `HlsPlaybackController.videoAspectRatio`）。
   ///
@@ -433,6 +456,19 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
   ///    [AylaDesktopWindowController.restoreTitleBar] 的缺陷说明）。
   /// 4. 每步都独立 try/catch：窗口控制失败绝不能让播放器状态机卡死
   ///    （否则全屏层已插、窗口没进 —— 用户看到「黑一下」且退不回去）。
+  ///
+  /// ## 关于「`unmaximize()` 是不是多余的」（2026-11-02 实测结论：**不是**）
+  ///
+  /// P2 定性时我怀疑这一步是「多一次窗口状态变换」的浪费，用探针量过：
+  /// 一次 `setFullScreen` 会让 Flutter view 尺寸**分 4 帧**变化
+  /// （`viewSizeChanges=4`，`setCallMs` 仅 22~67ms）—— 那是 OS 窗口动画，
+  /// 与 `unmaximize` 无关；`unmaximize` 本身不产生额外的 view 尺寸变化。
+  ///
+  /// 而删掉它的代价是确定的：window_manager 0.5.2 的 `SetFullScreen` 只在
+  /// `!g_maximized_before_fullscreen` 时才调 `SetAsFrameless()`，从最大化态
+  /// 直接进全屏会**跳过剥边框**⇒ 窗口拉满显示器但仍带标题栏（2026-10-31 用户
+  /// 实报「最大化时点全屏完全没成功」的根因）。
+  /// ⇒ **保留**：它有明确的功能必要性，且不贡献帧数。
   Future<void> _applyDesktopFullscreen(bool fullscreen) async {
     final AylaDesktopWindowController window = _window;
     if (fullscreen) {
@@ -808,19 +844,54 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
               //   旧写法 !fullscreen 恒真，导致 inline 侧在全屏期间仍持有同一个 controller，
               //   与 overlay 里的那份重复 attach ⇒ 手机端点全屏后画面黑掉/卡住）；
               // · 全屏宿主（形参 true）+ 全屏中 ⇒ 挂 ✅。
-              // ignore: avoid_print
               if (_showVideo && fullscreen == _fullscreen)
-                ColoredBox(
-                  color: Colors.black,
-                  // **恒收盒**：比例缺失时用 [kAylaLiveVideoAspectRatio] 兜底（锁死），
-                  // 所以任何平台、任何时刻都不会出现「铺满父约束 = 拉伸」那条分支。
-                  // `AylaVideoContain` 用 LayoutBuilder 给**有界**尺寸，不传导无界约束，
-                  // 对 media_kit 同样安全（见该文件头）。
-                  child: AylaVideoContain(
-                    aspectRatio:
-                        widget.videoAspectRatio ?? kAylaLiveVideoAspectRatio,
-                    child: widget.videoView ??
-                        const SizedBox(width: 160, height: 90),
+                RepaintBoundary(
+                  // 末帧抓取的取样范围：必须**只包真实视频那一层**
+                  // （不算弹幕/控件），否则抓下来的是带 UI 的合成图，
+                  // 占位时会把旧控件也定格住。
+                  key: widget.captureKey,
+                  child: ColoredBox(
+                    color: Colors.black,
+                    // **恒收盒**：比例缺失时用 [kAylaLiveVideoAspectRatio] 兜底（锁死），
+                    // 所以任何平台、任何时刻都不会出现「铺满父约束 = 拉伸」那条分支。
+                    // `AylaVideoContain` 用 LayoutBuilder 给**有界**尺寸，不传导无界约束，
+                    // 对 media_kit 同样安全（见该文件头）。
+                    child: AylaVideoContain(
+                      aspectRatio:
+                          widget.videoAspectRatio ?? kAylaLiveVideoAspectRatio,
+                      child: widget.videoView ??
+                          const SizedBox(width: 160, height: 90),
+                    ),
+                  ),
+                ),
+              // ---- 末帧占位（必须盖在视频**上面**）----------------------------
+              //
+              // ⚠️⚠️ **层级是实测结论，不是随手写的**（2026-11-02 实测）：
+              // 我之前把它放在视频**下面**，结果 `stop()` 后整屏像素仍是
+              // `nonBlack=0/900`（全黑）—— 因为视频层在 stop 后会自己刷成黑，
+              // 把下层占位完整盖住了。改成上层后同样的测量变成 `900/900`（有画面）。
+              //
+              // 什么时候它「不该」出现：真实画面正常播放时。这一点由控制器保证 ——
+              // `lastFrame` 只在 `suspendKeepInstance()`（stop 前）被赋值，
+              // `resumeInPlace()` 出首帧后立刻 `clearLastFrame()`，
+              // 所以播放期它恒为 null，不会挡住真实画面。
+              if (_showVideo &&
+                  fullscreen == _fullscreen &&
+                  widget.lastFrame != null)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ColoredBox(
+                      color: Colors.black,
+                      child: AylaVideoContain(
+                        aspectRatio:
+                            widget.videoAspectRatio ?? kAylaLiveVideoAspectRatio,
+                        child: Image.memory(
+                          widget.lastFrame!,
+                          fit: BoxFit.contain,
+                          gaplessPlayback: true,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               // 调用方的叠加层（飘弹幕）

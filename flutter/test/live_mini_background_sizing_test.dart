@@ -94,6 +94,7 @@ class _Recorder {
       required String title,
       String? playUrl,
       Rect? videoRect,
+      String? lastFramePath,
     }) async {
       enterCalls += 1;
       lastChannelId = channelId;

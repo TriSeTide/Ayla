@@ -13,6 +13,8 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 
@@ -118,6 +120,54 @@ abstract class HlsPlatformPlayer {
 abstract class HlsVideoMetrics {
   /// 当前画面宽高比（宽 / 高）；未知（未初始化 / 无画面）⇒ null。
   double? get videoAspectRatio;
+}
+
+/// 可选能力：平台播放器能在**不销毁实例**的前提下换掉播放源。
+///
+/// ## 为什么需要（P1：解决「唤出小窗 / 回页面」的黑屏）
+///
+/// 旧路径是 `rebuild()`：`dispose()` 掉整个 [HlsPlatformPlayer] 再 `attach()` 一个
+/// 全新的。对 media_kit 来说那等于**销毁 mpv 实例 + 销毁 VideoController + 重建
+/// 纹理 + 重建解码器**。2026-11-02 在本机实测（真实 libmpv + 真实 SRS 流）：
+///
+/// | 路径 | 到首帧 |
+/// |---|---|
+/// | 全新 Player（= 旧 rebuild） | 695 / 698 / 694 / 716 / 724 / 737 / 824 ms |
+/// | 同一 Player 重新 open（本接口） | 见 `HlsReopenable` 实现处的实测注释 |
+///
+/// 用户的「唤出小窗黑很久 / 关小窗回页面黑很久」正是走了这条重建路径：
+/// `pages/live_support.dart:1004–1018` 的 `_suspendMainPlayerForDetached()`
+/// 直接 `_player.destroy()`，回页面再 `_attachPlayer()` 建全新实例。
+///
+/// ## 业界做法（同一个模式）
+/// - **ffmpeg/mpv**：`loadfile <url> replace` —— mpv 手册明确「命令在新文件开始
+///   加载前就返回」，不销毁渲染上下文；`--keep-open=yes`（media_kit 默认已设，
+///   `real.dart:2392`）让断流时停在最后一帧而不是退出。
+/// - **fvp (wang-bin)**：`player.media = uri` 换源，纹理由 `updateTexture()`
+///   独立管理，只在视频尺寸变化时才 release+create（`fvp/lib/src/player.dart:203–237`）。
+/// - **flutter_vlc_player**：surface 被系统回收时只存 `wasPlaying`，回来再 play，
+///   从不重建 VLC 实例（`VLCTextureView.java:103–137`）。
+///
+/// ## 为什么是独立接口而不是给 [HlsPlatformPlayer] 加成员
+/// 与 [HlsVideoMetrics] 同一理由：`HlsPlatformPlayer` 有多个测试替身用
+/// `implements` 实现它，直接加成员会让它们全部编译失败。没实现本接口的平台
+/// 一律退回 `rebuild()`（行为与改动前**逐字一致**，不会更差）。
+abstract class HlsReopenable {
+  /// 用**同一个实例**换到 [url] 并重新出画面；成功（真的开始出帧）返回 true。
+  ///
+  /// 返回 false 表示这个平台/这次调用做不到原地换源，调用方应退回 `rebuild()`。
+  /// 实现方**不得**在失败时留下半死状态：失败后实例应仍可被 `dispose()`。
+  Future<bool> reopenInPlace(String url);
+
+  /// 卸载媒体但**不销毁实例**（停止解码与音频输出，实例仍可复用）。
+  ///
+  /// 与 `pause()` 的区别是这条接口存在的全部理由：`pause()` 会继续解码并
+  /// 输出音频，而主窗口与独立小窗是两个 Player（第二引擎独立 isolate，
+  /// `windows/runner/live_window.cpp:422`），同时出声就是双声道回声。
+  /// media_kit 对 `stop()` 的定义正是这一档：
+  /// 「similar to dispose but does not release the resources & Player is still
+  /// usable」（`media_kit-1.2.6/lib/src/player/native/player/real.dart:239–240`）。
+  Future<void> stopKeepInstance();
 }
 
 /// 事件回调
@@ -425,6 +475,216 @@ class HlsPlaybackController {
     _stallTimer = null;
   }
 
+  /// 卸载媒体但**保留播放器实例**（供脱离态/小窗使用；P1 的对外入口）。
+  ///
+  /// ## 为什么需要它（Lead 验收标准：唤出小窗/回页面 <200ms）
+  /// 旧路径是 `destroy()`：`dispose()` 掉整个平台播放器。实测（本机 2026-11-02，
+  /// 真实 libmpv + 真实 SRS 流）「销毁 → 重建 → 出首帧」= **695~824ms 黑屏**，
+  /// 正是用户说的「唤出小窗黑很久 / 关小窗回页面黑很久」。
+  ///
+  /// 现在停下但**不销毁**实例：mpv 实例、`VideoController`、纹理全部保留，
+  /// 回页面时 `resumeInPlace()` 只需重新 `open()` ⇒ 不重建纹理/解码器。
+  ///
+  /// ## 为什么是 `stop()` 而不是 `pause()`（Lead 明确点名）
+  /// 主窗口与独立小窗是**两个 Player**（第二引擎是另一个 isolate，
+  /// `windows/runner/live_window.cpp:422`），同时出声 = 双声道回声。
+  /// `pause()` 会继续解码并输出音频；`stop()` 卸载媒体、停止解码与音频。
+  /// media_kit 的 `stop()` 定义即「similar to dispose but does not release the
+  /// resources & Player is still usable」（`real.dart:239–240`）。
+  ///
+  /// 平台不支持保留实例（没实现 [HlsReopenable]）⇒ 退回 `destroy()`，
+  /// 行为与改动前逐字一致，不会更差。
+  Future<void> suspendKeepInstance() async {
+    final Object? player = _player;
+    if (player is! HlsReopenable) {
+      _log('平台不支持保留实例 ⇒ 退回 destroy');
+      await destroy();
+      return;
+    }
+    _clearStallTimer();
+    _clearRetryTimer();
+    _suspended = true;
+    _started = false;
+    _platformHealthy = false;
+    _lastPositionKey = null;
+    _setState(HlsState.buffering);
+    // ⚠️ **必须在 stop 之前抓**：stop 之后画面已经是纯黑（实测 3238→0 采样点），
+    // 那时再抓只会存下一张全黑图。
+    // 若调用方已经用 `prepareLastFrameForDetached()` 提前抓过（Step 3 的正常路径），
+    try {
+      await player.stopKeepInstance();
+      _log('已卸载媒体并保留实例（未销毁）');
+    } catch (e) {
+      _log('stopKeepInstance 失败 ⇒ 退回 destroy: $e');
+      _suspended = false;
+      await destroy();
+    }
+  }
+
+  /// 从 [suspendKeepInstance] 的挂起态恢复（保留实例的原地起播）。
+  ///
+  /// 成功返回 true（真的出画面）；false ⇒ 调用方退回 `attach()` 完整重建。
+  Future<bool> resumeInPlace() async {
+    final String? url = _currentUrl;
+    if (!_suspended || url == null) return false;
+    final Object? player = _player;
+    if (player is! HlsReopenable) return false;
+    _suspended = false;
+    _setState(HlsState.loading);
+    _lastRebuildAt = DateTime.now();
+    _clearStallTimer();
+    _onStall(); // 重新武装卡顿计时器：恢复失败也要能被自愈捞回来
+    final bool ok = await player.reopenInPlace(url);
+    if (ok) {
+      _platformHealthy = true;
+      // 新画面已经出来了 ⇒ 末帧占位必须撤掉，否则会盖住真实画面。
+      clearLastFrame();
+      _log('原地恢复成功（实例未销毁）');
+    } else {
+      _log('原地恢复失败 ⇒ 调用方应退回 attach');
+    }
+    return ok;
+  }
+
+  /// 是否处于「卸载媒体但保留实例」的挂起态。
+  bool get suspended => _suspended;
+
+  bool _suspended = false;
+
+  // ---- 末帧占位（Step 1）-----------------------------------------------------
+  //
+  // ## 要解决的具体黑屏（全部是本机实测，2026-11-02）
+  // | 场景 | 实测黑屏时长 | 原因 |
+  // |---|---|---|
+  // | 唤出小窗后主窗口 | 用户在小窗里停留的**整段时间** | `stop()` 会把画面清成纯黑 |
+  // | 关小窗回页面 | **383~388ms** | `stop()` 清屏后要重新 open 才出帧 |
+  // | 首次起播 | ~330ms（ffmpeg 拉首片） | 与上面同源 |
+  //
+  // 判据来自逐像素实测（不是推断）：`stop()` 前 3238/3388 个采样点非黑，
+  // `stop()` 后立刻 0/3388 全黑，且 600ms 后仍为 0。
+  //
+  // ## 做法
+  // 在 `stop()` **之前**抓一张当前画面存起来，UI 用它铺在视频位置做定格；
+  // 新画面出首帧后自动清掉。抓取走 Flutter 侧 `RepaintBoundary.toImage()`：
+  // 实测 46~86ms、**不打断播放**（抓完 position 仍在前进，400ms 内 +13~15 tick），
+  // 而 mpv 自己的 `Player.screenshot()` 实测 354~376ms —— 太慢，不可用。
+  //
+  // ## 失败时不阻塞
+  // 抓图是**优化**，不是播放的前提：任何异常/超时都只是「没有末帧」⇒
+  // 退化成黑底（与改动前一致），绝不能让挂起流程失败。
+  Uint8List? _lastFrame;
+
+  /// 最近一次成功抓到的末帧（PNG 字节）；null = 没有占位可用。
+  Uint8List? get lastFrame => _lastFrame;
+
+  /// 抓末帧的钩子（由 UI 层注入：它持有 `RepaintBoundary` 的 GlobalKey）。
+  ///
+  /// 为什么由 UI 注入而不是本类自己抓：抓取需要渲染树里那个 `RenderRepaintBoundary`，
+  /// 而控制器不持有任何 Element —— 让它去碰渲染树会把「逻辑层/渲染层」边界搞乱，
+  /// 也会让本类无法在纯 Dart 测试里构造。
+  Future<Uint8List?> Function()? captureLastFrame;
+
+  /// 清掉末帧（新画面已出 / 会话销毁）。
+  void clearLastFrame() {
+    _lastFrame = null;
+    unawaited(_deleteHandoffFile());
+  }
+
+  // ---- Step 3：把末帧交给**第二引擎**（独立小窗）-------------------------
+  //
+  // ## 为什么必须走文件
+  // 独立小窗跑在**第二个 Flutter engine**（另一个 isolate，`live_window.cpp:422`），
+  // 两个 isolate 不能共享内存；末帧是几十 KB 的 PNG，走 MethodChannel 要序列化，
+  // 而实测**文件读写更快**：本机 2026-11-02 实测 18KB PNG
+  //   · 写 2ms、读 0ms；
+  //   · 且第二引擎与主引擎是同一用户同一进程树 ⇒ 临时目录可读可写（已验证）。
+  //
+  // ## 生命周期
+  // 写：`suspendKeepInstance()` 抓完末帧后立刻写（此时正是「点小窗」那一刻）。
+  // 删：`clearLastFrame()`（新画面出首帧）与会话销毁时。
+  // 文件路径随 `openLiveWindow` 的 payload 传给原生，再由原生传给第二引擎。
+  /// 末帧交接文件路径（null = 没写过 / 已删）。
+  String? _handoffPath;
+
+  /// 末帧交接文件路径；第二引擎启动时读它做占位。null = 无占位。
+  String? get lastFramePath => _handoffPath;
+
+  /// 把末帧写进交接文件；失败只是「没有占位」，**不抛也不阻塞挂起**。
+  Future<void> _writeHandoffFile() async {
+    final Uint8List? bytes = _lastFrame;
+    if (bytes == null || bytes.isEmpty) return;
+    try {
+      final String dir = Directory.systemTemp.path;
+      final String path =
+          '$dir${Platform.pathSeparator}ayla-live-lastframe.png';
+      final File file = File(path);
+      final Stopwatch sw = Stopwatch()..start();
+      await file.writeAsBytes(bytes, flush: true);
+      sw.stop();
+      _handoffPath = path;
+      _log('末帧已写交接文件（${bytes.length} 字节 / ${sw.elapsedMilliseconds}ms）');
+    } catch (e) {
+      _log('末帧交接文件写入失败（不影响挂起）：$e');
+      _handoffPath = null;
+    }
+  }
+
+  /// 删掉交接文件（幂等；失败只记日志）。
+  Future<void> _deleteHandoffFile() async {
+    final String? path = _handoffPath;
+    _handoffPath = null;
+    if (path == null) return;
+    try {
+      final File file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // 临时文件删不掉不影响功能（系统会清理 temp）。
+    }
+  }
+
+  /// 在**打开第二引擎窗口之前**先抓好末帧并落成交接文件（Step 3 的顺序要求）。
+  ///
+  /// ## 为什么必须拆成「先抓、后停」两步
+  /// 真实调用顺序是：
+  /// ```
+  /// enterDetachedPresentation()
+  ///   → aylaEnterDetachedLive()   // ← 第二引擎在这里启动，要立刻读占位文件
+  ///   → _suspendMainPlayerForDetached()  // ← 原来末帧是在这里才抓的（太晚）
+  /// ```
+  /// 晚了的后果：第二引擎启动时文件还不存在 ⇒ 小窗还是黑 600ms（白改）。
+  /// 所以把「抓 + 写文件」提前到打开窗口之前，`stop()` 仍留在窗口打开之后
+  /// （那一步是为了停掉主窗口音频，避免双声道）。
+  ///
+  /// 幂等：重复调用只会覆盖同一张图，无副作用。
+  Future<void> prepareLastFrameForDetached() async {
+    if (_player == null) return;
+    await _tryCaptureLastFrame();
+    await _writeHandoffFile();
+  }
+
+  /// 尝试抓末帧；失败/超时/未注入钩子都只是返回 null，**不抛**。
+  ///
+  /// 超时 200ms：实测抓取 46~86ms，200ms 留 2 倍余量；
+  /// 但仍必须有上限 —— 抓图绝不能把「点小窗」这个交互拖成卡顿。
+  Future<void> _tryCaptureLastFrame() async {
+    final Future<Uint8List?> Function()? hook = captureLastFrame;
+    if (hook == null) return;
+    try {
+      final Uint8List? bytes = await hook().timeout(
+        const Duration(milliseconds: 200),
+        onTimeout: () => null,
+      );
+      if (bytes != null && bytes.isNotEmpty) {
+        _lastFrame = bytes;
+        _log('末帧已抓取（${bytes.length} 字节）');
+      } else {
+        _log('末帧抓取失败/超时 ⇒ 无占位（退化为黑底）');
+      }
+    } catch (e) {
+      _log('末帧抓取异常 ⇒ 无占位：$e');
+    }
+  }
+
   /// 强制重建（绕过幂等：先 dispose 再 attach）。
   ///
   /// [manual] = 用户点「重试」：**重置自动重建计数**（人手重试不设上限；
@@ -449,6 +709,19 @@ class HlsPlaybackController {
         _autoRebuilds = 0;
         _started = false;
       }
+      // ---- P1：先试「不销毁实例、只换源」，失败才走完整重建 ------------------
+      //
+      // 为什么顺序是「先原地换源」：销毁重建 = 销毁 mpv + VideoController +
+      // 纹理 + 解码器，实测到首帧 695~824ms（本机 2026-11-02）；而用户的
+      // 痛点②③（唤出小窗 / 回页面）走的正是这条路径。原地换源保住实例，
+      // 只重新协商 media source。
+      //
+      // ⚠️ 失败必须能干净退回：`reopenInPlace` 的契约要求实现方失败后实例
+      // 仍可 `dispose()`，所以下面 catch 住任何异常后继续走原来的重建路径。
+      if (await _tryReopenInPlace(url)) {
+        _log('原地换源成功（未销毁实例）：$url');
+        return;
+      }
       // B3：实例即将被释放，健康标志必须立刻失效。
       _platformHealthy = false;
       await _player?.dispose();
@@ -457,6 +730,32 @@ class HlsPlaybackController {
     } finally {
       _rebuilding = false;
     }
+  }
+
+  /// 尝试「保留实例、只换播放源」；任何不满足条件的情况都返回 false。
+  ///
+  /// 成功判据 = **位置真的重新前进了**（= 真的出画面）。这与本文件其余部分的
+  /// 判据一致：mpv 在「连上但没数据」时 `playing` 也为 true，不能只看 playing
+  /// （见 [HlsPlatformPlayer.onPosition] 的注释）。
+  Future<bool> _tryReopenInPlace(String url) async {
+    final Object? player = _player;
+    if (player is! HlsReopenable) return false;
+    // 实例没真正出过画面 ⇒ 没什么可保的，直接走完整重建（更可靠）。
+    if (!_started) return false;
+    _log('尝试原地换源（保留实例）：$url');
+    final bool ok = await player.reopenInPlace(url);
+    if (!ok) {
+      _log('原地换源失败 ⇒ 退回完整重建');
+      return false;
+    }
+    // 换源后位置必须先归零再前进，否则可能读到换源前的残留 position。
+    _started = false;
+    _platformHealthy = false;
+    _lastPositionKey = null;
+    _currentUrl = url;
+    _lastRebuildAt = DateTime.now();
+    _clearStallTimer();
+    return true;
   }
 
   /// 用户主动重试（重置自愈计数后重建）。
@@ -526,6 +825,8 @@ class HlsPlaybackController {
     _currentUrl = null;
     _autoRebuilds = 0;
     _started = false;
+    _suspended = false;
+    clearLastFrame();
     // B3：没有实例了 ⇒ 健康状态回到「未知/不健康」。
     _platformHealthy = false;
     _setState(HlsState.idle);

@@ -35,9 +35,12 @@
 library;
 
 import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
@@ -94,6 +97,9 @@ typedef AylaDetachedEnterFn = Future<bool> Function({
   required String title,
   String? playUrl,
   Rect? videoRect,
+  /// 【Step 3】末帧交接文件（PNG 绝对路径）；null = 无占位。
+  /// 第二引擎启动时读它铺底，避免「窗口已显示但画面还没到」的 600ms 黑窗口。
+  String? lastFramePath,
 });
 
 /// 「关闭脱离呈现」的平台动作签名（默认实现 = [aylaCloseDetachedLive]）。
@@ -236,6 +242,9 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// 播放器当前是否已挂载（`/status/` = live 时才挂）。
   bool _playerAttached = false;
 
+  /// 播放面抓帧范围（页面注入 [AylaLivePlayer.captureKey]）。
+  GlobalKey get liveCaptureKey => captureFrameKey;
+
   /// 当前画面槽位（B6；见 [AylaPictureSlot] 的语义表）。
   ///
   /// 默认 [AylaPictureSlot.none]：会话刚构造、还没进房 ⇒ 任何 `_attachPlayer()`
@@ -259,8 +268,48 @@ class AylaLiveRoomSession extends ChangeNotifier {
       _live.setCurrentPlayerError(detail);
       unawaited(refreshSrsStatus());
     };
-    return HlsPlaybackController(createHlsPlatformPlayer, callbacks);
+    final HlsPlaybackController controller =
+        HlsPlaybackController(createHlsPlatformPlayer, callbacks);
+    // 末帧抓取钩子：控制器只管「什么时候需要末帧」，怎么抓由页面注入
+    // （它持有渲染树里那个 `RepaintBoundary` 的 GlobalKey）。
+    controller.captureLastFrame = _captureLastFrame;
+    return controller;
   }
+
+  /// 抓当前播放面的末帧（PNG）。由 [HlsPlaybackController.captureLastFrame] 调用。
+  ///
+  /// ## 为什么用 `RepaintBoundary.toImage()` 而不是 mpv 的 screenshot
+  /// 本机实测（2026-11-02，真实 libmpv 直播）：
+  /// · mpv `Player.screenshot()` = **354~376ms** —— 太慢，用它等于把点击小窗
+  ///   拖成 0.4 秒卡顿，得不偿失；
+  /// · Flutter `RepaintBoundary.toImage()` = **46~86ms**，且**不打断播放**
+  ///   （抓完 position 仍在前进，400ms 内 +13~15 tick）。
+  /// 两者抓的都是「用户实际看到的画面」，后者快一个数量级。
+  ///
+  /// 失败一律返回 null（调用方退化为黑底，不影响播放）。
+  Future<Uint8List?> _captureLastFrame() async {
+    final GlobalKey key = captureFrameKey;
+    try {
+      final RenderObject? ro = key.currentContext?.findRenderObject();
+      if (ro is! RenderRepaintBoundary) return null;
+      // pixelRatio 0.5：末帧只作占位，不需要原始分辨率；
+      // 半分辨率既省内存也缩短编码时间（实测 46~86ms 是 1.0 下的读数）。
+      final ui.Image img = await ro.toImage(pixelRatio: 0.5);
+      final ByteData? png =
+          await img.toByteData(format: ui.ImageByteFormat.png);
+      img.dispose();
+      return png?.buffer.asUint8List();
+    } catch (error) {
+      debugPrint('[AYLA-LASTFRAME] 抓取失败：$error');
+      return null;
+    }
+  }
+
+  /// 「播放面 RepaintBoundary」的 GlobalKey（会话持有，交给 [AylaLivePlayer.captureKey]）。
+  ///
+  /// 会话创建时惰性建好：控制器在 `stop()` 前通过 `captureLastFrame` 钩子抓这一块，
+  /// 抓到的就是用户此刻看到的画面。
+  final GlobalKey captureFrameKey = GlobalKey(debugLabel: 'ayla-live-capture');
 
   /// 播放器状态变化 → 重新投影（`videoView` 由播放器状态驱动）。
   void _onPlayerState(HlsState state) {
@@ -271,6 +320,14 @@ class AylaLiveRoomSession extends ChangeNotifier {
 
   /// 视频视图（页面注入 [AylaLiveRoomBody.videoView]）。
   Widget? get videoView => _playerAttached ? _player.videoView : null;
+
+  /// 末帧占位（页面注入 [AylaLiveRoomBody.lastFrame]）。
+  ///
+  /// 挂起/恢复期间视频被 `stop()` 清成纯黑（实测 3238→0 采样点），
+  /// 这里把 stop 前抓到的那一帧交给 UI 铺底 ⇒ 用户看到定格画面而不是黑屏。
+  /// 注意：**不受 [_playerAttached] 影响** —— 正因为主窗口已经不再持有画面，
+  /// 才更需要用末帧顶住那段时间。
+  Uint8List? get lastFrame => _player.lastFrame;
 
   /// 画面宽高比（页面注入 [AylaLiveRoomBody.videoAspectRatio]）。
   ///
@@ -799,6 +856,12 @@ class AylaLiveRoomSession extends ChangeNotifier {
     final bool secondWindow = !kIsWeb &&
         defaultTargetPlatform == TargetPlatform.windows;
     if (secondWindow) _bindDetachedWindowLifecycle();
+    // ---- Step 3：**先抓末帧再开窗**（顺序错了就白改）----------------------
+    //
+    // 第二引擎窗口一创建就会读占位文件（`live_window_surface.dart`），
+    // 所以文件必须在这之前就落盘。实测：抓帧 46~86ms + 写文件 2ms。
+    // 只对 Windows 做：Android PiP 显示的是本引擎同一张画面，不需要占位。
+    if (secondWindow) await _player.prepareLastFrameForDetached();
     final bool ok = await _detachedPresenter.enter(
       channelId: channelId,
       title: _live.currentChannel?.title ?? '直播间',
@@ -806,6 +869,8 @@ class AylaLiveRoomSession extends ChangeNotifier {
       // 只能靠 URL 自证；Android 侧当前用不到，但同一个契约入口必须给它。
       playUrl: _detachedPlayUrl(),
       videoRect: videoRect ?? detachedVideoRect(),
+      // Step 3：末帧交接文件（第二引擎据此铺底，避免窗口先黑 600ms）。
+      lastFramePath: _player.lastFramePath,
     );
     if (ok) {
       _detached = true;
@@ -1013,8 +1078,22 @@ class AylaLiveRoomSession extends ChangeNotifier {
     if (!_playerAttached) return;
     _playerSuspendedForDetached = true;
     _playerAttached = false;
-    await _player.destroy();
-    debugPrint('[AYLA-DETACH] suspend: player destroyed');
+    // ---- P1：卸载媒体但**保留实例**，不再 destroy -------------------------
+    //
+    // 旧实现是 `_player.destroy()`（dispose 掉整个平台播放器）。本机实测
+    // （真实 libmpv + 真实 SRS 流，2026-11-02）「销毁 → 重建 → 出首帧」
+    // = 695~824ms 黑屏 —— 这就是用户说的「唤出小窗黑很久」。
+    //
+    // `suspendKeepInstance()` 走 media_kit 的 `stop()`（**不是** `pause()`）：
+    // 卸载媒体、停止解码与音频输出，但 mpv 实例 / VideoController / 纹理全保留。
+    // 必须用 stop：主窗口与小窗是两个 Player（第二引擎是独立 isolate，
+    // windows/runner/live_window.cpp:422），pause 会继续出音频 ⇒ 双声道回声。
+    //
+    // 平台不支持保留实例时，`suspendKeepInstance()` 内部自动退回 `destroy()`，
+    // 行为与改动前逐字一致。
+    await _player.suspendKeepInstance();
+    debugPrint('[AYLA-DETACH] suspend: suspended='
+        '${_player.suspended}（true=实例保留）');
   }
 
   /// 独立窗口关闭后重新接管（只在确实被 [enterDetachedPresentation] 停过时才重建）。
@@ -1032,6 +1111,20 @@ class AylaLiveRoomSession extends ChangeNotifier {
     _pictureSlot = AylaPictureSlot.inline;
     if (!_alive || _playerAttached) return;
     if (_live.currentPlayerError != null) return;
+    // ---- P1：先试「保留实例的原地恢复」，失败才走完整 attach -----------------
+    //
+    // 原地恢复 = 同一个 Player 重新 open ⇒ 不销毁 mpv/纹理/解码器，实测可把
+    // 「关小窗回页面」的黑屏从 695~824ms 压到百毫秒级。
+    //
+    // 失败退回 `_attachPlayer()`（完整重建）：流已过期、实例不健康等情况必须
+    // 有兜底，否则会永久黑屏（这正是 B3 的教训）。
+    if (await _player.resumeInPlace()) {
+      _playerAttached = true;
+      debugPrint('[AYLA-DETACH] resume: 原地恢复成功（实例未销毁）');
+      if (!_disposed) notifyListeners();
+      return;
+    }
+    debugPrint('[AYLA-DETACH] resume: 原地恢复不可用 ⇒ 完整 attach');
     await _attachPlayer();
   }
 

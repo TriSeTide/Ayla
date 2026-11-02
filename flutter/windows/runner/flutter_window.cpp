@@ -138,9 +138,13 @@ bool FlutterWindow::OnCreate() {
             live_window_host_ = std::make_unique<AylaLiveWindowHost>(
                 GetHandle(), AylaOverlayKind::kLiveMini);
           }
-          const bool opened = live_window_host_->Show(
+          // 【Step 3】末帧交接文件路径（主窗口在 stop() 前抓的画面）。
+          // 第二引擎启动时读它铺底 —— 窗口 37~66ms 就 Show，而真实画面要
+          // 589~1021ms 才到（本机实测），中间这段原本是纯黑窗口。
+          // 空串 = 没有占位（退化行为与改动前一致）。
+          const bool opened = live_window_host_->ShowWithLastFrame(
               read_string("channelId"), read_string("title"),
-              read_string("playUrl"));
+              read_string("playUrl"), read_string("lastFramePath"));
           result->Success(flutter::EncodableValue(opened));
           return;
         }

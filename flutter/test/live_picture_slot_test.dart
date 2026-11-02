@@ -72,6 +72,7 @@ class _Recorder {
       required String title,
       String? playUrl,
       Rect? videoRect,
+      String? lastFramePath,
     }) async {
       calls.add('enter');
       return true;

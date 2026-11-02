@@ -19,6 +19,7 @@
 
 namespace {
 
+
 /// Window class of the detached live mini window (opaque, black backdrop).
 constexpr const wchar_t kLiveWindowClass[] = L"AYLA_DETACHED_LIVE_WINDOW";
 
@@ -476,6 +477,14 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
 bool AylaLiveWindowHost::Show(const std::string& channel_id,
                               const std::string& title,
                               const std::string& play_url) {
+  return ShowWithLastFrame(channel_id, title, play_url, std::string());
+}
+
+bool AylaLiveWindowHost::ShowWithLastFrame(
+    const std::string& channel_id,
+    const std::string& title,
+    const std::string& play_url,
+    const std::string& last_frame_path) {
   // A live window is a singleton (UI + resource budget: one engine per window).
   // Re-opening while one exists means "the session switched target", so replace.
   if (window_handle_ != nullptr || controller_ != nullptr) {
@@ -492,7 +501,15 @@ bool AylaLiveWindowHost::Show(const std::string& channel_id,
   std::ostringstream payload;
   payload << "{\"kind\":\"liveMini\",\"playUrl\":\"" << JsonEscape(play_url)
           << "\",\"title\":\"" << JsonEscape(title) << "\",\"channelId\":\""
-          << JsonEscape(channel_id) << "\"}";
+          << JsonEscape(channel_id) << "\"";
+  // 【Step 3】把末帧文件路径一并交给第二引擎：窗口 37~66ms 就 Show，
+  // 而真实画面要 589~1021ms（本机实测），中间那段原本是纯黑窗口。
+  // 空路径不写这个字段，第二引擎按「没有占位」处理（行为与改动前一致）。
+  if (!last_frame_path.empty()) {
+    payload << ",\"lastFramePath\":\"" << JsonEscape(last_frame_path)
+            << "\"";
+  }
+  payload << "}";
 
   // The window must COVER THE WHOLE WORK AREA, not just the card:
   // the mini player has to be draggable to any screen position, and the only

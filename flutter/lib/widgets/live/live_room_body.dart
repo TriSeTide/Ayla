@@ -35,6 +35,7 @@ library;
 
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -189,6 +190,8 @@ class AylaLiveRoomBody extends StatefulWidget {
     this.favoriteController,
     this.onShare,
     this.videoView,
+    this.lastFrame,
+    this.captureKey,
     this.videoAspectRatio,
     this.directoryFooter,
     this.onOpenProfile,
@@ -319,6 +322,15 @@ class AylaLiveRoomBody extends StatefulWidget {
   /// 视频视图（页面注入同一 `HlsPlaybackController.videoView`）。
   final Widget? videoView;
 
+  /// 末帧占位（页面注入 `HlsPlaybackController.lastFrame`）。
+  ///
+  /// `stop()` 会把画面清成纯黑（逐像素实测 3238→0 采样点），所以挂起/恢复
+  /// 期间用 stop 前抓到的那一帧铺底，用户看到定格而非黑屏。
+  final Uint8List? lastFrame;
+
+  /// 播放面抓帧范围（页面注入 `AylaLiveRoomSession.liveCaptureKey`）。
+  final GlobalKey? captureKey;
+
   /// 画面宽高比（页面注入 `HlsPlaybackController.videoAspectRatio`）。
   ///
   /// 全屏时播放面收成等比盒（= `object-fit: contain`）；null = 未知 ⇒ 不收盒
@@ -426,6 +438,8 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     optimisticStatus: _statusOf(widget.data.channel),
     playerError: widget.data.playerError,
     videoView: widget.videoView,
+    lastFrame: widget.lastFrame,
+    captureKey: widget.captureKey,
     // 画面比例（⚠️ 中间层必须透传：漏传 = 全屏仍拉伸 —— skill 第五批「加了参数 ≠
     // 接通了线」的同一类缺陷）。
     videoAspectRatio: widget.videoAspectRatio,

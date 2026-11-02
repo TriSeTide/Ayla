@@ -527,6 +527,8 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
         currentUserId: selfId,
       )),
       videoView: session.videoView,
+      lastFrame: session.lastFrame,
+      captureKey: session.liveCaptureKey,
       videoAspectRatio: session.videoAspectRatio,
       onOpenProfile: (AylaLiveViewerItem item) =>
           context.push('/user/${Uri.encodeComponent(item.userId)}'),

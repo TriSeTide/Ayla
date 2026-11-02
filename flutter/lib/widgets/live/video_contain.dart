@@ -109,12 +109,24 @@ class AylaVideoContain extends StatelessWidget {
           // 两边都无界（极少见）：交给调用方的约束，本件不猜尺寸
           return child;
         }
-        if (w <= 0 || h <= 0) return child;
+        // ---- 退化分支不再 `return child`（2026-11-02 逐帧实测修正）--------
+        //
+        // 旧写法在 `w<=0 || h<=0` 时直接把 child 交回去 ⇒ child 拿到的是**父约束**，
+        // 而这里的父约束可能仍是无界/零尺寸。逐帧探针实测（P2 定性）：
+        // 首次进全屏时恰好有 **1 帧** `zeroSizeFrames=1` —— 那一帧视频节点被放进
+        // 一个零尺寸盒子，视觉上就是「闪一下黑」。
+        //
+        // 现在改成：**永远产出有界的正尺寸**（最小 1px）。代价只是那一帧画面被
+        // 压到 1px（几乎看不见），收益是彻底消除零尺寸帧，且不会把无界约束
+        // 传给平台视图（无界约束会导致 media_kit 内部 Stack 展开出 Infinity ⇒
+        // NaN 变换矩阵 ⇒ 整层不绘制，见 live_player.dart 记录的 2026-10-01 事故）。
+        final double safeW = w > 0 ? w : 1.0;
+        final double safeH = h > 0 ? h : 1.0;
         // 不取整：亚像素抖动在全屏下逐帧 ±1px 很显眼
         return Center(
           child: SizedBox(
-            width: math.max(w, 0),
-            height: math.max(h, 0),
+            width: math.max(safeW, 0),
+            height: math.max(safeH, 0),
             child: child,
           ),
         );

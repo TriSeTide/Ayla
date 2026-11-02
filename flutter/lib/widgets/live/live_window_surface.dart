@@ -37,12 +37,14 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../../player/platforms/media_kit_texture_config.dart';
 import '../../theme/tokens.dart';
 import 'live_mini_player.dart'
     show
@@ -84,6 +86,7 @@ class AylaDetachedLiveWindowApp extends StatefulWidget {
     this.onReady,
     this.initialUrl,
     this.initialTitle,
+    this.initialLastFramePath,
   });
 
   /// 第一帧渲染完成后的回调。
@@ -96,6 +99,20 @@ class AylaDetachedLiveWindowApp extends StatefulWidget {
   /// 同上：初始标题（小窗的 title / 语义标签）。
   final String? initialTitle;
 
+  /// 【Step 3】主窗口抓的末帧文件（PNG 绝对路径）；null = 没有占位。
+  ///
+  /// ## 为什么需要
+  /// 小窗是**第二个 Flutter engine**。本机实测（2026-11-02，真实链路）：
+  ///   · `createEngineStart → windowShown` = **37~66ms**（引擎本身很快）；
+  ///   · `windowShown → firstFrame`        = **589~1021ms**（这段是纯黑窗口）。
+  /// 窗口先显示、画面后到 ⇒ 用户看到 0.6 秒黑框。用主窗口那一帧铺底，
+  /// 用户看到的是「画面跳了一下」而不是「先黑一下」（B 站/YouTube 的形态）。
+  ///
+  /// ## 为什么走文件
+  /// 两个 engine 是不同 isolate，不能共享内存；末帧是几十 KB 的 PNG，
+  /// 走 MethodChannel 要序列化。本机实测 18KB：写 2ms / 读 0ms ⇒ 文件更快。
+  final String? initialLastFramePath;
+
   @override
   State<AylaDetachedLiveWindowApp> createState() =>
       _AylaDetachedLiveWindowAppState();
@@ -103,6 +120,30 @@ class AylaDetachedLiveWindowApp extends StatefulWidget {
 
 class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
   final AylaDetachedWindowChannel _channel = AylaDetachedWindowChannel();
+
+  /// 【Step 3】主窗口留下的末帧（PNG 字节）；null = 没有占位。
+  ///
+  /// 读到之后先铺底，真实画面出首帧时在 position 监听里清掉。
+  Uint8List? _lastFrame;
+
+  /// 读末帧交接文件；失败只是「没有占位」，绝不阻塞播放。
+  Future<void> _loadLastFramePlaceholder() async {
+    final String? path = widget.initialLastFramePath;
+    if (path == null || path.isEmpty) return;
+    try {
+      final File file = File(path);
+      if (!await file.exists()) {
+        debugPrint('[AYLA-LASTFRAME] 末帧文件不存在（无占位）：$path');
+        return;
+      }
+      final Uint8List bytes = await file.readAsBytes();
+      if (bytes.isEmpty || !mounted) return;
+      setState(() => _lastFrame = bytes);
+      debugPrint('[AYLA-LASTFRAME] 末帧已加载（${bytes.length} 字节）');
+    } catch (e) {
+      debugPrint('[AYLA-LASTFRAME] 末帧读取失败（不影响播放）：$e');
+    }
+  }
 
   Player? _player;
   VideoController? _videoController;
@@ -116,6 +157,8 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
   @override
   void initState() {
     super.initState();
+    // 【Step 3】立刻读末帧铺底（读到之前是黑底，读到后 setState 换上）。
+    unawaited(_loadLastFramePlaceholder());
     final String? initialTitle = widget.initialTitle;
     if (initialTitle != null && initialTitle.isNotEmpty) {
       _title = initialTitle;
@@ -180,7 +223,12 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
     if (_disposed) return;
 
     final Player player = Player();
-    final VideoController controller = VideoController(player);
+    // 【P2 诊断】与主窗口一致：构造期固定纹理尺寸（P0 的同一份配置），
+    // 这样测出的「小窗出首帧」不掺入「1x1 探测纹理再 resize」的额外成本。
+    final VideoController controller = VideoController(
+      player,
+      configuration: aylaMediaKitVideoConfiguration,
+    );
     setState(() {
       _player = player;
       _videoController = controller;
@@ -190,6 +238,20 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
     player.stream.error.listen((String error) {
       if (_disposed) return;
       setState(() => _status = '播放失败：$error');
+    });
+    // 【Step 3】首个 position 前进 = 真实画面已出 ⇒ 撤掉末帧占位。
+    //
+    // 为什么判据是 position 而不是「有纹理」：mpv 在「连上但没数据」时 playing
+    // 也为 true（本仓库多处记录过这个坑），只有位置真的前进才等于出画面。
+    bool placeholderCleared = false;
+    player.stream.position.listen((Duration pos) {
+      if (_disposed) return;
+      if (pos > Duration.zero && !placeholderCleared) {
+        placeholderCleared = true;
+        if (_lastFrame != null && mounted) {
+          setState(() => _lastFrame = null);
+        }
+      }
     });
 
     try {
@@ -220,8 +282,19 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
     final VideoController? controller = _videoController;
     // 播放面：与 App 内同一个用法（只交画面、不叠 media_kit 控制条、不申请唤醒锁
     // —— 第二个引擎只注册了 media_kit_video）。
+    // 【Step 3】占位优先级：真实视频 > 主窗口末帧 > 黑底。
+    // 实测依据（本机 2026-11-02）：窗口 37~66ms 就 Show，而第一帧画面要
+    // 589~1021ms 才到 ⇒ 中间 0.6 秒原本是纯黑框。用末帧铺底后，用户看到的是
+    // 「画面跳了一下」而不是「先黑一下」（B 站/YouTube 的形态）。
+    final Widget? placeholder = _lastFrame == null
+        ? null
+        : Image.memory(
+            _lastFrame!,
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+          );
     final Widget video = controller == null
-        ? const ColoredBox(color: Colors.black)
+        ? (placeholder ?? const ColoredBox(color: Colors.black))
         : Video(
             controller: controller,
             controls: NoVideoControls,

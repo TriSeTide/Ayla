@@ -93,6 +93,24 @@ class AylaLiveWindowHost {
             const std::string& title,
             const std::string& play_url);
 
+  /// Same as [Show], additionally handing |last_frame_path| to the second
+  /// engine so it can paint a still of the frame the main window was showing
+  /// before it got suspended.
+  ///
+  /// Why this exists: on Windows the mini window is a *second Flutter engine*.
+  /// Measured on this machine (2026-11-02, real libmpv + real SRS stream):
+  ///   createEngineStart -> windowShown = 37~66ms   (engine is fast)
+  ///   windowShown       -> firstFrame  = 589~1021ms (this is the black gap)
+  /// The window is shown long before any picture exists, so without a
+  /// placeholder the user stares at a black box for ~0.6s.
+  ///
+  /// |last_frame_path| is a PNG written by the MAIN engine before it called
+  /// stop(); empty string = no placeholder (behaviour identical to before).
+  bool ShowWithLastFrame(const std::string& channel_id,
+                         const std::string& title,
+                         const std::string& play_url,
+                         const std::string& last_frame_path);
+
   /// Creates + shows the floating-ball window with |payload_json| (the
   /// serialised AylaOverlayPayload), or just forwards the new payload when the
   /// window is already up (idempotent - the main engine pushes on every change

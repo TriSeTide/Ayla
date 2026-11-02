@@ -288,6 +288,8 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
         currentUserId: selfId,
       )),
       videoView: session.videoView,
+      lastFrame: session.lastFrame,
+      captureKey: session.liveCaptureKey,
       videoAspectRatio: session.videoAspectRatio,
       onOpenProfile: (AylaLiveViewerItem item) =>
           context.push('/user/${Uri.encodeComponent(item.userId)}'),

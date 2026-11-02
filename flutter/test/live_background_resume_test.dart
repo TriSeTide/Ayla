@@ -80,6 +80,7 @@ class _Recorder {
       required String title,
       String? playUrl,
       Rect? videoRect,
+      String? lastFramePath,
     }) async => true,
     close: () async {},
     setSessionActive: (bool active) async {},

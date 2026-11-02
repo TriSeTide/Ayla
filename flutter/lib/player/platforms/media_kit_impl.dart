@@ -18,8 +18,9 @@ import '../../core/net/live_play_url.dart'
 import '../hls_player.dart';
 import '../live_edge.dart';
 import '../texture_size.dart';
+import 'media_kit_texture_config.dart';
 
-class MediaKitHls implements HlsPlatformPlayer {
+class MediaKitHls implements HlsPlatformPlayer, HlsReopenable {
   @override
   void Function(HlsState state)? onStateChange;
 
@@ -65,7 +66,22 @@ class MediaKitHls implements HlsPlatformPlayer {
     debugPrint('[AYLA-BOOT] init=${_bootWatch.elapsedMilliseconds}ms');
     final p = Player();
     _player = p;
-    _videoController = VideoController(p);
+    // ---- 【P0】构造期固定纹理尺寸（消除「尺寸变化过程黑屏」的根因 A）--------
+    //
+    // 全部依据（机制、行号、为什么不用运行时 setSize、与 fvp 的对比、代价）见
+    // `media_kit_texture_config.dart` 的文件头。一句话：固定之后 `CheckAndResize()`
+    // 恒 early-return，窗口/全屏怎么变都不会再 UnregisterTexture + 重建 ID3D11Texture2D。
+    //
+    // ⚠️ **绝不能改成运行时 `_videoController.setSize()`** —— 那条路既有
+    // 「VideoOutput 未注册时 SIGSEGV」（本文件下方 B4 注释），也有
+    // `VideoOutputManager::SetSize` 的 detach 线程与 `Resize()` 的 erase 并发写
+    // 同一个 map 的 use-after-free 窗口。构造期传参不经过这条路径。
+    _videoController = VideoController(
+      p,
+      configuration: aylaMediaKitVideoConfiguration,
+    );
+    debugPrint('[AYLA-TEX] fixed video output size='
+        '$kAylaTextureWidth x $kAylaTextureHeight');
 
     _subs.add(p.stream.playing.listen((v) {
       onStateChange?.call(v ? HlsState.playing : HlsState.buffering);
@@ -204,6 +220,27 @@ class MediaKitHls implements HlsPlatformPlayer {
     // 播放器只拉了 2 次 master m3u8 就停在那里，一个分片都不请求。
     //
     // 只保留「无害且有用」的重连/持久连接项。
+    await _applyBootOptions(p, url);
+
+    debugPrint('[AYLA-BOOT] options=${_bootWatch.elapsedMilliseconds}ms');
+    onStateChange?.call(HlsState.loading);
+    await p.open(Media(url), play: true);
+    debugPrint('[AYLA-BOOT] opened=${_bootWatch.elapsedMilliseconds}ms');
+  }
+
+  /// 下发起播/重连相关的 mpv 选项（attach 与 [reopenInPlace] 共用）。
+  ///
+  /// ## 为什么抽成独立方法
+  /// P1 的原地换源也要让这些选项对**换到的新连接**生效。抽出来保证两条路径
+  /// 逐字一致 —— 任何一边漏设都会造成「起播正常但重连卡 6 秒」这类隐蔽问题。
+  ///
+  /// ## ⚠️ `demuxer-lavf-o` 必须完整包含 media_kit 自己的默认项
+  /// media_kit 1.2.6 在 Player 初始化时写
+  /// `seg_max_retry=5,strict=experimental,allowed_extensions=ALL,protocol_whitelist=[...]`
+  /// （`real.dart:2428–2432`）。mpv 属性**同名后写覆盖前写** ⇒ 少写一项就等于把它删掉。
+  /// 历史事故：上一版只写 analyzeduration/probesize，把 `seg_max_retry` 冲掉 ⇒
+  /// 分片偶发 404 时不再重试 ⇒ ffmpeg 空等 6 秒（[AYLA-BOOT] opened 后零日志）。
+  Future<void> _applyBootOptions(Player p, String url) async {
     const String lavfBase = 'seg_max_retry=5,strict=experimental,'
         'allowed_extensions=ALL,http_persistent=1';
     await Future.wait(<Future<void>>[
@@ -218,11 +255,6 @@ class MediaKitHls implements HlsPlatformPlayer {
       _setMpvOption(p, 'cache-secs', '2'),
       _setMpvOption(p, 'demuxer-max-bytes', '8388608'),
     ]);
-
-    debugPrint('[AYLA-BOOT] options=${_bootWatch.elapsedMilliseconds}ms');
-    onStateChange?.call(HlsState.loading);
-    await p.open(Media(url), play: true);
-    debugPrint('[AYLA-BOOT] opened=${_bootWatch.elapsedMilliseconds}ms');
   }
 
   /// 下发纹理尺寸（B4；`VideoController.setSize` 内部会 await 平台实例，
@@ -328,6 +360,80 @@ class MediaKitHls implements HlsPlatformPlayer {
   @override
   Future<void> play() async {
     await _player?.play();
+  }
+
+  /// 在**不销毁 mpv / VideoController / 纹理**的前提下换播放源（P1）。
+  ///
+  /// ## 为什么用 `open()` 而不是 `loadfile replace`
+  /// `loadfile` 确实不销毁渲染上下文，但它**绕过 media_kit 状态机**：
+  /// `Player.open()` 内部会先 `stop(open:true)`（`real.dart:173–176`）重置
+  /// `PlayerState`（`:267`）并重发 playlist/playing 事件。直接用 `loadfile`
+  /// 会让 Dart 侧 `state.width/height`、`playlist` 长期停在换源前。
+  ///
+  /// `open()` 内部那次 `stop()` **不销毁 Player**（销毁只在 `Player.dispose()`
+  /// → `Initializer.dispose(ctx)` + `mpv_terminate_destroy`，`real.dart:96–108`）；
+  /// `VideoController` / `VideoOutput` / 纹理都挂在 `Player.handle` 上 ⇒
+  /// Player 活着它们就活着 ⇒ **纹理不重建**。
+  ///
+  /// ## 成功判据
+  /// 必须是「位置真的重新前进」——mpv 在「连上但没数据」时 `playing` 也为 true，
+  /// 只看 playing 会把卡死当成功（与 [HlsPlatformPlayer.onPosition] 同一判据）。
+  /// 超时 4s：本机实测换源到首帧远快于此，且短于自愈的 6s stallTimeout，
+  /// 不会和状态机打架。
+  @override
+  Future<bool> reopenInPlace(String url) async {
+    final Player? p = _player;
+    if (p == null) return false;
+    final Stopwatch sw = Stopwatch()..start();
+    debugPrint('[AYLA-REOPEN] begin');
+    final Completer<bool> gotFrame = Completer<bool>();
+    StreamSubscription<Duration>? posSub;
+    try {
+      posSub = p.stream.position.listen((Duration pos) {
+        if (!gotFrame.isCompleted && pos > Duration.zero) {
+          gotFrame.complete(true);
+        }
+      });
+      // 新连接必须重新带上起播/重连选项（`open` 不重置 mpv 属性，但这里保证
+      // 与 attach 完全一致，任何一边漏设都会造成「重连卡 6 秒」的隐蔽问题）。
+      await _applyBootOptions(p, url);
+      await p.open(Media(url), play: true);
+      debugPrint('[AYLA-REOPEN] opened=${sw.elapsedMilliseconds}ms');
+      final bool ok = await gotFrame.future.timeout(
+        const Duration(seconds: 4),
+        onTimeout: () => false,
+      );
+      debugPrint('[AYLA-REOPEN] firstFrame=${sw.elapsedMilliseconds}ms ok=$ok');
+      if (ok) _hasRenderedFrame = false; // 下一次 position 重新打 firstFrame 点
+      return ok;
+    } catch (e) {
+      debugPrint('[AYLA-REOPEN] failed: $e');
+      return false;
+    } finally {
+      await posSub?.cancel();
+    }
+  }
+
+  /// 卸载媒体但**保留实例**（供 `live_support.dart` 的脱离态使用）。
+  ///
+  /// ## 为什么必须是 `stop()` 而不是 `pause()`（Lead 明确要求）
+  /// 主窗口与独立小窗是**两个 Player**（第二引擎是另一个 isolate，
+  /// `windows/runner/live_window.cpp:422`）。`pause()` 会**继续解码并输出音频**
+  /// ⇒ 两路同时出声 = 双声道回声。`stop()` 则卸载媒体、停止解码与音频。
+  ///
+  /// media_kit 对 `stop()` 的定义（`real.dart:239–240`）：
+  /// 「similar to [dispose] but does not release the resources & [Player] is still
+  /// usable」—— 正好是「保留实例、下次能立刻换回来」所需要的那一档。
+  @override
+  Future<void> stopKeepInstance() async {
+    final Player? p = _player;
+    if (p == null) return;
+    try {
+      await p.stop();
+      debugPrint('[AYLA-REOPEN] stopKeepInstance done (instance kept)');
+    } catch (e) {
+      debugPrint('[AYLA-REOPEN] stopKeepInstance failed: $e');
+    }
   }
 
   /// 跳到直播真实边缘（开发文档 §3 R1）。

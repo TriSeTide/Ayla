@@ -593,6 +593,8 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
         currentUserId: selfId.isEmpty ? null : selfId,
       )),
       videoView: session.videoView,
+      lastFrame: session.lastFrame,
+      captureKey: session.liveCaptureKey,
       videoAspectRatio: session.videoAspectRatio,
       directoryFooter: AylaDirectoryLoadMore(
         loading: _directory?.loading ?? false,
