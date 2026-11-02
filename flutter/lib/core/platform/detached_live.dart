@@ -131,6 +131,7 @@ Future<bool> aylaEnterDetachedLive({
   Rect? videoRect,
   int aspectX = 16,
   int aspectY = 9,
+  String? lastFramePath,
 }) async {
   if (defaultTargetPlatform == TargetPlatform.windows) {
     try {
@@ -140,6 +141,11 @@ Future<bool> aylaEnterDetachedLive({
           'channelId': channelId,
           'title': title,
           'playUrl': playUrl,
+          // 【Step 3】主窗口在 `stop()` 前抓的末帧文件（PNG 绝对路径）。
+          // 独立小窗（第二引擎）启动时读它做占位，避免「窗口先黑 600ms」。
+          // 为什么走文件而不是消息体：第二引擎是独立 isolate，不能共享内存；
+          // 本机实测 18KB PNG 写 2ms / 读 0ms，比走 MethodChannel 序列化更快。
+          'lastFramePath': lastFramePath,
         },
       );
       return ok ?? false;

@@ -422,6 +422,7 @@ void main() {
       child: const _AppRoot(),
     ),
   );
+
 }
 
 // =============================================================================
@@ -460,6 +461,10 @@ void aylaLiveWindowMain(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
   String? playUrl;
   String? title;
+  // 【Step 3】主窗口在 stop() 前抓的末帧文件（PNG 绝对路径）。
+  // 第二引擎拿它先铺底：窗口 37~66ms 就显示，而真实画面要 589~1021ms，
+  // 没有占位的话这段就是纯黑窗口（本机实测，见 live_window.h 的 ShowWithLastFrame）。
+  String? lastFramePath;
   // "liveMini"（默认）| "activityBall" —— 见 live_window.cpp 的 AylaOverlayKind。
   String kind = 'liveMini';
   AylaOverlayPayload? overlayPayload;
@@ -471,8 +476,10 @@ void aylaLiveWindowMain(List<String> args) {
         if (rawKind is String && rawKind.isNotEmpty) kind = rawKind;
         final Object? rawUrl = decoded['playUrl'];
         final Object? rawTitle = decoded['title'];
+        final Object? rawFrame = decoded['lastFramePath'];
         if (rawUrl is String && rawUrl.isNotEmpty) playUrl = rawUrl;
         if (rawTitle is String && rawTitle.isNotEmpty) title = rawTitle;
+        if (rawFrame is String && rawFrame.isNotEmpty) lastFramePath = rawFrame;
         // activityBall：payload 是**已经解析过的对象**（不是字符串），
         // 因为原生侧是把它拼进同一条 JSON 里的（见 live_window.cpp 的 ShowBall）。
         final Object? rawPayload = decoded['payload'];
@@ -494,6 +501,7 @@ void aylaLiveWindowMain(List<String> args) {
     AylaDetachedLiveWindowApp(
       initialUrl: playUrl,
       initialTitle: title,
+      initialLastFramePath: lastFramePath,
     ),
   );
 }
