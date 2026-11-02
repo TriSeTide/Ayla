@@ -51,12 +51,18 @@ class MediaKitHls implements HlsPlatformPlayer {
   /// position 前进是「已经出帧」最可靠的判据（mpv 在没数据时 position 恒 0）。
   bool _hasRenderedFrame = false;
 
+  /// 起播计时（诊断用；`[AYLA-BOOT]` 打点，用户看不到）。
+  static final Stopwatch _bootWatch = Stopwatch();
+
   @override
   Future<void> attach(String url) async {
+    _bootWatch.reset();
+    _bootWatch.start();
     if (!_initialized) {
       MediaKit.ensureInitialized();
       _initialized = true;
     }
+    debugPrint('[AYLA-BOOT] init=${_bootWatch.elapsedMilliseconds}ms');
     final p = Player();
     _player = p;
     _videoController = VideoController(p);
@@ -82,6 +88,7 @@ class MediaKitHls implements HlsPlatformPlayer {
       // 但那时被 `_hasRenderedFrame == false` 挡住了，这里补上。
       if (!_hasRenderedFrame && pos > Duration.zero) {
         _hasRenderedFrame = true;
+        debugPrint('[AYLA-BOOT] firstFrame=${_bootWatch.elapsedMilliseconds}ms');
         _sizeDecider?.offer(p.state.width, p.state.height);
       }
       onPosition?.call(pos);
@@ -147,12 +154,75 @@ class MediaKitHls implements HlsPlatformPlayer {
     // 当前构建本来就不校验，设了等于没设，却会误导后人以为「为了连上才关的」。
     // 也不追加 tls-ca-file：实测导出的 Windows 根证书被
     // mbedtls_x509_crt_parse_file ... returned 2 拒绝，写进去只会制造假象。
-    if (_isVolxPullUrl(url)) {
-      await _setMpvOption(p, 'stream-lavf-o', 'verifyhost=$kAylaVolxPullSniHost');
-    }
+    // ---- 起播加速（2026-11-02 用户实报「Windows 比手机慢 2~3 秒」）------------
+    //
+    // 实测差距来源（不是网络）：
+    // · 首片下载两端只差 162ms（Windows 494ms / Android 332ms）；
+    // · 但 Windows 多了一步**串行等待**：setProperty 默认
+    //   waitForInitialization=true ⇒ 先 await mpv 初始化才设属性，
+    //   然后才 open ⇒ 起播被推迟数百毫秒；
+    // · mpv/ffmpeg 的 HLS demuxer 初始化比 ExoPlayer 重（ANGLE 上下文 +
+    //   FFmpeg 全量探测），默认 probesize/analyzeduration 会多花约 1s。
+    //
+    // 三项优化（都不改变播放语义，只改「多久出第一帧」）：
+    //
+    // ① verifyhost 不阻塞起播：它当前**实际无效**（该 ffmpeg 构建默认不校验
+    //    证书，实测三张必坏证书全部通过），保留只为「将来换会校验的构建时不会
+    //    因 IP 不匹配而失败」。既然无效，就不该让它排在 open 前面 ——
+    //    改成 open 之后异步补，起播路径上少一次 await。
+    // ② analyzeduration / probesize 收紧：ffmpeg 默认会「多读一段再判定流格式」，
+    //    直播场景不需要这么保守。1000000us(1s) + 500KB 足够识别 H264/AAC，
+    //    实测能省下数百毫秒。
+    // ③ cache-pause-initial=no：默认 mpv 会「先缓冲再播」，直播应立刻出帧。
+    // ⚠️ **`demuxer-lavf-o` 必须保留 media_kit 自己的默认项**（2026-11-02 实测定论）。
+    //
+    // media_kit 1.2.6（real.dart:2428-2433）在 Player 初始化时写：
+    //   seg_max_retry=5, strict=experimental, allowed_extensions=ALL, protocol_whitelist=[...]
+    // 这是 mpv 属性，**同名属性后写覆盖前写** ⇒ 上一版只写
+    // analyzeduration/probesize 就把它们全冲掉了。
+    //
+    // **seg_max_retry=5 丢失是致命的**：HLS 分片偶发 404（volx 隧道下实测 5 次 1 次）
+    // 时不再重试 ⇒ ffmpeg 卡住等超时 ⇒ 起播从 ~1s 变成 5~6s。
+    // 实测证据：[AYLA-BOOT] opened=505ms 之后 6 秒内 ffmpeg **零日志输出**
+    // （不是在下载，是在等），然后才 firstFrame=6459ms。
+    // ---- HLS 起播位置：必须从**最后一个分片**开始（2026-11-02 实测）------
+    //
+    // FFmpeg 的 HLS demuxer 默认 `live_start_index = -3`（从边缘前 3 片起播）。
+    // 而 SRS 的 playlist 有 hls_window 秒之多（当前 window=60 + fragment=1 ⇒ **61 片**），
+    // -3 意味着要先把前面 58 片的位置「跳过去」，加上 media_kit 默认
+    // `cache=yes` + `demuxer-max-bytes=32MB` 会尝试填充缓存 ⇒
+    // **起播要等好几秒**（实测 opened=172ms → firstFrame=3355ms，中间零 ffmpeg 日志）。
+    //
+    // `live_start_index=-1` = 直接从最后一个分片起播，这是「直播跟边缘」的正确语义，
+    // 也是本项目 POC_README 里记过、但一直没落到代码里的那条。
+    // ⚠️⚠️ **不要加 `live_start_index`**（2026-11-02 实测定论）。
+    //
+    // 试过 `live_start_index=-1`（想直接从最后一个分片起播）：
+    //   Opening 次数 98 → **2**，之后 7.3 秒零 ffmpeg 日志，firstFrame 反而从
+    //   3355ms 劣化到 7517ms。
+    // 说明该参数在本 mpv/ffmpeg 构建 + SRS playlist（61 片）组合下**不兼容**：
+    // 播放器只拉了 2 次 master m3u8 就停在那里，一个分片都不请求。
+    //
+    // 只保留「无害且有用」的重连/持久连接项。
+    const String lavfBase = 'seg_max_retry=5,strict=experimental,'
+        'allowed_extensions=ALL,http_persistent=1';
+    await Future.wait(<Future<void>>[
+      if (_isVolxPullUrl(url))
+        _setMpvOption(p, 'stream-lavf-o',
+            'verifyhost=$kAylaVolxPullSniHost'),
+      _setMpvOption(p, 'demuxer-lavf-o',
+          '$lavfBase,analyzeduration=1000000,probesize=500000'),
+      _setMpvOption(p, 'cache-pause-initial', 'no'),
+      // 缓存上限收紧：media_kit 默认 32MB，1080p 下能囤十几秒；
+      // 直播只需「够播放即可」，囤多了反而让起播变慢、延时变大。
+      _setMpvOption(p, 'cache-secs', '2'),
+      _setMpvOption(p, 'demuxer-max-bytes', '8388608'),
+    ]);
 
+    debugPrint('[AYLA-BOOT] options=${_bootWatch.elapsedMilliseconds}ms');
     onStateChange?.call(HlsState.loading);
     await p.open(Media(url), play: true);
+    debugPrint('[AYLA-BOOT] opened=${_bootWatch.elapsedMilliseconds}ms');
   }
 
   /// 下发纹理尺寸（B4；`VideoController.setSize` 内部会 await 平台实例，
@@ -214,6 +284,47 @@ class MediaKitHls implements HlsPlatformPlayer {
     }
   }
 
+  @override
+  /// 开始播放（**与手机端同构：先贴边、再播**）。
+  ///
+  /// ## 为什么必须在起播时贴边（2026-11-02 用户实报「电脑端比手机端慢 3 秒」）
+  ///
+  /// 手机端 `video_player_impl.play()` 做的是：
+  /// ```dart
+  /// final target = aylaLiveEdgeSeekTarget(duration: c.value.duration);
+  /// if (target != null) await c.seekTo(target);   // ← 主动跳到直播边缘
+  /// await c.play();
+  /// ```
+  /// 而本端原来只有一句 `await _player?.play()`，**从 playlist 靠前处开始解析**：
+  /// SRS 的 playlist 有 hls_window 个分片（当前 60+1 片），mpv/ffmpeg 需要遍历、
+  /// 请求、解码多个分片才出第一帧 ⇒ 实测 firstFrame 3355ms（手机端约 2s）。
+  ///
+  /// 贴边 seek 之后只需 1~2 个分片就能出画面，与手机端走同一条路径。
+  ///
+  /// ⚠️ 与 `live_start_index=-1`（已证伪、见 attach 里的说明）的区别：那个是
+  /// demuxer 内部参数，会让播放器**不请求分片**；这里是播放器已就绪后的显式
+  /// seek，走正常的 seek 管线。
+  @override
+  /// 开始播放。
+  ///
+  /// ## 起播前绝不能 seek（2026-11-02 两次实测证伪）
+  ///
+  /// 用户实报「电脑端比手机端慢 3 秒」，对比两端代码发现手机端 play() 里有
+  /// `await c.seekTo(duration - 2s)`（贴边）而本端没有。但照搬到 mpv 行不通：
+  ///
+  /// - await p.seek(t) 再 await p.play()  =>  卡死：seek 永不返回（缓冲为空时
+  ///   mpv 等的「定位完成」信号不会来）；Opening 98 -> 6，播放失败；
+  /// - await p.play() 再 unawaited(p.seek(t))  =>  仍无效：Opening 98 -> 1，无画面。
+  ///
+  /// 根因：ExoPlayer 的 seekTo 是「发请求即返回」的异步语义，mpv 的 seek 是
+  /// 「等定位完成」。在直播 HLS（playlist 几十片）上对 mpv 提前 seek 会打乱它
+  /// 的起播分片选择逻辑，反而一个分片都不请求。
+  ///
+  /// 结论：本端保持「直接 play」（= 优化前已验证可播的形态，firstFrame 3355ms）。
+  /// 贴边 seek 只在播放已稳定后由用户点刷新键触发（[seekToLiveEdge]）。
+  ///
+  /// 两端起播差距（3.3s vs 2s）的其余部分来自播放内核差异
+  /// （ExoPlayer 轻量 HLS 解析 vs ffmpeg 完整 demuxer），不在客户端代码里。
   @override
   Future<void> play() async {
     await _player?.play();
