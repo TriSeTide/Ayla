@@ -1,7 +1,8 @@
 /// 更新包下载 + SHA-256 校验（不含解包/安装）。
 ///
 /// 工程约束：
-/// - 目标文件只能落在应用缓存/支持目录下的 `updates/`，目录名与文件名都经过路径净化；
+/// - 目标文件只能落在**数据根**下的 `updates/`（Windows = `<exe目录>/data/updates`，
+///   见 `core/storage/ayla_storage_paths.dart`），**绝不写 C 盘**；目录名与文件名都经过路径净化；
 /// - 下载先写 `.part`，校验通过后才原子改名为正式文件；任何一步失败都删除临时文件；
 /// - 校验两个事实：字节数与清单一致 + SHA-256 与清单一致；不一致抛错，绝不把
 ///   损坏包交给解包/安装路径；
@@ -14,8 +15,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
-import 'package:path_provider/path_provider.dart';
-
+import '../storage/ayla_storage_paths.dart';
 import 'update_api.dart';
 
 /// 下载进度（字节）。
@@ -153,16 +153,13 @@ class AylaUpdateDownloader {
     }
   }
 
-  Future<Directory> _updatesRoot() async {
-    final Directory base = Platform.isAndroid || Platform.isIOS
-        ? await getTemporaryDirectory()
-        : await getApplicationSupportDirectory();
-    final Directory root = Directory(
-      '${base.path}${Platform.pathSeparator}updates',
-    );
-    if (!await root.exists()) await root.create(recursive: true);
-    return root;
-  }
+  /// 更新暂存根 = `<数据根>/updates`。
+  ///
+  /// **2026-11-02 用户定稿**：Windows 上数据根 = `<exe目录>/data`，
+  /// 与安装盘一致；不再使用 `getApplicationSupportDirectory()`（它恒为
+  /// `%APPDATA%\Roaming\...`，正是 C 盘被占 7.79 GB 的来源），
+  /// 也没有任何回退分支。
+  Future<Directory> _updatesRoot() => aylaUpdatesDirectory();
 }
 
 /// 更新包文件名净化：只保留最后一段，去掉 Windows/Unix 非法字符与控制字符。

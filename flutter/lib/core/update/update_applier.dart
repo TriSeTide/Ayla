@@ -12,8 +12,14 @@
 /// ## 为什么 Windows 必须用脚本而不是「解压覆盖」
 /// 运行中的 `ayla_flutter.exe`、`flutter_windows.dll`、`data/app.so` 被系统占用，
 /// 应用自己无法覆盖自己。脚本在应用退出后再替换文件，然后重启新版本 —— 这是桌面端
-/// 自更新唯一不需要管理员权限的可行路径。脚本从 **%TEMP% 的更新 staging 目录**运行，
-/// 不写系统目录、不注册服务、不改 PATH。
+/// 自更新唯一不需要管理员权限的可行路径。脚本从 **`<exe目录>/data/updates/<sha256>/`**
+/// （数据根，见 `core/storage/ayla_storage_paths.dart`）运行，不写系统目录、
+/// 不注册服务、不改 PATH。
+///
+/// ## 清理契约（2026-11-02 补）
+/// 覆盖安装脚本在 `robocopy` 成功后**删除解包目录 `extracted/`**（它占单版本体积的 6 成），
+/// 并在重启新版本后由启动期回收删除整个 staging 目录 —— 详见
+/// `cleanupUpdateStaging` 与 `AylaUpdateRetention`。
 library;
 
 import 'dart:io';
@@ -22,6 +28,7 @@ import 'package:archive/archive_io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../storage/ayla_storage_paths.dart';
 import 'update_api.dart';
 import 'update_install_launcher.dart';
 import 'update_downloader.dart';
@@ -276,6 +283,8 @@ String buildWindowsApplyScript({
     '  pause',
     '  exit /b %RC%',
     ')',
+    'rem 覆盖完成 ⇒ 立刻删除解包体（占单版本体积约 6 成）；失败不影响已完成的安装',
+    'rd /s /q "%SRC%" >> "%LOG%" 2>&1',
     'start "" "%DST%\\%EXE%"',
     'echo [%DATE% %TIME%] Ayla update done >> "%LOG%"',
     'exit /b 0',

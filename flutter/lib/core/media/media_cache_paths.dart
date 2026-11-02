@@ -3,21 +3,22 @@
 /// 事实源：`Ayla/docs/architecture/flutter-local-media-cache.md`（2026-10-21 定稿）。
 /// 本文件只负责「缓存放在哪、目录怎么分」，不含读写逻辑（见 [AylaMediaCache]）。
 ///
-/// ## 根目录（文档 §3）
+/// ## 根目录（2026-11-02 用户定稿：绝不写 C 盘）
 ///
 /// | 平台 | 根 |
 /// |---|---|
 /// | Windows | `<exe 所在目录>/data/media-cache/` |
-/// | Android / iOS（以及桌面 Linux/macOS） | `<getApplicationSupportDirectory()>/media-cache/` |
+/// | Android / iOS | `<getApplicationSupportDirectory()>/media-cache/`（应用私有沙盒） |
 ///
 /// **Windows 的 `data/` 是 Flutter 运行时资源目录**（`app.so` / `icudtl.dat` /
 /// `flutter_assets/`），因此缓存必须落进 `data/media-cache/` 这个**独立子目录**，
 /// 绝不写平级文件。更新脚本用 `robocopy /E`（只覆盖不删除，
-/// `lib/core/update/update_applier.dart:271`）⇒ `data/media-cache/` 更新后不会丢。
+/// `lib/core/update/update_applier.dart`）⇒ `data/media-cache/` 更新后不会丢。
 ///
-/// **可写性降级（文档 §3.2）**：Windows 装到 `Program Files` 等受保护目录时，
-/// 普通用户对 exe 同级目录没有写权限 ⇒ 试写探测失败后回退
-/// `<ApplicationSupport>/media-cache/`，并通过 `debugPrint` 留日志。
+/// **没有降级回退（2026-11-02 变更）**：旧实现在 exe 同级不可写时会**静默**把整份缓存
+/// 搬到 `%APPDATA%\com.ayla\ayla_flutter\media-cache`（C 盘），且无 UI 告知、不迁移。
+/// 用户明确要求「不允许任何 C 盘的降级回退」，因此该分支已删除：根目录统一由
+/// `core/storage/ayla_storage_paths.dart` 解析，不可写即抛错（安装位置需可写）。
 ///
 /// ## 分桶布局（文档 §4）
 ///
@@ -63,6 +64,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/media_kind.dart';
+import '../storage/ayla_storage_paths.dart';
 
 /// 缓存目录名（`data/` 下的独立子目录，见库文档）。
 const String kMediaCacheDirName = 'media-cache';
@@ -86,20 +88,11 @@ bool aylaIsThumbCacheFileName(String fileName) =>
 
 /// 缓存根来源（诊断/日志用）。
 enum AylaMediaCacheRootSource {
-  /// Windows：`<exe 目录>/data/media-cache`（首选）。
+  /// Windows：`<exe 目录>/data/media-cache`。
   executableData,
 
-  /// `getApplicationSupportDirectory()/media-cache`（Windows 降级 / 移动端兜底）。
+  /// Android / iOS：`getApplicationSupportDirectory()/media-cache`（应用私有沙盒）。
   applicationSupport,
-
-  /// Android：`<外部存储>/Android/data/<包名>/files/media-cache`
-  /// （用户拍板 2026-10-29「手机端保存在经典的 Android/data」）。
-  ///
-  /// 为什么不用 `getExternalStorageDirectory()` 直接拼：该 API 返回
-  /// `/storage/emulated/0/Android/data/<pkg>/files`，但部分 ROM 会返回
-  /// 应用专属的其它挂载点；我们只**校验路径形态**（含 `/Android/data/`），
-  /// 形态不符或不可写即降级到 [applicationSupport]，绝不猜路径。
-  androidExternalData,
 }
 
 /// 平台能力抽象 —— **测试注入点**。
@@ -209,73 +202,33 @@ class AylaMediaCacheLayout {
 Future<AylaMediaCacheLayout> aylaResolveMediaCacheLayout({
   AylaMediaCachePlatform platform = const AylaIoMediaCachePlatform(),
 }) async {
+  // Windows：**唯一**落点 = `<exe目录>/data/media-cache`，**没有任何降级回退**。
+  //
+  // 2026-11-02 用户定稿：「全部改到 <exe目录>\data\，不允许任何动 C 盘，
+  // 也不允许任何 C 盘的降级回退」。旧实现在此处不可写时会静默搬到
+  // `%APPDATA%\com.ayla\ayla_flutter\media-cache`（C 盘），该分支已删除。
   if (platform.targetPlatform == TargetPlatform.windows) {
     final String exeDir = _parentDirOf(platform.executablePath);
     final String primary =
         '$exeDir/$kMediaCacheWindowsDataDirName/$kMediaCacheDirName';
-    if (await aylaProbeDirectoryWritable(Directory(primary))) {
-      return AylaMediaCacheLayout(
-        root: primary,
-        source: AylaMediaCacheRootSource.executableData,
-        degraded: false,
+    final bool writable = await aylaProbeDirectoryWritable(Directory(primary));
+    if (!writable) {
+      // 不降级：把「装到了不可写目录」这个事实显式抛给上层（缓存链路会记日志），
+      // 绝不静默改写到系统盘。
+      throw AylaStorageException(
+        '媒体缓存目录不可写。Ayla 的缓存固定存放在程序目录下的 data/media-cache，'
+            '不会回退到 C 盘。请把 Ayla 安装到可写位置。',
+        path: primary,
       );
     }
-    debugPrint(
-      '[AylaMediaCache] exe 同级 data/ 不可写（${Directory(primary).path}）'
-      '—— 可能安装在 Program Files 等受保护目录，降级到应用支持目录',
-    );
-    final Directory support = await platform.applicationSupportDirectory();
-    final String fallbackRoot = _join(support.path, kMediaCacheDirName);
-    await _ensureDirectoryQuietly(fallbackRoot);
     return AylaMediaCacheLayout(
-      root: fallbackRoot,
-      source: AylaMediaCacheRootSource.applicationSupport,
-      degraded: true,
-    );
-  }
-  // Android：优先外部存储的 `Android/data/<包名>/files/media-cache`
-  // （用户拍板 2026-10-29「手机端保存在经典的 Android/data」）。
-  //
-  // 校验三件事，任一不满足即降级到应用支持目录（绝不猜路径）：
-  //   1. 平台给了外部目录（部分 ROM / 已卸载的 SD 卡返回 null）；
-  //   2. 路径形态确实是 `/Android/data/`（防止厂商 ROM 把应用专属目录
-  //      映射到别处，此时"Android/data"对用户毫无意义）；
-  //   3. 目录可写（外部存储可能被拔出、只读挂载或配额耗尽）。
-  if (platform.targetPlatform == TargetPlatform.android) {
-    final Directory? external = await platform.externalStorageDirectory();
-    if (external != null) {
-      final String normalized = external.path.replaceAll('\\', '/');
-      if (normalized.contains('/Android/data/')) {
-        final String primary = _join(normalized, kMediaCacheDirName);
-        if (await aylaProbeDirectoryWritable(Directory(primary))) {
-          return AylaMediaCacheLayout(
-            root: primary,
-            source: AylaMediaCacheRootSource.androidExternalData,
-            degraded: false,
-          );
-        }
-        debugPrint(
-          '[AylaMediaCache] Android 外部存储不可写（$primary）——降级到应用支持目录',
-        );
-      } else {
-        debugPrint(
-          '[AylaMediaCache] 外部目录形态不是 /Android/data/（$normalized）'
-          '——降级到应用支持目录',
-        );
-      }
-    }
-    final Directory support = await platform.applicationSupportDirectory();
-    final String fallbackRoot = _join(support.path, kMediaCacheDirName);
-    await _ensureDirectoryQuietly(fallbackRoot);
-    return AylaMediaCacheLayout(
-      root: fallbackRoot,
-      source: AylaMediaCacheRootSource.applicationSupport,
-      degraded: true,
+      root: primary,
+      source: AylaMediaCacheRootSource.executableData,
+      degraded: false,
     );
   }
 
-  // iOS（以及桌面 Linux/macOS）：应用私有目录，无需探测写权限
-  //（仍要建目录：首次使用时目录可能尚不存在，create 幂等且失败由写入链记日志）。
+  // Android / iOS：应用私有沙盒目录（不是「系统盘用户目录」，无回退概念）。
   final Directory support = await platform.applicationSupportDirectory();
   final String root = _join(support.path, kMediaCacheDirName);
   await _ensureDirectoryQuietly(root);

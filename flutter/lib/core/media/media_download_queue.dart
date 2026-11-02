@@ -46,6 +46,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../models/media_kind.dart';
+import '../storage/ayla_storage_paths.dart';
 import 'media_cache.dart';
 import 'media_cache_paths.dart';
 import 'media_signer.dart' show MediaExpiredError;
@@ -272,11 +273,12 @@ class AylaMediaDownloadQueue {
       return;
     }
     try {
-      final AylaMediaCacheLayout layout = await _cache.ensureReady();
-      final String root = layout.root.replaceAll('\\', '/');
-      final int slash = root.lastIndexOf('/');
-      final String parent = slash <= 0 ? root : root.substring(0, slash);
-      _queueFile = File('$parent/download-queue.json');
+      // 2026-11-02：队列文件固定落数据根（Windows = `<exe目录>/data/download-queue.json`），
+      // 不再从媒体缓存根反推 —— 缓存根不可用时队列也要能持久化，且**绝不回退到 C 盘**。
+      final Directory dataRoot = Directory(await aylaEnsureDataRoot());
+      _queueFile = File(
+        '${dataRoot.path}${Platform.pathSeparator}download-queue.json',
+      );
       await _load();
     } catch (error) {
       debugPrint('[AylaDownloadQueue] 初始化失败（队列降级为内存态）：$error');

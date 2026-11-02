@@ -197,7 +197,7 @@ class AylaMediaCache {
 
   /// 解析后的布局（[ensureReady] 之后非 null）。
   AylaMediaCacheLayout? _layout;
-  Future<AylaMediaCacheLayout>? _layoutFuture;
+  Future<AylaMediaCacheLayout?>? _layoutFuture;
 
   /// 启动期 `.tmp` 扫除是否已做过（只做一次）。
   bool _tempsCleaned = false;
@@ -233,7 +233,7 @@ class AylaMediaCache {
   set layoutForTest(AylaMediaCacheLayout? value) {
     _layout = value;
     _layoutFuture =
-        value == null ? null : Future<AylaMediaCacheLayout>.value(value);
+        value == null ? null : Future<AylaMediaCacheLayout?>.value(value);
     _tempsCleaned = value != null; // 测试不扫 .tmp
   }
 
@@ -250,18 +250,26 @@ class AylaMediaCache {
 
   /// 解析根目录并完成一次性启动清理（幂等）。
   ///
-  /// 不抛：根目录解析/建目录失败时仍返回布局对象，写入链路由 [storeBytes] 逐次记日志。
-  Future<AylaMediaCacheLayout> ensureReady() {
-    final Future<AylaMediaCacheLayout>? current = _layoutFuture;
+  /// **不抛**（2026-11-02）：根目录解析/建目录失败时记日志并返回 null，
+  /// 缓存整体降级为「不缓存」，但**绝不回退到 C 盘**（用户硬要求）。
+  /// 调用方（`main.dart`）用 `unawaited` 触发，异常不能拖垮启动。
+  Future<AylaMediaCacheLayout?> ensureReady() {
+    final Future<AylaMediaCacheLayout?>? current = _layoutFuture;
     if (current != null) return current;
-    final Future<AylaMediaCacheLayout> future = _init();
+    final Future<AylaMediaCacheLayout?> future = _init();
     _layoutFuture = future;
     return future;
   }
 
-  Future<AylaMediaCacheLayout> _init() async {
-    final AylaMediaCacheLayout layout =
-        await aylaResolveMediaCacheLayout(platform: _platform);
+  Future<AylaMediaCacheLayout?> _init() async {
+    final AylaMediaCacheLayout layout;
+    try {
+      layout = await aylaResolveMediaCacheLayout(platform: _platform);
+    } catch (error) {
+      // 不可写 ⇒ 不缓存（**不降级到 C 盘**）。缓存是增强项，不能拖垮媒体链路。
+      debugPrint('[AylaMediaCache] 缓存根不可用，本次运行不启用本地缓存：$error');
+      return null;
+    }
     _layout = layout;
     debugPrint('[AylaMediaCache] 缓存根 = ${layout.root} '
         '(来源=${layout.source.name}${layout.degraded ? '，已降级' : ''})');
@@ -296,7 +304,8 @@ class AylaMediaCache {
     if (!_isCacheableId(mediaId)) return null;
     final bool isThumb = variant == AylaMediaCacheVariant.thumb;
     try {
-      final AylaMediaCacheLayout layout = await ensureReady();
+      final AylaMediaCacheLayout? layout = await ensureReady();
+      if (layout == null) return null;
       final String safe = aylaSafeMediaId(mediaId);
       final String key = _key(kind, safe, variant);
 
@@ -436,7 +445,8 @@ class AylaMediaCache {
     if (bytes.isEmpty) return null;
     final bool isThumb = variant == AylaMediaCacheVariant.thumb;
     try {
-      final AylaMediaCacheLayout layout = await ensureReady();
+      final AylaMediaCacheLayout? layout = await ensureReady();
+      if (layout == null) return null;
       final File target = File(
         layout.pathFor(
           kind,
@@ -474,7 +484,8 @@ class AylaMediaCache {
     if (!_isCacheableId(mediaId)) return null;
     final bool isThumb = variant == AylaMediaCacheVariant.thumb;
     try {
-      final AylaMediaCacheLayout layout = await ensureReady();
+      final AylaMediaCacheLayout? layout = await ensureReady();
+      if (layout == null) return null;
       final File target = File(
         layout.pathFor(
           kind,
@@ -714,7 +725,8 @@ class AylaMediaCache {
     if (!_isCacheableId(mediaId)) return 0;
     int removed = 0;
     try {
-      final AylaMediaCacheLayout layout = await ensureReady();
+      final AylaMediaCacheLayout? layout = await ensureReady();
+      if (layout == null) return 0;
       final String safe = aylaSafeMediaId(mediaId);
       for (final AylaMediaKind kind in AylaMediaKind.values) {
         // 两种形态一起清（2026-10-23 用户改版后 thumb 也落盘）。
@@ -747,7 +759,8 @@ class AylaMediaCache {
   /// 并留日志（不抛）。
   Future<AylaMediaCacheStats> stats() async {
     try {
-      final AylaMediaCacheLayout layout = await ensureReady();
+      final AylaMediaCacheLayout? layout = await ensureReady();
+      if (layout == null) return AylaMediaCacheStats.empty;
       final Directory root = Directory(layout.root);
       if (!await root.exists()) return AylaMediaCacheStats.empty;
 
