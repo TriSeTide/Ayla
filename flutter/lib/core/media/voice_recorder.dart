@@ -25,8 +25,9 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart'
     show ChangeNotifier, Listenable, debugPrint;
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+
+import '../storage/ayla_storage_paths.dart';
 
 /// 平台是否支持语音录制（web `isVoiceRecordingSupported()` 的等价）。
 ///
@@ -163,7 +164,9 @@ class AylaRecordVoiceRecorder extends ChangeNotifier implements AylaVoiceRecorde
       }
       final ({AudioEncoder encoder, String mimeType, String ext}) fmt =
           await _pickFormat();
-      final Directory dir = await getTemporaryDirectory();
+      // 2026-11-02：录制临时文件落 `<exe目录>/data/voice`（Windows），
+      // 不再使用系统 %TEMP%（那是 C 盘）。
+      final Directory dir = await aylaVoiceDirectory();
       final String path =
           '${dir.path}${Platform.pathSeparator}voice-${DateTime.now().millisecondsSinceEpoch}.${fmt.ext}';
       await _recorder.start(

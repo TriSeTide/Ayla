@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ayla_flutter/core/media/media_cache.dart';
 import 'package:ayla_flutter/core/media/media_cache_paths.dart';
+import 'package:ayla_flutter/core/storage/ayla_storage_paths.dart';
 import 'package:ayla_flutter/core/models/media_kind.dart';
 
 /// 真实平台：executablePath 指向真实目录，其余走真实 dart:io 实现。
@@ -48,7 +49,7 @@ void main() {
 
     final AylaMediaCache cache =
         AylaMediaCache(platform: _RealPlatform(exePath, support));
-    final AylaMediaCacheLayout layout = await cache.ensureReady();
+    final AylaMediaCacheLayout layout = (await cache.ensureReady())!;
 
     // ① 根目录必须是 <exe目录>/data/media-cache（真实 Windows 路径）
     expect(layout.source, AylaMediaCacheRootSource.executableData);
@@ -97,7 +98,7 @@ void main() {
     expect(await stored.exists(), isFalse);
   });
 
-  test('真实磁盘 IO：主目录不可写 → 降级到应用支持目录', () async {
+  test('真实磁盘 IO：主目录不可写 → 落到显式 Ayla\\data（Program Files 场景仍可用）', () async {
     final Directory tempRoot = await Directory.systemTemp.createTemp('ayla-real-ro-');
     addTearDown(() async {
       if (await tempRoot.exists()) await tempRoot.delete(recursive: true);
@@ -112,24 +113,37 @@ void main() {
     final Directory support = Directory('${tempRoot.path}/support');
     await support.create(recursive: true);
 
+    // 回落根默认是真实用户目录 %LOCALAPPDATA%\Ayla\data ⇒ 测试必须重定向，
+    // 否则会在开发机上留垃圾（2026-11-02 实测踩过）。
+    aylaFallbackDataRootForTest = '${tempRoot.path}/localappdata/Ayla/data';
+    addTearDown(() => aylaFallbackDataRootForTest = null);
+
     final AylaMediaCache cache =
         AylaMediaCache(platform: _RealPlatform(exePath, support));
-    final AylaMediaCacheLayout layout = await cache.ensureReady();
+    // 用户 2026-11-02 裁决：Program Files 场景**正常用**，允许写 C 盘，
+    // 但数据仍在显式的 Ayla\\data 目录里（不是 %APPDATA% 隐式目录）。
+    final AylaMediaCacheLayout? layout = await cache.ensureReady();
+    expect(layout, isNotNull, reason: '不可写 exe 同级 ⇒ 回落而不是禁用');
+    expect(layout!.degraded, isTrue);
+    expect(
+      layout.root.replaceAll('\\', '/').toLowerCase(),
+      contains('ayla/data/media-cache'),
+      reason: '回落点必须是显式 Ayla/data 目录',
+    );
+    // 反证：没有回到旧实现的 ApplicationSupport 隐式目录
+    expect(
+      Directory('${support.path}/media-cache').existsSync(),
+      isFalse,
+      reason: '禁止回到 %APPDATA%\\Roaming 隐式目录',
+    );
 
-    expect(layout.degraded, isTrue, reason: '主目录不可写应降级');
-    expect(layout.source, AylaMediaCacheRootSource.applicationSupport);
-    final String norm = layout.root.replaceAll('\\', '/');
-    expect(norm.endsWith('/support/media-cache'), isTrue,
-        reason: '降级根应是 <support>/media-cache，实际=${layout.root}');
-
-    // 降级后仍能正常读写
     final File? stored = await cache.storeBytes(
       mediaId: 'degrade000000000000000000000001',
       kind: AylaMediaKind.image,
       bytes: List<int>.filled(10, 7),
       mimeType: 'image/png',
     );
-    expect(stored, isNotNull);
+    expect(stored, isNotNull, reason: '缓存照常工作（不阻断功能）');
     expect(await stored!.exists(), isTrue);
   });
 }

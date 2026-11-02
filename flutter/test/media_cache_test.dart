@@ -6,7 +6,8 @@
 /// 2. **写入后 lookup 命中** —— 且落盘路径严格符合分桶布局；
 /// 3. **并发去重** —— 同一 media_id 并发 `fetchAndStore` 只签名/下载一次；
 /// 4. **原子性** —— 写入后不残留 `.tmp`；启动时清掉崩溃留下的 `.tmp`；
-/// 5. **可写性降级** —— Windows 主目录不可写时回退到 ApplicationSupport 并标记 `degraded`。
+/// 5. **不可写即报错**（2026-11-02 用户定稿：**不允许任何 C 盘降级回退**）——
+///    Windows 主目录不可写时抛 [AylaStorageException]，绝不改写 `%APPDATA%`。
 ///
 /// 全部使用临时目录 + 注入的假平台/假签名器/假下载器，**不碰真实用户缓存目录**、
 /// **不发任何网络请求**。
@@ -20,6 +21,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ayla_flutter/core/media/media_cache.dart';
 import 'package:ayla_flutter/core/media/media_cache_paths.dart';
+import 'package:ayla_flutter/core/storage/ayla_storage_paths.dart';
 import 'package:ayla_flutter/core/media/media_signer.dart';
 import 'package:ayla_flutter/core/models/media_kind.dart';
 
@@ -29,7 +31,6 @@ class _FakePlatform implements AylaMediaCachePlatform {
     required this.targetPlatform,
     required this.exeDir,
     required this.supportDir,
-    this.externalDir,
   });
 
   @override
@@ -37,13 +38,6 @@ class _FakePlatform implements AylaMediaCachePlatform {
 
   final String exeDir;
   final String supportDir;
-
-  /// Android 外部存储目录（null = 该平台没有 / 取不到）。
-  final String? externalDir;
-
-  @override
-  Future<Directory?> externalStorageDirectory() async =>
-      externalDir == null ? null : Directory(externalDir!);
 
   @override
   String get executablePath {
@@ -55,6 +49,11 @@ class _FakePlatform implements AylaMediaCachePlatform {
   @override
   Future<Directory> applicationSupportDirectory() async =>
       Directory(supportDir);
+
+  /// 2026-11-02：外部存储分支已删除（用户要求「不允许任何降级回退」），
+  /// 接口保留只为不破坏既有测试替身的编译；生产实现恒返回 null 且不再被调用。
+  @override
+  Future<Directory?> externalStorageDirectory() async => null;
 }
 
 /// 统计下载次数并可挂起的假下载器。
@@ -158,50 +157,9 @@ void main() {
       expect(await appSo.exists(), isTrue, reason: '探测不得动 data/ 里的运行时资源');
     });
 
-    test('Android：根 = <外部存储>/Android/data/<pkg>/files/media-cache', () async {
-      // 用户拍板 2026-10-29：「手机端保存在经典的 Android/data」。
-      final String external =
-          '${tempRoot.path}/external/Android/data/top.trise.ayla/files'
-              .replaceAll('\\', '/');
-      await Directory(external).create(recursive: true);
-      final _FakePlatform androidWithExternal = _FakePlatform(
-        targetPlatform: TargetPlatform.android,
-        exeDir: '/nonexistent',
-        supportDir: '${tempRoot.path}/support-android2',
-        externalDir: external,
-      );
-
-      final AylaMediaCacheLayout layout =
-          await aylaResolveMediaCacheLayout(platform: androidWithExternal);
-
-      expect(
-        layout.root.replaceAll('\\', '/'),
-        '$external/media-cache',
-      );
-      expect(layout.source, AylaMediaCacheRootSource.androidExternalData);
-      expect(layout.degraded, isFalse);
-      expect(await Directory(layout.root).exists(), isTrue);
-    });
-
-    test('Android：外部目录形态不是 /Android/data/ → 降级 ApplicationSupport', () async {
-      final String weird =
-          '${tempRoot.path}/weird-mount/appfiles'.replaceAll('\\', '/');
-      await Directory(weird).create(recursive: true);
-      final _FakePlatform p = _FakePlatform(
-        targetPlatform: TargetPlatform.android,
-        exeDir: '/nonexistent',
-        supportDir: '${tempRoot.path}/support-android3',
-        externalDir: weird,
-      );
-
-      final AylaMediaCacheLayout layout =
-          await aylaResolveMediaCacheLayout(platform: p);
-
-      expect(layout.source, AylaMediaCacheRootSource.applicationSupport);
-      expect(layout.degraded, isTrue);
-    });
-
-    test('Android：拿不到外部存储 → 降级 ApplicationSupport（degraded）', () async {
+    test('Android：根 = <ApplicationSupport>/media-cache（应用私有沙盒，无外部存储分支）', () async {
+      // 2026-11-02 用户定稿「不允许任何降级回退」：Android 不再走
+      // `getExternalStorageDirectory()` 的外部存储分支，统一落应用私有沙盒。
       final AylaMediaCacheLayout layout =
           await aylaResolveMediaCacheLayout(platform: mobilePlatform);
 
@@ -210,7 +168,7 @@ void main() {
         '${mobilePlatform.supportDir}/media-cache'.replaceAll('\\', '/'),
       );
       expect(layout.source, AylaMediaCacheRootSource.applicationSupport);
-      expect(layout.degraded, isTrue, reason: 'Android 拿不到 Android/data 必须标记降级');
+      expect(layout.degraded, isFalse);
       expect(await Directory(layout.root).exists(), isTrue);
     });
 
@@ -232,7 +190,7 @@ void main() {
       expect(await Directory(layout.root).exists(), isTrue);
     });
 
-    test('Windows 主目录不可写 → 降级到 ApplicationSupport 且 degraded=true', () async {
+    test('Windows 主目录不可写 → 落到 Ayla\\data 显式目录（Program Files 场景，允许写 C 盘）', () async {
       // 造「不可写」：在主路径上放一个**同名文件**，目录 create 必然失败
       // （跨平台稳定，不依赖 ACL/只读属性）。
       final String primary =
@@ -240,17 +198,33 @@ void main() {
       await Directory('${windowsPlatform.exeDir}/data').create(recursive: true);
       await File(primary).writeAsBytes(const <int>[9]);
 
+      // 用户 2026-11-02 裁决：「万一真有人把包放进 Program Files —— 就让他装在那里
+      // 正常用，这种情况允许写 C 盘，但 data 还是全部写在 exe 同级」。
+      //
+      // ⚠️ 回落根由 `aylaFallbackDataRoot()` 给出（= %LOCALAPPDATA%\Ayla\data）。
+      // 测试里**必须**把它重定向到临时目录，否则会写进真实的用户目录
+      //（2026-11-02 实测踩过：跑测试会在 %LOCALAPPDATA%\Ayla 里留下垃圾）。
+      // 回落根默认是真实用户目录 %LOCALAPPDATA%\Ayla\data ⇒ 测试必须重定向，
+      // 否则会在开发机上留垃圾（2026-11-02 实测踩过）。
+      aylaFallbackDataRootForTest =
+          '${tempRoot.path}/localappdata/Ayla/data';
+      addTearDown(() => aylaFallbackDataRootForTest = null);
+
       final AylaMediaCacheLayout layout =
           await aylaResolveMediaCacheLayout(platform: windowsPlatform);
 
-      expect(layout.degraded, isTrue, reason: '主目录不可写必须标记降级');
-      expect(layout.source, AylaMediaCacheRootSource.applicationSupport);
+      expect(layout.degraded, isTrue, reason: '非 exe 同级 ⇒ 标记为降级');
       expect(
-        layout.root.replaceAll('\\', '/'),
-        '${windowsPlatform.supportDir}/media-cache'.replaceAll('\\', '/'),
+        layout.root.replaceAll('\\', '/').toLowerCase(),
+        contains('ayla/data/media-cache'),
+        reason: '回落点必须是显式的 Ayla/data 目录，不能是 %APPDATA% 隐式目录',
       );
-      // 降级后仍应可用（可写）
-      expect(await aylaProbeDirectoryWritable(Directory(layout.root)), isTrue);
+      // 反证：没有回到旧实现的 ApplicationSupport 隐式目录
+      expect(
+        layout.root.toLowerCase().contains('supportdir'),
+        isFalse,
+        reason: '禁止回到 %APPDATA%\\Roaming 隐式目录',
+      );
     });
 
     test('分桶布局：<kind>/<id 前2位>/<id>.<ext>', () {
@@ -440,7 +414,7 @@ void main() {
           endsWith('data/media-cache/image/aa/$id.jpg'));
 
       // 两者共存，互不覆盖（内容与大小都要各自保留）
-      final AylaMediaCacheLayout layout = await cache.ensureReady();
+      final AylaMediaCacheLayout layout = (await cache.ensureReady())!;
       final List<File> files = await _allFiles(Directory(layout.root));
       expect(files.length, 2, reason: '★ thumb 与 original 必须同时存在');
       expect(await thumb.length(), 3, reason: '★ thumb 未被 original 覆盖');
@@ -521,7 +495,7 @@ void main() {
     test('★ 老版本兼容：只有 <id>.<ext> 的老文件按 original 命中，无需迁移', () async {
       final AylaMediaCache cache = AylaMediaCache(platform: windowsPlatform);
       const String id = 'ddeeff00112233445566778899001122';
-      final AylaMediaCacheLayout layout = await cache.ensureReady();
+      final AylaMediaCacheLayout layout = (await cache.ensureReady())!;
       // 手工造一个「老版本留下的」文件（没有 .thumb 段）
       final File legacy = File(layout.pathFor(
         AylaMediaKind.image,
@@ -630,7 +604,7 @@ void main() {
   group('原子性与 .tmp 残留', () {
     test('写入成功后不残留任何 .tmp', () async {
       final AylaMediaCache cache = AylaMediaCache(platform: windowsPlatform);
-      final AylaMediaCacheLayout layout = await cache.ensureReady();
+      final AylaMediaCacheLayout layout = (await cache.ensureReady())!;
       await cache.storeBytes(
         mediaId: '11111111111111111111111111111111',
         kind: AylaMediaKind.image,
@@ -674,7 +648,7 @@ void main() {
 
     test('半截 .tmp 永远不会被 lookup 命中', () async {
       final AylaMediaCache cache = AylaMediaCache(platform: windowsPlatform);
-      final AylaMediaCacheLayout layout = await cache.ensureReady();
+      final AylaMediaCacheLayout layout = (await cache.ensureReady())!;
       const String id = 'bbbb2222cccc3333dddd4444eeee5555';
       final String bucket = '${layout.root}/image/bb';
       await Directory(bucket).create(recursive: true);
@@ -701,24 +675,35 @@ void main() {
       );
       expect(second, isNotNull);
       expect(await second!.readAsBytes(), <int>[4, 5, 6]);
-      final AylaMediaCacheLayout layout = await cache.ensureReady();
+      final AylaMediaCacheLayout layout = (await cache.ensureReady())!;
       final List<File> files = await _allFiles(Directory(layout.root));
       expect(files, hasLength(1));
       expect(files.single.path.endsWith('.tmp'), isFalse);
     });
   });
 
-  group('降级路径端到端', () {
-    test('主目录不可写 → 缓存放进降级根且读写正常', () async {
+  group('不可写路径端到端（无降级回退）', () {
+    test('主目录不可写 → 不缓存、不写 C 盘、媒体链路不崩', () async {
       // 造不可写（同名文件占位，见上）
       final String primary =
           '${windowsPlatform.exeDir}/data/media-cache'.replaceAll('\\', '/');
       await Directory('${windowsPlatform.exeDir}/data').create(recursive: true);
       await File(primary).writeAsBytes(const <int>[9]);
 
+      // 回落根重定向到临时目录（见上一条用例的说明）。
+      aylaFallbackDataRootForTest =
+          '${tempRoot.path}/localappdata/Ayla/data';
+      addTearDown(() => aylaFallbackDataRootForTest = null);
+
       final AylaMediaCache cache = AylaMediaCache(platform: windowsPlatform);
-      final AylaMediaCacheLayout layout = await cache.ensureReady();
-      expect(layout.degraded, isTrue);
+      final AylaMediaCacheLayout? layout = await cache.ensureReady();
+      expect(layout, isNotNull, reason: 'Program Files 场景仍要正常缓存（用户裁决）');
+      expect(layout!.degraded, isTrue);
+      expect(
+        layout.root.replaceAll('\\', '/').toLowerCase(),
+        contains('ayla/data/media-cache'),
+        reason: '回落点必须是显式 Ayla/data 目录',
+      );
 
       const String id = 'dddd4444eeee5555ffff666677778888';
       final File? stored = await cache.storeBytes(
@@ -727,14 +712,15 @@ void main() {
         bytes: <int>[1, 2, 3],
         mimeType: 'image/jpeg',
       );
-      expect(stored, isNotNull);
+      expect(stored, isNotNull, reason: '缓存照常工作（不阻断功能）');
+      expect(await stored!.exists(), isTrue);
+      // 反证：没有回到旧实现的 ApplicationSupport 隐式目录
       expect(
-        stored!.path.replaceAll('\\', '/'),
-        '${windowsPlatform.supportDir}/media-cache/image/dd/$id.jpg'
-            .replaceAll('\\', '/'),
+        Directory('${windowsPlatform.supportDir}/media-cache').existsSync(),
+        isFalse,
+        reason: '禁止回到 %APPDATA%\\Roaming 隐式目录',
       );
-      expect(await cache.lookup(id, kind: AylaMediaKind.image), isNotNull);
-      // 主路径上的占位文件不受影响（降级绝不写主路径）
+      // 主路径上的占位文件不受影响
       expect(await File(primary).exists(), isTrue);
     });
 
@@ -782,7 +768,7 @@ void main() {
       expect(downloader.calls, 1);
 
       // 只有 thumb 那一份，没有冒充出来的 original
-      final AylaMediaCacheLayout layout = await cache.ensureReady();
+      final AylaMediaCacheLayout layout = (await cache.ensureReady())!;
       final List<File> files = await _allFiles(Directory(layout.root));
       expect(files.length, 1);
       expect(await cache.lookup(id, kind: AylaMediaKind.image), isNull,
@@ -824,7 +810,7 @@ void main() {
       final File? result = await cache.fetchAndStore(
           mediaId: 'aaaabbbbccccddddeeeeffff00001111', kind: AylaMediaKind.file);
       expect(result, isNull);
-      final AylaMediaCacheLayout layout = await cache.ensureReady();
+      final AylaMediaCacheLayout layout = (await cache.ensureReady())!;
       expect(await _allFiles(Directory(layout.root)), isEmpty);
     });
   });
@@ -873,7 +859,7 @@ void main() {
 
     test('stats 不把 .tmp 计入条目数', () async {
       final AylaMediaCache cache = AylaMediaCache(platform: windowsPlatform);
-      final AylaMediaCacheLayout layout = await cache.ensureReady();
+      final AylaMediaCacheLayout layout = (await cache.ensureReady())!;
       final String bucket = '${layout.root}/image/cc';
       await Directory(bucket).create(recursive: true);
       await File('$bucket/cc11.jpg').writeAsBytes(List<int>.filled(10, 1));

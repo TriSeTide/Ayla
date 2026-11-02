@@ -519,7 +519,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     // /group/target，replace）。
     // web 上 recentGroupId 读 localStorage **同步**、groups 又来自 appInit 预加载
     // ⇒ target 首帧就有值 ⇒ **永远走不到下面的 home-loading 分支**，用户从来看不到它。
-    // Flutter 侧 prefs 是异步读盘（getApplicationSupportDirectory + readAsString）
+    // Flutter 侧 prefs 是异步读盘（<exe目录>/data/profile + readAsString）
     // ⇒ 就绪前的这几帧此前会渲染「正在加载群聊…」转圈 = 用户说的那个「从来没见过的东西」。
     // ⇒ 改为**静默等待**：与 web 的可见行为一致，也不会先跳错群（见上面 target 的 prefsReady 门）。
     if (groups.isEmpty && (pager == null || pager.loading)) {

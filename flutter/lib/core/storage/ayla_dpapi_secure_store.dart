@@ -1,9 +1,9 @@
 /// **Windows 上自管的 DPAPI 加密凭据文件**（2026-11-02）。
 ///
 /// ## 为什么不用 `flutter_secure_storage`
-/// 该插件在 Windows 上的落点是 `getApplicationSupportDirectory()/flutter_secure_storage.dat`
+/// 该插件在 Windows 上的落点是「应用支持目录 /flutter_secure_storage.dat」
 /// （`flutter_secure_storage_windows-4.2.2/lib/src/flutter_secure_storage_windows_ffi.dart:257`
-/// 文件名常量、`:275-284` 目录解析），而 `getApplicationSupportDirectory()` 恒为
+/// 文件名常量、`:275-284` 目录解析），而 path_provider 的应用支持目录恒为
 /// `%APPDATA%\Roaming\com.ayla\ayla_flutter` —— **插件没有提供配置目录的入口**。
 /// 既然用户要求「不落 C 盘、且不允许 C 盘回退」，Windows 分支必须自管一个文件。
 ///

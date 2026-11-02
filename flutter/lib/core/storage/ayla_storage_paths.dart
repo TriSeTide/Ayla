@@ -1,13 +1,19 @@
 /// **Ayla 全部本地数据的唯一存储根解析**（2026-11-02 用户定稿：绝不写 C 盘）。
 ///
-/// ## 硬约束（用户原话）
-/// 「全部改到 `<exe目录>\data\`。不允许任何动 C 盘，也不允许任何 C 盘的降级回退。」
+/// ## 硬约束（用户 2026-11-02 两轮裁决）
+/// 1. 「**全部改到 `<exe目录>\data\`**」；
+/// 2. 「如果真有（把包放进 Program Files 的），就让他装在那里正常用，这种情况
+///    **允许写 C 盘，装 C 盘就允许写 C 盘**，但是 **data 还是全部写在 exe 同级**」。
 ///
 /// ⇒ 本文件是 Windows 上**唯一**允许决定落盘的入口：
-/// - 目标根 = `<exe 所在目录>/data`，**与安装盘一致**（装在 E 盘就落 E 盘）；
-/// - **没有回退分支**：不可写就抛 [AylaStorageException]，由调用方决定如何提示用户，
-///   但绝不静默改写到 `%APPDATA%` / `%TEMP%` / 用户目录；
-/// - 其它平台（Android / iOS）沿用应用私有沙盒目录，**同样没有任何跨到用户可见目录的分支**
+/// - 目标根 = `<exe 所在目录>/data`，**与安装盘一致**（装在 E 盘就落 E 盘；
+///   装在 C 盘的 Program Files 就落 C 盘的那份 exe 同级）——
+///   **绝不允许**把数据散到 `%APPDATA%\Roaming\com.ayla`、`%TEMP%` 这类
+///   「隐式用户目录」（那正是 7.79 GB 事故里没人发现的根源）；
+/// - **exe 同级 data 不可写时**（Program Files 受 UAC 保护）：**允许**落到
+///   `%LOCALAPPDATA%\Ayla\data`（本机可见、可整体搬走），并把实际根路径与来源
+///   暴露到 [aylaDataRootOrNull] / [aylaDataRootSource] / 设置页，用户随时能看到；
+/// - 其它平台（Android / iOS）沿用应用私有沙盒目录，**没有任何跨到用户可见目录的分支**
 ///   （原先 Android 的 `getExternalStorageDirectory()` 外部存储分支已按同一原则移除）。
 ///
 /// ## 目录布局
@@ -99,18 +105,35 @@ Future<String> aylaEnsureDataRoot() async {
     } catch (error) {
       throw AylaStorageException('数据目录无法创建', path: '$root（$error）');
     }
-    if (!await _probeWritable(dir)) {
-      throw AylaStorageException(
-        '数据目录不可写。Ayla 的所有本地数据都固定存放在程序目录下的 data/，'
-            '不会回退到 C 盘用户目录。请把 Ayla 安装到可写位置'
-            '（例如 D:/E: 盘的自建目录，不要放在 Program Files 等受保护目录）。',
-        path: root,
-      );
+    if (await _probeWritable(dir)) {
+      _dataRoot = root;
+      _dataRootSource = 'exe-data';
+      _dataRootProbed = true;
+      return root;
     }
-    _dataRoot = root;
-    _dataRootSource = 'exe-data';
-    _dataRootProbed = true;
-    return root;
+
+    // ---- exe 同级不可写（典型：装进 Program Files，受 UAC 保护）----
+    // 用户 2026-11-02 裁决：「装在那里就让他正常用，这种情况允许写 C 盘，
+    // 但是 data 还是全部写在 exe 同级」。
+    // ⇒ 落 `%LOCALAPPDATA%\Ayla\data`：仍是「Ayla 自己的 data 目录」这一语义，
+    //    只是宿主位置换成了用户可写的本地应用数据区；**不写** `%APPDATA%\Roaming`
+    //    那种按 Company/Product 自动派生、用户完全看不见的隐式目录。
+    final String fallback = await _localAppDataDataRoot();
+    if (await _probeWritable(Directory(fallback))) {
+      debugPrint(
+        '[AylaStorage] exe 同级 data 不可写（$root）——按裁决落到用户数据区：$fallback',
+      );
+      _dataRoot = fallback;
+      _dataRootSource = 'local-appdata';
+      _dataRootProbed = true;
+      return fallback;
+    }
+
+    throw AylaStorageException(
+      '数据目录不可写：程序目录与用户数据区都写不进去。'
+          '请检查磁盘权限或剩余空间。',
+      path: '$root / $fallback',
+    );
   }
 
   // Android / iOS：应用私有沙盒（不存在「系统盘用户目录」概念，无需也不允许回退）。
@@ -125,6 +148,41 @@ Future<String> aylaEnsureDataRoot() async {
   _dataRootSource = 'mobile-support';
   _dataRootProbed = true;
   return root;
+}
+
+/// `%LOCALAPPDATA%\Ayla\data`（exe 同级不可写时的落点）。
+///
+/// 为什么不是 `%APPDATA%\Roaming\<Company>\<Product>`：那个路径由 exe 的 VERSIONINFO
+/// 自动派生、用户完全看不到，正是 7.79 GB 事故里没人发现的原因。
+/// `%LOCALAPPDATA%\Ayla` 是显式命名、可被用户在设置页看到、可整体搬走的目录。
+Future<String> _localAppDataDataRoot() async =>
+    aylaFallbackDataRoot();
+
+/// **测试注入点**：覆盖 exe 同级不可写时的回落根（生产不设置）。
+///
+/// 为什么需要：回落根默认是 `%LOCALAPPDATA%\Ayla\data`，属于**真实用户目录**。
+/// 单元测试若直接调解析函数，就会在开发机/CI 的用户目录里留下垃圾
+/// （2026-11-02 实测踩过：跑测试在 `%LOCALAPPDATA%\Ayla` 里留下缓存与凭据）。
+/// 测试必须把它指到临时目录。
+@visibleForTesting
+String? aylaFallbackDataRootForTest;
+
+/// exe 同级不可写时的实际数据根（Program Files 场景）。
+///
+/// 形如 `%LOCALAPPDATA%\Ayla\data` —— 仍是**显式的 Ayla data 目录**，
+/// 只是宿主位置换成用户可写区；**绝不**用 `%APPDATA%\Roaming\<Company>\<Product>`
+/// 那种按 VERSIONINFO 派生、用户看不见的隐式目录（7.79 GB 事故就是这么藏起来的）。
+String aylaFallbackDataRoot() {
+  final String? override = aylaFallbackDataRootForTest;
+  if (override != null) return override;
+  final String? localAppData = Platform.environment['LOCALAPPDATA'];
+  if (localAppData != null && localAppData.isNotEmpty) {
+    return '$localAppData${Platform.pathSeparator}Ayla'
+        '${Platform.pathSeparator}data';
+  }
+  // 环境变量缺失（极罕见）：落到系统临时区的显式 Ayla/data，仍然可见可清理。
+  return '${Directory.systemTemp.path}${Platform.pathSeparator}Ayla'
+      '${Platform.pathSeparator}data';
 }
 
 /// `data/profile`（账号与偏好）。
@@ -151,17 +209,39 @@ Future<Directory> _sub(String name) async {
   return dir;
 }
 
+/// 探测序号（保证并发探测的文件名**进程内唯一**）。
+int _probeSeq = 0;
+
 Future<bool> _probeWritable(Directory dir) async {
+  // ⚠️ 文件名必须唯一（2026-11-02 修复的实际故障）：
+  //
+  // 原实现只用 `DateTime.now().microsecondsSinceEpoch`，但本函数会被**并发调用**
+  // ——启动期 `aylaEnsureDataRoot()`（main.dart）与 `AylaMediaCache.ensureReady()` 并行跑，
+  // 且 `_dataRootProbed` 幂等位只在解析**完成**后才置真，两个调用方会同时进入探测。
+  // 同一微秒内两次调用 ⇒ **文件名相同** ⇒ A 写、B 写、A 删成功、B 删报 ENOENT
+  // ⇒ 误判「目录不可写」⇒ 数据根初始化失败 ⇒ **凭据读不出、无法登录**。
+  //
+  // 实测日志（修复前）：
+  //   `Cannot delete file ... .write-probe-1793610476900386.tmp (errno = 2)`
+  //   同一个文件名出现了两次 ⇒ 并发重名确证。
+  //
+  // 加自增序号后每次探测拥有独立文件，互不影响。
+  final File probe = File(
+    '${dir.path}${Platform.pathSeparator}.write-probe-'
+    '${DateTime.now().microsecondsSinceEpoch}-${_probeSeq++}.tmp',
+  );
   try {
-    final File probe = File(
-      '${dir.path}${Platform.pathSeparator}.write-probe-'
-      '${DateTime.now().microsecondsSinceEpoch}.tmp',
-    );
     await probe.writeAsBytes(const <int>[0], flush: true);
     await probe.delete();
     return true;
   } catch (error) {
     debugPrint('[AylaStorage] 目录不可写探测失败：${dir.path}（$error）');
+    // 失败也尽力清理，避免留下垃圾文件（清理失败无所谓）。
+    try {
+      if (await probe.exists()) await probe.delete();
+    } catch (_) {
+      // 忽略：清理是尽力而为。
+    }
     return false;
   }
 }

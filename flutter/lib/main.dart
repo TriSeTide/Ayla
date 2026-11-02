@@ -30,6 +30,8 @@ import 'package:go_router/go_router.dart';
 import 'package:window_manager/window_manager.dart' show windowManager;
 
 import 'core/media/media_cache.dart';
+import 'core/storage/ayla_storage_diagnosis.dart';
+import 'widgets/base/storage_blocked_screen.dart' show AylaStorageBlockedApp;
 import 'core/storage/ayla_storage_paths.dart';
 import 'core/update/update_retention.dart';
 import 'core/platform/detached_live.dart';
@@ -312,6 +314,20 @@ void main() {
   // ③ 回收 `<data>/updates` 里历史版本的安装包与解包体（每版 150~320 MB，
   //    曾累积到 7.79 GB —— 这正是本次整改要解决的原始问题）。
   // 三者都不 await：存储是增强项，绝不能拖慢首帧；内部失败只记日志。
+  // 安装位置诊断（2026-11-02 用户裁决：「万一真有人把包放进 Program Files 呢
+  // —— 就让他装在那里正常用，这种情况允许写 C 盘，但 data 还是全部写在 exe 同级」）。
+  // 这里**只报告、不阻断**：exe 同级 data 可写就走它；不可写（Program Files 受 UAC 保护）
+  // 就落 `%LOCALAPPDATA%\Ayla\data`，应用照常启动，绝不散到 `%APPDATA%\Roaming`。
+  // ⚠️ 不能 await（main 是同步的，且诊断会让首帧多等一次磁盘探测）。
+  unawaited(() async {
+    try {
+      final AylaStorageDiagnosis d = await aylaDiagnoseInstallLocation();
+      debugPrint('[AylaStorage] 安装位置诊断：$d');
+      if (!d.ok) debugPrint('[AylaStorage] 提示：${d.suggestion}');
+    } catch (error) {
+      debugPrint('[AylaStorage] 诊断失败（忽略）：$error');
+    }
+  }());
   unawaited(() async {
     try {
       final String root = await aylaEnsureDataRoot();
@@ -422,6 +438,7 @@ void main() {
       child: const _AppRoot(),
     ),
   );
+
 }
 
 // =============================================================================
@@ -722,4 +739,17 @@ class _AppRootState extends ConsumerState<_AppRoot>
       },
     );
   }
+}
+/// 安装位置不可用时的根 widget（见 [AylaStorageBlockedApp]）。
+///
+/// 单独包一层而不是直接 `runApp(AylaStorageBlockedApp(...))`：
+/// 与正常启动路径保持「顶层都是一个 Widget」的对称形态，便于测试直接 pump。
+class _AylaStorageBlockedApp extends StatelessWidget {
+  const _AylaStorageBlockedApp({required this.diagnosis});
+
+  final AylaStorageDiagnosis diagnosis;
+
+  @override
+  Widget build(BuildContext context) =>
+      AylaStorageBlockedApp(diagnosis: diagnosis);
 }

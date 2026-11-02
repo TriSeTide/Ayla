@@ -156,7 +156,7 @@ class AylaUpdateDownloader {
   /// 更新暂存根 = `<数据根>/updates`。
   ///
   /// **2026-11-02 用户定稿**：Windows 上数据根 = `<exe目录>/data`，
-  /// 与安装盘一致；不再使用 `getApplicationSupportDirectory()`（它恒为
+  /// 与安装盘一致；不再使用 path_provider 的应用支持目录（它恒为
   /// `%APPDATA%\Roaming\...`，正是 C 盘被占 7.79 GB 的来源），
   /// 也没有任何回退分支。
   Future<Directory> _updatesRoot() => aylaUpdatesDirectory();

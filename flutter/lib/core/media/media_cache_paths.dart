@@ -64,6 +64,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/media_kind.dart';
+import '../storage/ayla_storage_diagnosis.dart' show aylaFallbackDataRoot;
 import '../storage/ayla_storage_paths.dart';
 
 /// 缓存目录名（`data/` 下的独立子目录，见库文档）。
@@ -202,29 +203,41 @@ class AylaMediaCacheLayout {
 Future<AylaMediaCacheLayout> aylaResolveMediaCacheLayout({
   AylaMediaCachePlatform platform = const AylaIoMediaCachePlatform(),
 }) async {
-  // Windows：**唯一**落点 = `<exe目录>/data/media-cache`，**没有任何降级回退**。
+  // Windows：首选 `<exe目录>/data/media-cache`。
   //
-  // 2026-11-02 用户定稿：「全部改到 <exe目录>\data\，不允许任何动 C 盘，
-  // 也不允许任何 C 盘的降级回退」。旧实现在此处不可写时会静默搬到
-  // `%APPDATA%\com.ayla\ayla_flutter\media-cache`（C 盘），该分支已删除。
+  // 2026-11-02 用户两轮裁决：
+  // ①「全部改到 <exe目录>\data\」②「万一真有人把包放进 Program Files —— 就让他
+  // 装在那里正常用，这种情况允许写 C 盘，但 data 还是全部写在 exe 同级」。
+  // ⇒ 首选 exe 同级；不可写时落到 `%LOCALAPPDATA%\Ayla\data\media-cache`
+  //   （显式、可见、可搬走），**绝不**回到旧实现的
+  //   `%APPDATA%\com.ayla\ayla_flutter\media-cache` 那种隐式目录。
   if (platform.targetPlatform == TargetPlatform.windows) {
     final String exeDir = _parentDirOf(platform.executablePath);
     final String primary =
         '$exeDir/$kMediaCacheWindowsDataDirName/$kMediaCacheDirName';
-    final bool writable = await aylaProbeDirectoryWritable(Directory(primary));
-    if (!writable) {
-      // 不降级：把「装到了不可写目录」这个事实显式抛给上层（缓存链路会记日志），
-      // 绝不静默改写到系统盘。
-      throw AylaStorageException(
-        '媒体缓存目录不可写。Ayla 的缓存固定存放在程序目录下的 data/media-cache，'
-            '不会回退到 C 盘。请把 Ayla 安装到可写位置。',
-        path: primary,
+    if (await aylaProbeDirectoryWritable(Directory(primary))) {
+      return AylaMediaCacheLayout(
+        root: primary,
+        source: AylaMediaCacheRootSource.executableData,
+        degraded: false,
       );
     }
-    return AylaMediaCacheLayout(
-      root: primary,
-      source: AylaMediaCacheRootSource.executableData,
-      degraded: false,
+    // 与 `ayla_storage_paths.dart` 的回落口径保持一致。
+    final String fallback = '${aylaFallbackDataRoot()}/$kMediaCacheDirName'
+        .replaceAll('\\', '/');
+    if (await aylaProbeDirectoryWritable(Directory(fallback))) {
+      debugPrint(
+        '[AylaMediaCache] exe 同级不可写（$primary）——落到用户数据区：$fallback',
+      );
+      return AylaMediaCacheLayout(
+        root: fallback,
+        source: AylaMediaCacheRootSource.applicationSupport,
+        degraded: true,
+      );
+    }
+    throw AylaStorageException(
+      '媒体缓存目录不可写：程序目录与用户数据区都写不进去。',
+      path: '$primary / $fallback',
     );
   }
 
