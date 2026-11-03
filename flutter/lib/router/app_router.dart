@@ -55,7 +55,12 @@ import '../state/auth_bootstrap.dart'
     show aylaAutoLoginInFlight, aylaInitialLocation, aylaSessionRestoreInFlight;
 import '../state/auth_state.dart';
 import '../theme/page_transitions.dart' show aylaIsTransitionFreePath;
-import 'shell_config.dart' show aylaIsGroupScene, aylaPanelOwnedPath;
+import 'shell_config.dart'
+    show
+        aylaIsGroupScene,
+        aylaIsLiveRoomPagePath,
+        aylaIsLiveStudioPagePath,
+        aylaPanelOwnedPath;
 
 /// 认证状态变化 → `GoRouter` 重算守卫的桥（[GoRouter.refreshListenable]）。
 class _AuthRefresh extends ChangeNotifier {
@@ -90,6 +95,35 @@ class _AuthRefresh extends ChangeNotifier {
 /// key: groupId 负责（channel_sidebar.dart:576）。
 const LocalKey kAylaGroupShellPageKey = ValueKey<String>('ayla-group-shell-page');
 
+/// 直播间详情页 / 开播控制台的 **Page key**（页面身份归一 = web `resolvePageKey` 的等价物）。
+///
+/// ## 为什么必须归一（2026-11-02 用户实报「侧栏切换直播间跳变」）
+/// 侧栏切台的实现是 `context.replace('/live/:id')`（web `navigate(replace)`）。
+/// Page key = 路径时，`/live/1 → /live/2` 会换一个 `ValueKey` ⇒ Navigator 的
+/// `Page.canUpdate` 判假 ⇒ **整条 route 被替换、整棵子树重建**（探针实测
+/// `identical(State, State) == false`）。用户看到的「跳变」就是这一下重建：
+/// 播放器（平台视图）销毁重建 → 黑屏 / 重新起播；侧栏 `AylaLiveChannelRail` 的
+/// State 归零 → 选中高亮 `_highlightRect` 丢失 → 先消失一帧再瞬现在新项（而不是
+/// 300ms 迁移）；头部 `_LiveRoomHeaderSwap` 与三块面板的
+/// `AylaRevealScope(replayKey:)` 也全部重挂 ⇒ 切台动效从「旧头退出 → 新头进入」
+/// 退化成一次整页重建。
+///
+/// ## web 事实源（`components/motion/PageTransition.tsx:37–67`）
+/// `resolvePageKey` 把 `/live/:id` 归一成 **`/live/room`**、`/live/start/:channelId`
+/// 归一成 **`/live/start`** ⇒ React 按组件类型复用同一个 `LiveRoomPage` /
+/// `LiveStudioPage` 实例，**只更新 `useParams().channelId`**；tsx 43–51 的注释写明了
+/// 这条归一的理由（「避免直播间上下滑切换触发整页重挂载（底栏滑出动画复位）」；
+/// 开播控制台若不归一，旧页 cleanup 的 `liveSessionRuntime.leave()` 会清掉新页刚
+/// 建立的会话 —— 2026-09-06 事故）。
+///
+/// ## 契约连带义务（改这里必须同时保证）
+/// 页面**不再靠重挂载换取新状态** ⇒ `LiveRoomPage` / `LiveStudioPage` 必须在
+/// `didUpdateWidget` 里**就地换会话**（旧会话 `stop()`、新会话 `start()`），并且所有
+/// 读「当前频道」的数据投影都要按新的 `channelId` 门控（不能直接读 `currentChannel`）。
+/// 回归锁见 `test/live_channel_switch_test.dart`。
+const LocalKey kAylaLiveRoomPageKey = ValueKey<String>('ayla-live-room-page');
+const LocalKey kAylaLiveStudioPageKey = ValueKey<String>('ayla-live-studio-page');
+
 Page<void> aylaRoutePage({
   required GoRouterState state,
   required Widget child,
@@ -110,12 +144,20 @@ Page<void> aylaRoutePage({
   // Flutter 侧此前用 state.pageKey（含路径）⇒ 切场景 = **换 Page = 整页重建** ⇒ 就是用户
   // 看到的「每次点击都在跳转」。共用一个 key 后，Navigator 的 Page.canUpdate 判定为
   // 「同一个 Page」⇒ **复用 route、保留 Element/State**，只更新 child（场景参数）。
-  final LocalKey pageKey = aylaIsGroupScene(state.uri.path)
-      ? kAylaGroupShellPageKey
-      // go_router 的 state.pageKey 声明为 Key（非 LocalKey），这里按路径自建等价 key。
-      : ValueKey<String>(state.uri.path);
-  if (aylaPanelOwnedPath(state.uri.path) ||
-      aylaIsTransitionFreePath(state.uri.path)) {
+  //
+  // 同一条纪律的**第二处**（2026-11-02，见 [kAylaLiveRoomPageKey] 的长注释）：
+  // `/live/:id` 与 `/live/start/:channelId` 也各归一个固定 key ⇒ 侧栏切台 =
+  // 同一个页面实例、只换 `channelId` prop（web `resolvePageKey` 的同一语义）。
+  final String path = state.uri.path;
+  final LocalKey pageKey = aylaIsLiveRoomPagePath(path)
+      ? kAylaLiveRoomPageKey
+      : (aylaIsLiveStudioPagePath(path)
+          ? kAylaLiveStudioPageKey
+          : (aylaIsGroupScene(path)
+              ? kAylaGroupShellPageKey
+              // go_router 的 state.pageKey 声明为 Key（非 LocalKey），这里按路径自建等价 key。
+              : ValueKey<String>(path)));
+  if (aylaPanelOwnedPath(path) || aylaIsTransitionFreePath(path)) {
     return NoTransitionPage<void>(key: pageKey, child: child);
   }
   return MaterialPage<void>(key: pageKey, child: child);

@@ -153,11 +153,25 @@ bool aylaIsPrimaryNavRoute(String pathname) {
   return aylaMatches('/home', pathname);
 }
 
+/// 直播间**观看页**路由（`/live/:channelId`）。
+///
+/// ⚠️ 与 [aylaIsLiveRoomRoute] 的区别：那个是「直播域沉浸路由」的**壳层判定**
+/// （含开播控制台 `/live/start/:channelId`，窄屏底栏滑走、宽屏 TopNav 常驻）；
+/// 本函数只认**观看页**，供路由层决定 Page key（`app_router.dart` 的
+/// [kAylaLiveRoomPageKey]：`/live/1 → /live/2` 必须是同一个页面实例）。
+/// 对照 web `PageTransition.tsx:53` 的 `LIVE_ROOM_PATTERN = "/live/:id"`。
+bool aylaIsLiveRoomPagePath(String pathname) =>
+      aylaMatches('/live/:channelId', pathname);
+
+/// 开播控制台路由（`/live/start/:channelId`）—— web `PageTransition.tsx:54` 的
+/// `LIVE_STUDIO_PATTERN`；侧栏切频道同样不得触发整页重挂载（见 [kAylaLiveStudioPageKey]）。
+bool aylaIsLiveStudioPagePath(String pathname) =>
+      aylaMatches('/live/start/:channelId', pathname);
+
 /// 直播间路由（`/live/:channelId`、`/live/start/:channelId`）。
 /// 窄屏：进房动画 = 底栏下滑走；宽屏：TopNav 常驻 + 视频主区 + 弹幕侧列。
 bool aylaIsLiveRoomRoute(String pathname) =>
-      aylaMatches('/live/:channelId', pathname) ||
-      aylaMatches('/live/start/:channelId', pathname);
+      aylaIsLiveRoomPagePath(pathname) || aylaIsLiveStudioPagePath(pathname);
 
 /// 群聊场景路由（窄屏 GroupPage 自渲染顶部导航条 ⇒ 壳层不出 BottomTabs / MessageFab）。
 bool aylaIsGroupScene(String pathname) =>

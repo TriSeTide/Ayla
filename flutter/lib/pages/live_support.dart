@@ -1457,6 +1457,31 @@ class AylaLiveRoomSession extends ChangeNotifier {
     super.dispose();
   }
 
+  /// 历史窗口尚未就绪时的弹幕来源 —— **只认本会话频道的那份实时队列**。
+  ///
+  /// ## 为什么不能直接 `?? _live.danmaku`（2026-11-02 侧栏切台修复，探针实证）
+  /// 切台那一刻，新会话刚 `start()`，而它创建 `_history` 是在
+  /// `await Future<void>.delayed(Duration.zero)` **之后**（`start()` 头部：必须先让位，
+  /// Riverpod 禁止在 build/initState 期间改 provider）。旧会话的 `stop()` 同样排在
+  /// microtask（见 `live_room_page.dart` 的 `_switchChannel`）。
+  /// ⇒ **切台首帧**里 `_history` 还是 null、`_live.danmaku` 还是**上一个频道**的队列，
+  /// 直接回落就会把旧频道的弹幕挂到新频道的列表与飘弹幕层上。
+  ///
+  /// 探针实测（切台首帧）：`overlay=1 channelKey=2 items=3 bodyLoading=false`
+  /// —— 正是旧频道的 3 条弹幕。web 侧不存在该窗口：`liveSessionRuntime.enter()`
+  /// 在切频道分支**同步**先 `this.leave()`（`clearCurrent()` 清空 danmaku）再建新会话。
+  ///
+  /// 判据用 store 的 `currentChannel.id`：实时队列在 store 里**总是**属于当前频道
+  /// （`AylaLiveState.setViewers` / `appendDanmaku` 都是这个口径），所以「current 是
+  /// 本会话频道」⇔「这份队列属于我」。不成立就返回空 —— 宁可首帧空列表，
+  /// 也不能显示别的直播间的弹幕。
+  List<AylaLiveDanmaku> _fallbackDanmaku() {
+    if (_live.isDisposed) return const <AylaLiveDanmaku>[];
+    final String? owner = _live.currentChannel?.id;
+    if (owner == channelId) return _live.danmaku;
+    return const <AylaLiveDanmaku>[];
+  }
+
   /// 弹幕展示投影（页面装配 [AylaLiveRoomData.danmaku] 用）。
   ///
   /// 映射写在页面层（不在 `AylaLiveDanmaku` 上开 `toEntry`）：数据投影在 `core/api`、
@@ -1472,7 +1497,7 @@ class AylaLiveRoomSession extends ChangeNotifier {
   List<AylaDanmakuEntry> danmakuEntries({
     bool Function(String userId)? senderOnlineOf,
   }) {
-    final List<AylaLiveDanmaku> source = _history?.items ?? _live.danmaku;
+    final List<AylaLiveDanmaku> source = _history?.items ?? _fallbackDanmaku();
     return <AylaDanmakuEntry>[
       for (final AylaLiveDanmaku item in source)
         AylaDanmakuEntry(

@@ -444,9 +444,25 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     }),
     danmakuError: widget.data.sendError,
     // 飘弹幕层：**仅 `!loading && srsStatus === "live"`** 才挂（tsx 222）
+    //
+    // `channelKey`（2026-11-02 侧栏切台修复）：web `DanmakuOverlay.tsx:101–149` 的
+    // effect 依赖 `[channelId]`，切台即「基线重建 + 画面清空（切台无残留）」；
+    // Flutter 侧一直没传 ⇒ `didUpdateWidget` 里 `old.channelKey != widget.channelKey`
+    // 恒为 false，本件只能靠**整件卸载重挂**偶然达到同样效果。
+    // 路由 Page key 归一后本件不再整页重建，这条接线从「可有可无」变成**必备**。
+    //
+    // ⚠️ 但**不要**据此认为「不传就必然残留旧弹幕」（2026-11-02 审计纠错）：
+    // 切台后新会话 `start()` 会 `setCurrentLoading(true)`（`live_support.dart:431`）
+    // ⇒ `children` 变 null ⇒ 本层整件卸载重建、`_seen` 自然归零。
+    // 真正把旧弹幕带过窗口期的是**数据投影**（`danmakuEntries` 的 `?? _live.danmaku`
+    // 回落），那条已单独修（见 `live_support.dart` 的 `_fallbackDanmaku`）。
+    // 本参数的职责是「同实例内换频道时主动清基线」，属双保险。
     children: (!widget.data.loading &&
             widget.data.srsStatus == AylaLiveSrsStatus.live)
-        ? AylaDanmakuOverlay(items: widget.data.danmaku)
+        ? AylaDanmakuOverlay(
+            items: widget.data.danmaku,
+            channelKey: widget.channelId,
+          )
         : null,
   );
 
@@ -1295,6 +1311,20 @@ class _LiveRoomHeaderSwapState extends State<_LiveRoomHeaderSwap>
     }
     if (!MediaQuery.disableAnimationsOf(context)) {
       if (_leavingChild != null) return; // 已在退出中 ⇒ 只更新 identity
+      // ⚠️ `_c.reverse()` 在 `value == 0` 时是**零行程**：AnimationController 不会
+      // 派发任何 status 回调（`animation_controller.dart` 的 `_checkStatusChanged`
+      // 只在状态真的变化时通知）⇒ `_onStatus` 永不触发 ⇒ `_leavingChild` 永远摘不掉、
+      // 头部锁死在旧内容上。正常路径不会落到这里（`_c` 停 1 或停在退出中），
+      // 但 reduced-motion 切回、以及「退出播完后 `forward(from:0)` 尚未起第一帧
+      // 就又被切台」这两条路径能到达 —— 直接同步跳到终态，等价 `duration: 0`
+      // 的 reduced 档（web `panelVariants(reduced)` 同样两段都瞬时）。
+      if (_c.value == 0) {
+        _current = widget.identity;
+        _child = widget.child;
+        _leavingChild = null;
+        _c.value = 1;
+        return;
+      }
       _leavingChild = _child; // 退出期渲染旧头
       _c.reverse();
       return;

@@ -110,23 +110,7 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
       });
       return;
     }
-    _session = AylaLiveRoomSession(
-      channelId: widget.channelId,
-      liveState: ref.read(liveStateProvider),
-      liveWs: ref.read(liveWsProvider),
-      chat: ref.read(chatWsProvider),
-      // 点回直播间（小窗主体）的导航目标（web `LiveStudioPage.tsx:148`）。
-      activityRoute: '/live/start/${widget.channelId}',
-      // 活动态索引的两个注入点（web 读 `useAuthStore.getState()`）：当前用户 id 决定
-      // 「本会话是否为主播自己的会话」（`tracksOwnerActivity`），媒体活动位写在会话启停处。
-      currentUserId: () => ref.read(authNotifierProvider).user?.id,
-      onMediaActivity: (AylaMediaActivityKind kind, bool active, String? roomId) =>
-          ref.read(authNotifierProvider.notifier).setMediaActivity(
-        kind: kind,
-        active: active,
-        roomId: roomId,
-      ),
-    )..addListener(_onChanged);
+    _session = _createSession(widget.channelId)..addListener(_onChanged);
     _directory = AylaPagedList<AylaDirectoryLiveEntry>(
       request: (String? cursor) => AylaLiveApi.listLiveChannelsPage(
         cursor: cursor,
@@ -182,6 +166,65 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
       _viewerSheet ??=
           AylaLiveViewerSheetController(elysiaReader: _readElysiaProfile)
             ..addListener(_onChanged);
+
+  /// 新建一个直播会话（`initState` 与 `didUpdateWidget` 的切台路径共用；
+  /// 事实源 web `hooks/useLiveRoom.ts:71–84` 的 effect —— 只换 `channelId`/`activityRoute`
+  /// 就 cleanup 旧会话、setup 新会话）。
+  AylaLiveRoomSession _createSession(String channelId) => AylaLiveRoomSession(
+    channelId: channelId,
+    liveState: ref.read(liveStateProvider),
+    liveWs: ref.read(liveWsProvider),
+    chat: ref.read(chatWsProvider),
+    // 点回直播间（小窗主体）的导航目标（web `LiveStudioPage.tsx:148`）。
+    activityRoute: '/live/start/$channelId',
+    // 活动态索引的两个注入点（web 读 `useAuthStore.getState()`）：当前用户 id 决定
+    // 「本会话是否为主播自己的会话」（`tracksOwnerActivity`），媒体活动位写在会话启停处。
+    currentUserId: () => ref.read(authNotifierProvider).user?.id,
+    onMediaActivity: (AylaMediaActivityKind kind, bool active, String? roomId) =>
+        ref.read(authNotifierProvider.notifier).setMediaActivity(
+      kind: kind,
+      active: active,
+      roomId: roomId,
+    ),
+  );
+
+  /// 侧栏切频道（路由 Page key 已归一 ⇒ 同一个 State 实例，只换 `channelId`）。
+  ///
+  /// 语义与观看页一致、与 web 逐条对齐：
+  /// · 旧会话**完整销毁**（web `liveSessionRuntime.enter()` 切频道分支先 `this.leave()`），
+  ///   不走 `detachView`（那是「离开页面 ⇒ 进小窗」，控制台恒不触发小窗）；
+  /// · 侧栏目录 `_directory` **不重建**（web `useOwnedLiveDirectory` 跨频道保持同一份数据）
+  ///   —— 这正是「切频道不跳」的关键：重建会重拉一页、列表闪一次。
+  ///
+  /// ⚠️ 旧会话的销毁**必须排进 microtask**（同 `live_room_page.dart` 的说明）：
+  /// `stop()` 的同步段会 `clearCurrent()` 通知 `liveStateProvider`，而本方法由
+  /// `didUpdateWidget` 调用 —— 那时正在 build ⇒ Riverpod 抛
+  /// 「Tried to modify a provider while the widget tree was building」。
+  void _switchChannel(String channelId) {
+    final AylaLiveRoomSession? previous = _session;
+    previous?.removeListener(_onChanged);
+    final AylaLiveRoomSession next = _createSession(channelId)..addListener(_onChanged);
+    _session = next;
+    _actionError = null;
+    if (previous != null) {
+      scheduleMicrotask(() {
+        unawaited(previous.stop().whenComplete(previous.dispose));
+      });
+    }
+    // 名单弹层的缓存属于上一个频道（web 弹层卸载重挂后按 `[channelId]` 重拉）
+    _viewerSheet?.removeListener(_onChanged);
+    _viewerSheet?.dispose();
+    _viewerSheet = null;
+    unawaited(next.start());
+  }
+
+  @override
+  void didUpdateWidget(covariant LiveStudioPage old) {
+    super.didUpdateWidget(old);
+    // 侧栏切频道 = 同一个页面实例换 `channelId`（路由 Page key 已归一，见
+    // `app_router.dart` 的 [kAylaLiveStudioPageKey]；web `resolvePageKey` 同款）。
+    if (old.channelId != widget.channelId && _validId) _switchChannel(widget.channelId);
+  }
 
   void _onChanged() {
     if (mounted) setState(() {});
@@ -460,9 +503,14 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
         loading: live.currentLoading,
         error: live.currentError,
         playerError: live.currentPlayerError,
-        viewerCount: live.viewerCount,
+        // ⚠️ 同观看页：切频道后 store 的「在看读数」有一段属于旧频道的窗口，
+        // 必须按 id 校验（web `LiveRoomBody.tsx:125–130` 的同一口径）。
+        viewerCount: live.currentChannel?.id == widget.channelId
+            ? live.viewerCount
+            : channel?.viewerCount,
         viewers: <AylaLiveViewerItem>[
-          for (final AylaLiveViewer viewer in live.viewers)
+          if (live.currentChannel?.id == widget.channelId)
+            for (final AylaLiveViewer viewer in live.viewers)
             AylaLiveViewerItem(
               userId: viewer.userId,
               nickname: viewer.nickname,

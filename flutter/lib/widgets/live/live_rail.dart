@@ -132,9 +132,29 @@ class _AylaLiveChannelRailState extends State<AylaLiveChannelRail> {
       // 赋值即可（build 紧随其后，无需 setState）。
       // ⚠️ 若只靠 postFrame 重测，会白白多等一帧才启动 300ms 迁移
       // （探针实测：+400ms 未动、+800ms 才到位）。
-      _highlightRect = _slotRect(widget.currentId) ?? _highlightRect;
+      final Rect? rect = _slotRect(widget.currentId);
+      if (rect != null) {
+        _highlightRect = rect;
+      } else {
+        // 死角（2026-11-02 审计指出）：新槽位**尚未挂载**（列表还在加载 / 新频道
+        // 刚被置顶进列表）时量不到矩形。旧实现在这里保留旧矩形且**不再重试** ⇒
+        // 高亮停在上一个频道的位置，直到下一次 currentId/长度变化才纠正。
+        // 帧后补测一次：那时列表已布局完，能拿到真矩形就触发迁移。
+        // （若仍拿不到 —— 例如该频道根本不在列表里 —— `_measureHighlight` 保持
+        //  旧值不动，与既有「不在列表中不滚动不抛错」的契约一致。）
+        WidgetsBinding.instance.addPostFrameCallback((_) => _measureHighlight());
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent());
     }
+    // 收起 → 展开：先把缓存的矩形**作废**，避免用「收起前」的几何画展开首帧
+    //（收起期间列表尺寸/滚动位置可能都变了；`_measureHighlight` 在帧后立刻补上真值）。
+    if (old.collapsed && !widget.collapsed) _highlightRect = null;
+
+    // 列表长度变化 / 收起↔展开。
+    // ⚠️ 收起 → 展开必须**重新量**：收起时整件 `return SizedBox.shrink()`（见 [build]），
+    // 高亮子树被拆掉，但 `_highlightRect` 仍留在 State 里 ⇒ 展开首帧会按**收起前**的
+    // 矩形画一次，帧后才被纠正（用户可见的一帧错位）。这里在帧后重测即消除。
+    // （2026-11-02 审计指出；同批已修「新槽位未挂载不重试」，见 currentId 分支。）
     if (old.channels.length != widget.channels.length ||
         old.collapsed != widget.collapsed) {
       WidgetsBinding.instance.addPostFrameCallback((_) {

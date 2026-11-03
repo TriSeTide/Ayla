@@ -9,6 +9,17 @@
 /// | 靠近列表末尾时续读一页 | 47–50 |
 /// | 切台 = `replace` 到 `/live/:id` | 52–55 |
 /// | `FullScreenSwipeBack`（窄屏） | 61 |
+///
+/// ## ⚠️ 切台 = **就地换会话**，不是重挂载（2026-11-02 用户实报「侧栏切换直播间跳变」）
+/// 路由层的 Page key 已把 `/live/:id` 归一（`app_router.dart` 的
+/// [kAylaLiveRoomPageKey]，等价 web `resolvePageKey('/live/:id') === '/live/room'`）
+/// ⇒ 切台时本页**同一个 State 实例**被复用，只换 [LiveRoomPage.channelId]。
+/// 于是「页面生命周期」这一层必须自己承担 web 里 `useLiveRoom` effect 的职责：
+/// 旧会话完整销毁（`stop()` + `dispose()`，**不走 detachView 的小窗分支** ——
+/// web 的 `enter()` 在切频道时先 `leave()` 完整销毁，再建新会话）、新会话 `start()`。
+///
+/// 不这么做会露出两处回归：① 会话仍是旧频道 ⇒ 画面/弹幕/在看人数全部不换；
+/// ② 侧栏 `_directory` 若跟着页面重建 ⇒ 切一次台就重新拉一页目录（用户可见的「跳」）。
 library;
 
 import 'dart:async';
@@ -86,23 +97,7 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       });
       return;
     }
-    _session = AylaLiveRoomSession(
-      channelId: widget.channelId,
-      liveState: ref.read(liveStateProvider),
-      liveWs: ref.read(liveWsProvider),
-      chat: ref.read(chatWsProvider),
-      // 点回直播间（小窗主体）的导航目标（web `LiveRoomBody` 的 activityRoute 缺省值）。
-      activityRoute: '/live/${widget.channelId}',
-      // 活动态索引的两个注入点（web 读 `useAuthStore.getState()`）：当前用户 id 决定
-      // 「本会话是否为主播自己的会话」（`tracksOwnerActivity`），媒体活动位写在会话启停处。
-      currentUserId: () => ref.read(authNotifierProvider).user?.id,
-      onMediaActivity: (AylaMediaActivityKind kind, bool active, String? roomId) =>
-          ref.read(authNotifierProvider.notifier).setMediaActivity(
-        kind: kind,
-        active: active,
-        roomId: roomId,
-      ),
-    )..addListener(_onChanged);
+    _session = _createSession(widget.channelId)..addListener(_onChanged);
     _directory = AylaPagedList<AylaDirectoryLiveEntry>(
       request: (String? cursor) =>
           AylaLiveApi.listLiveChannelsPage(cursor: cursor),
@@ -144,17 +139,114 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
     super.dispose();
   }
 
+  /// 新建一个直播会话（`initState` 与 `didUpdateWidget` 的切台路径共用）。
+  ///
+  /// 事实源：web `hooks/useLiveRoom.ts:71–84` 的 effect —— 会话参数取自
+  /// `channelId` / `activityRoute`，两者任一变化就「cleanup 旧 + setup 新」。
+  AylaLiveRoomSession _createSession(String channelId) => AylaLiveRoomSession(
+    channelId: channelId,
+    liveState: ref.read(liveStateProvider),
+    liveWs: ref.read(liveWsProvider),
+    chat: ref.read(chatWsProvider),
+    // 点回直播间（小窗主体）的导航目标（web `LiveRoomBody` 的 activityRoute 缺省值）。
+    activityRoute: '/live/$channelId',
+    // 活动态索引的两个注入点（web 读 `useAuthStore.getState()`）：当前用户 id 决定
+    // 「本会话是否为主播自己的会话」（`tracksOwnerActivity`），媒体活动位写在会话启停处。
+    currentUserId: () => ref.read(authNotifierProvider).user?.id,
+    onMediaActivity: (AylaMediaActivityKind kind, bool active, String? roomId) =>
+        ref.read(authNotifierProvider.notifier).setMediaActivity(
+      kind: kind,
+      active: active,
+      roomId: roomId,
+    ),
+  );
+
+  /// 切台（路由 Page key 已归一 ⇒ **本方法**才是 web `useLiveRoom` effect 的等价物）。
+  ///
+  /// ## 为什么必须是「完整销毁 + 重建」，而不是 `detachView`
+  /// web `liveSessionRuntime.enter()`（`:179–255`）在**切频道**分支先 `this.leave()`
+  /// 完整销毁旧会话（播放器 / WS / store 全清），再建新会话；只有**同频道**重挂载才
+  /// 保留会话（那条路径走 `putIsNarrow` 的小窗接管）。`detachView` 是「离开页面」
+  /// （`:319–337`：窄屏直播中 ⇒ 进小窗），语义完全不同 —— 切台用它会弹出小窗。
+  ///
+  /// ## 为什么旧会话的销毁必须**排进 microtask**（2026-11-02 实测）
+  /// `stop()` 的同步段就会 `liveStateProvider.clearCurrent()` ⇒ 那个 provider 的
+  /// `notifyListeners`。而本方法由 [didUpdateWidget] 调用 —— 那时**正在 build** ⇒
+  /// Riverpod 直接抛「Tried to modify a provider while the widget tree was building」
+  /// （与 `dispose` 里把 `detachView` 排进 microtask 是同一个坑，见那边的注释）。
+  /// 排进 microtask 后：本帧先用**新会话**重建完（`session` 已是新的），旧会话在
+  /// 帧后的 microtask 里才清状态 —— 那时它已经不被任何人引用，清的是它自己留下的
+  /// 那份旧投影，新会话的 `start()` 也有 `await Future.delayed(Duration.zero)` 让位，
+  /// 因此不会互踩（与 web「cleanup 早于 setup」的顺序等价：都是旧会话先让出）。
+  void _switchChannel(String channelId) {
+    final AylaLiveRoomSession? previous = _session;
+    previous?.removeListener(_onChanged);
+    final AylaLiveRoomSession next = _createSession(channelId)..addListener(_onChanged);
+    _session = next;
+    // 旧会话：**不进小窗**，完整销毁（web `enter` 切频道分支的 `this.leave()` 同款）。
+    if (previous != null) {
+      scheduleMicrotask(() {
+        unawaited(previous.stop().whenComplete(previous.dispose));
+      });
+    }
+    // 名单弹层的缓存属于**上一个频道**（web 弹层卸载重挂后按 `[channelId]` 重新拉）
+    // ⇒ 这里同样按新频道重建。它的 dispose 只摘监听、不碰 provider，可同步。
+    _viewerSheet?.removeListener(_onChanged);
+    _viewerSheet?.dispose();
+    _viewerSheet = null;
+    // `start()` 的同步段只置 `_alive` / `_epoch`（第一个语句就是
+    // `await Future.delayed(Duration.zero)`）⇒ 在 didUpdateWidget 里调用安全。
+    unawaited(next.start());
+  }
+
+  @override
+  void didUpdateWidget(covariant LiveRoomPage old) {
+    super.didUpdateWidget(old);
+    // 侧栏切台 = 同一个页面实例换 `channelId`（路由 Page key 已归一，见文件头）。
+    // ⚠️ 这里**不调用 setState**：本次 build 本来就会读到新的 `_session` 字段；
+    // 在 didUpdateWidget 里再 setState 只会多排一帧。
+    if (old.channelId != widget.channelId && _validId) _switchChannel(widget.channelId);
+  }
+
   void _onChanged() {
     if (mounted) setState(() {});
   }
 
+  /// 当前频道快照：**只认本页 `channelId` 那一份**，绝不回落到「别的频道」。
+  ///
+  /// ## 为什么不能用 `?? current`（2026-11-02 审计指出的 P1，已实测确认）
+  /// 切台那一刻的事实与直觉相反：`live.currentChannel` **不是 null，而是上一个频道**。
+  /// 因为旧会话的 `stop()` 被排进 microtask（见 [_switchChannel]），而新会话的
+  /// `start()` 第一个语句就是 `await Future<void>.delayed(Duration.zero)`
+  /// （`live_support.dart:383–433`：先让位再 `clearCurrent()`）
+  /// ⇒ **didUpdateWidget 之后的那次 build 里，store 里躺的还是旧频道**。
+  /// 写成 `channelOf(id) ?? current` 就会把旧快照递给头部/分享 ⇒ 标题、封面、主播、
+  /// 来源标签先显示旧频道再跳成新的 —— 正是用户报的「跳一下」。
+  ///
+  /// 正确口径 = 优先 store 的 current（**但必须同 id**，它是最新的详情），否则用目录里
+  /// 该频道的快照（用户就是从侧栏点进来的，目录里必然有）；两者都没有就返回 null，
+  /// 让头部走「加载中…」档 —— 宁可短暂空档，也不显示别的直播间。
+  AylaLiveChannelSnapshot? _channelOf(AylaLiveState live) {
+    final AylaLiveChannelSnapshot? current = live.currentChannel;
+    if (current != null && current.id == widget.channelId) return current;
+    return live.channelOf(widget.channelId);
+  }
+
+  /// store 里「在看人数/预览」这份读数属于哪个频道（web `LiveRoomBody.tsx:125`）。
+  String? _viewerOwnerId(AylaLiveState live) => live.currentChannel?.id;
+
   /// 侧栏列表：当前频道置顶（web tsx 32–33）。
+  ///
+  /// ⚠️ **只读 `channelOf(channelId)`**（之前多了一句 `?? currentChannel`）：切台后的
+  /// 首次 build 里 `currentChannel` 仍是**上一个频道**（旧会话的 `stop()` 排在 microtask，
+  /// 见 [_channelOf] 的说明）⇒ 会把旧频道当成当前项插到侧栏首位，切台后侧栏多出一个
+  /// 不属于这里的条目、高亮也跟着错位。web 侧同样只认 `channel?.id === channelId`
+  /// （`LiveRoomPage.tsx:32–33`）。
   List<AylaLiveCardData> _ordered() {
     final List<AylaDirectoryLiveEntry> items =
         _directory?.items ?? const <AylaDirectoryLiveEntry>[];
     final AylaLiveChannelSnapshot? current =
-        ref.read(liveStateProvider).channelOf(widget.channelId) ??
-            ref.read(liveStateProvider).currentChannel;
+        ref.read(liveStateProvider).channelOf(widget.channelId);
     final List<AylaLiveCardData> cards = <AylaLiveCardData>[
       for (final AylaDirectoryLiveEntry entry in items) entry.card,
     ];
@@ -218,14 +310,22 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       // 弹层打开 → 页面发起同一次拉取（`LiveViewerSheet.tsx:44–65`）
       onOpenViewerSheet: () => viewerSheet.onOpen(widget.channelId),
       data: AylaLiveRoomData(
-        channel: live.currentChannel ?? live.channelOf(widget.channelId),
+        channel: _channelOf(live),
         srsStatus: live.srsStatus,
         loading: live.currentLoading,
         error: live.currentError,
         playerError: live.currentPlayerError,
-        viewerCount: live.viewerCount,
+        // ⚠️ 切台后 `live.currentChannel` / `viewerCount` / `viewers` 都会有一个
+        // 「旧会话已清、新会话详情未回」的窗口。web `LiveRoomBody.tsx:125–130` 给的
+        // 口径是**按 id 校验**：`viewerOwnerId === channelId` 才用 store 的读数，否则
+        // 退到 descriptor 里的快照值。原样照搬 —— 不校验会把上一个直播间的人数/头像
+        // 短暂显示在新直播间上（同一类「跳变」）。
+        viewerCount: _viewerOwnerId(live) == widget.channelId
+            ? live.viewerCount
+            : _channelOf(live)?.viewerCount,
         viewers: <AylaLiveViewerItem>[
-          for (final AylaLiveViewer viewer in live.viewers)
+          if (_viewerOwnerId(live) == widget.channelId)
+            for (final AylaLiveViewer viewer in live.viewers)
             AylaLiveViewerItem(
               userId: viewer.userId,
               nickname: viewer.nickname,
@@ -279,10 +379,13 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
         context,
         payload: AylaSharePayload.live(
           id: widget.channelId,
-          title: live.currentChannel?.title ?? '直播间',
-          cover: live.currentChannel?.cover,
-          ownerName: live.currentChannel?.ownerNickname,
-          groupId: live.currentChannel?.group,
+          // ⚠️ 用按 id 取的那份，不直接读 `currentChannel`：切台窗口期内它可能还是
+          // 上一个直播间的标题/封面（web `LiveRoomBody.tsx:262–269` 用的也是外层
+          // 传入的 `channel` prop，不是 store 的 current）。
+          title: _channelOf(live)?.title ?? '直播间',
+          cover: _channelOf(live)?.cover,
+          ownerName: _channelOf(live)?.ownerNickname,
+          groupId: _channelOf(live)?.group,
         ),
         controller: _share,
         currentUserId: selfId,
