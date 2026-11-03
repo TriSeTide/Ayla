@@ -113,11 +113,12 @@ void main() {
       expect(launcher.lastPath, '/tmp/staging/a.apk');
     });
 
-    test('Android：无内置安装器 ⇒ 退化打开下载页', () async {
+    test('Android：无内置安装器（旧版本）⇒ 退化打开下载页', () async {
       final List<Uri> opened = <Uri>[];
       final AylaUpdateApplier applier = AylaUpdateApplier(
         platform: AylaUpdatePlatformKind.android,
-        installLauncher: _FakeInstallLauncher(false),
+        installLauncher:
+            _FakeInstallLauncher.withReason('当前安装包不含 APK 安装器（旧版本），请手动安装'),
         openUrl: (Uri uri) async {
           opened.add(uri);
           return true;
@@ -128,6 +129,29 @@ void main() {
       );
       expect(result.mode, 'open_download');
       expect(opened.single.toString(), 'https://example.com/a.apk');
+    });
+
+    test('Android：安装器被系统拒绝 ⇒ **抛错告知原因，不再静默跳浏览器**（2026-11-02 用户实报）',
+        () async {
+      final List<Uri> opened = <Uri>[];
+      final AylaUpdateApplier applier = AylaUpdateApplier(
+        platform: AylaUpdatePlatformKind.android,
+        installLauncher:
+            _FakeInstallLauncher.withReason('系统没有接受这个安装包（可能是安装权限被关闭）'),
+        openUrl: (Uri uri) async {
+          opened.add(uri);
+          return true;
+        },
+      );
+      await expectLater(
+        applier.apply(_androidPrepared()),
+        throwsA(isA<AylaUpdateApplyException>()),
+      );
+      expect(
+        opened,
+        isEmpty,
+        reason: '已经下载好了却跳浏览器重复下载 —— 正是用户实报的症状，必须禁止',
+      );
     });
 
     test('Android：安装器抛错 ⇒ AylaUpdateApplyException（保留 APK）', () async {
@@ -173,20 +197,30 @@ void main() {
 }
 
 class _FakeInstallLauncher extends AylaUpdateInstallLauncher {
-  _FakeInstallLauncher(this.result) : _throw = false;
-  _FakeInstallLauncher.thrower() : result = false, _throw = true;
+  _FakeInstallLauncher(this.result) : _throw = false, reason = null;
+  _FakeInstallLauncher.thrower() : result = false, _throw = true, reason = null;
+
+  /// 指定失败原因（null = 用「旧版本没有安装器」以外的默认原因）。
+  _FakeInstallLauncher.withReason(String this.reason)
+      : result = false,
+        _throw = false;
 
   final bool result;
   final bool _throw;
+  final String? reason;
   int calls = 0;
   String? lastPath;
 
   @override
-  Future<bool> installApk(String path) async {
+  Future<AylaApkInstallOutcome> installApk(String path) async {
     calls++;
     lastPath = path;
     if (_throw) throw StateError('user denied install');
-    return result;
+    if (result) return AylaApkInstallOutcome.ok;
+    return AylaApkInstallOutcome(
+      launched: false,
+      reason: reason ?? '系统没有接受这个安装包，请重试或手动安装',
+    );
   }
 }
 

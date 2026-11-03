@@ -801,16 +801,36 @@ class MainActivity : FlutterActivity() {
         mediaFocusLost = false
     }
 
+    /**
+     * 拉起系统 APK 安装器。
+     *
+     * ## 为什么允许两个根（2026-11-02 事故）
+     * 旧实现只认 `cacheDir`（`getTemporaryDirectory()`）。2026-11-02 存储整改后，
+     * APK 落点改成了「数据根/updates」（Android 上 = `getFilesDir()/updates`）——
+     * 而这里仍然只校验 `cacheDir` ⇒ **合法 APK 被判成非法路径** ⇒ 返回 false ⇒
+     * Dart 侧退化「打开浏览器下载页」⇒ 用户看到「明明下载好了却跳浏览器」。
+     *
+     * 现在两个根都认：
+     * - `filesDir`（现行：数据根 updates/）；
+     * - `cacheDir`（旧版本落点，兼容从旧版本升级上来的残留包）。
+     *
+     * 仍然**拒绝任意路径**：只允许这两个应用私有目录下的普通文件。
+     */
     private fun installApk(path: String): Boolean {
         val file = File(path).canonicalFile
-        val cacheRoot = cacheDir.canonicalFile
         if (!file.exists() || !file.isFile) return false
-        if (!file.path.startsWith(cacheRoot.path + File.separator)) return false
+        val allowedRoots = listOf(filesDir.canonicalFile, cacheDir.canonicalFile)
+        val underAllowed = allowedRoots.any { root ->
+            file.path.startsWith(root.path + File.separator)
+        }
+        if (!underAllowed) return false
         val authority = "$packageName.fileprovider"
         val uri: Uri = try {
             FileProvider.getUriForFile(this, authority, file)
         } catch (_: IllegalArgumentException) {
-            // provider 未声明（旧工程）：明确返回 false，让 Dart 侧走下载页兜底。
+            // provider 未声明或路径不在 <paths> 授权范围内：明确返回 false，
+            // 让 Dart 侧走下载页兜底（同时会打日志便于排查）。
+            Log.w(TAG, "FileProvider 拒绝了该路径（检查 file_paths.xml）：$path")
             return false
         }
         val intent = Intent(Intent.ACTION_VIEW).apply {

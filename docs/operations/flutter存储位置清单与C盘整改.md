@@ -147,6 +147,36 @@ Get-ChildItem $env:TEMP -Directory | Where-Object Name -match '^ayla-' | Remove-
 UI 入口 `lib/widgets/base/storage_blocked_screen.dart` 已实现，但**当前不阻断启动**，
 保留给「用户主动想搬」的场景。
 
+## 5.6 连带事故：Android「点安装跳浏览器」（2026-11-02 用户实报）
+
+**症状**：手机端检查更新 → 下载完成 → 点「安装」→ **跳到浏览器去下载 APK**，
+而包其实已经下载好了。
+
+**根因（存储整改的连带破坏）**：
+APK 落点从「系统临时目录（cacheDir）」改成了「数据根/updates」
+（Android 上 = `getFilesDir()/updates`）。但两处旧契约没跟着改：
+
+| 层 | 旧契约 | 后果 |
+|---|---|---|
+| `MainActivity.installApk` | 只校验文件在 `cacheDir` 之下 | **合法 APK 被判非法路径** ⇒ 返回 false |
+| `res/xml/file_paths.xml` | 只声明 `<cache-path>` | FileProvider 也不授权 `filesDir` 路径 |
+| `update_applier._applyAndroidApk` | 收到 false **静默** `openUrl(下载页)` | 用户看到「跳浏览器重复下载」 |
+
+**修复**：
+1. `file_paths.xml` 同时声明 `<files-path>`（现行）与 `<cache-path>`（兼容旧版本残留）；
+2. `installApk` 同时接受 `filesDir` 与 `cacheDir`，仍然**拒绝任意路径**；
+3. 安装器返回 `AylaApkInstallOutcome{launched, reason}`（不再是裸 bool）；
+4. `update_applier` **只有「当前构建没有内置安装器」才允许打开下载页**，
+   其余失败（权限被关 / 路径被拒 / 包已删除）一律抛 `AylaUpdateApplyException`
+   把原因显示给用户，**保留已校验的 APK** 供重试。
+
+**回归锁**：`test/android_apk_install_lock_test.dart`（5 条）
++ `test/update_applier_test.dart` 新增「安装器被拒 ⇒ 抛错且不打开浏览器」。
+
+> **教训**：改「文件落在哪」会同时改变**原生侧路径校验**与 **FileProvider 授权**这两条
+> 隐式契约。以后任何落点迁移，必须同时核对：`MainActivity` 的 allowed roots、
+> `file_paths.xml` 的 `<paths>`、以及各平台「用路径换 content:// 或 file://」的地方。
+
 ## 6. 已知取舍（显式登记）
 
 1. **凭据文件从插件改为自管 DPAPI 文件**：`flutter_secure_storage` 的 Windows 实现固定写

@@ -195,31 +195,54 @@ class AylaUpdateApplier {
     );
   }
 
-  /// Android：通过原生通道拉起系统安装器；不可用时退化为打开下载页。
+  /// Android：通过原生通道拉起系统安装器。
+  ///
+  /// ## 为什么不再「失败就静默开浏览器」（2026-11-02 用户实报）
+  /// 旧实现只要 `installApk` 返回 false 就直接 `openUrl(download.url)`，
+  /// 用户看到的是「**明明已经下载好了，点安装却跳浏览器去下载**」——
+  /// 而真实原因是 APK 落点在 FileProvider 授权范围外被判非法（见
+  /// `file_paths.xml` 与 `MainActivity.installApk` 的注释）。
+  ///
+  /// 现在的契约：
+  /// 1. 安装器拉起成功 ⇒ 正常返回；
+  /// 2. 拉起失败 ⇒ **把原因抛给弹窗**（保留已校验的 APK，用户可重试），
+  ///    **不再**自动打开浏览器下载页去重复下一遍；
+  /// 3. 只有当本构建**根本没有安装器通道**（`AylaApkInstallOutcome.notAndroid`
+  ///    之外的 MissingPlugin 场景）才退化为打开下载页。
   Future<AylaUpdateApplyResult> _applyAndroidApk(
     AylaPreparedUpdate prepared,
   ) async {
-    bool launched = false;
+    final AylaApkInstallOutcome outcome;
     try {
-      launched = await _installLauncher.installApk(prepared.filePath);
+      outcome = await _installLauncher.installApk(prepared.filePath);
     } catch (error) {
-      // 系统拒绝（未知来源权限未授予等）：保留 APK，展示可操作原因。
+      // 通道本身异常：保留 APK，展示可操作原因。
       throw AylaUpdateApplyException('无法启动 APK 安装器：$error');
     }
-    if (launched) {
+    if (outcome.launched) {
       return const AylaUpdateApplyResult(
         mode: 'android_apk',
         detail: '已打开系统安装器，请按提示完成安装',
       );
     }
-    final bool fallback = await _openUrl(Uri.parse(prepared.download.url));
-    if (!fallback) {
-      throw const AylaUpdateApplyException('无法打开 APK 安装器或下载地址');
+
+    final String? reason = outcome.reason;
+    // 只有「当前构建没有安装器」这一种情况才值得退化为下载页；
+    // 其余失败（权限被关 / 路径被拒 / 包损坏）都必须如实告知，不能重复下载。
+    if (reason != null && reason.contains('旧版本')) {
+      final bool fallback = await _openUrl(Uri.parse(prepared.download.url));
+      if (!fallback) {
+        throw const AylaUpdateApplyException('无法打开 APK 安装器或下载地址');
+      }
+      return AylaUpdateApplyResult(
+        mode: 'open_download',
+        fallbackUrl: prepared.download.url,
+        detail: '当前构建没有内置安装器，已打开 APK 下载地址',
+      );
     }
-    return AylaUpdateApplyResult(
-      mode: 'open_download',
-      fallbackUrl: prepared.download.url,
-      detail: '当前构建没有内置安装器，已打开 APK 下载地址',
+
+    throw AylaUpdateApplyException(
+      reason ?? '系统没有接受这个安装包，请重试或手动安装',
     );
   }
 

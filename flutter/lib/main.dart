@@ -31,7 +31,6 @@ import 'package:window_manager/window_manager.dart' show windowManager;
 
 import 'core/media/media_cache.dart';
 import 'core/storage/ayla_storage_diagnosis.dart';
-import 'widgets/base/storage_blocked_screen.dart' show AylaStorageBlockedApp;
 import 'core/storage/ayla_storage_paths.dart';
 import 'core/update/update_retention.dart';
 import 'core/platform/detached_live.dart';
@@ -739,17 +738,4 @@ class _AppRootState extends ConsumerState<_AppRoot>
       },
     );
   }
-}
-/// 安装位置不可用时的根 widget（见 [AylaStorageBlockedApp]）。
-///
-/// 单独包一层而不是直接 `runApp(AylaStorageBlockedApp(...))`：
-/// 与正常启动路径保持「顶层都是一个 Widget」的对称形态，便于测试直接 pump。
-class _AylaStorageBlockedApp extends StatelessWidget {
-  const _AylaStorageBlockedApp({required this.diagnosis});
-
-  final AylaStorageDiagnosis diagnosis;
-
-  @override
-  Widget build(BuildContext context) =>
-      AylaStorageBlockedApp(diagnosis: diagnosis);
 }

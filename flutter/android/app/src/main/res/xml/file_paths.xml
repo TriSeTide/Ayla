@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 应用内更新：只暴露应用缓存目录（APK 下载落点），不暴露外部存储或任意路径。 -->
+<!--
+  应用内更新：FileProvider 只暴露「APK 下载落点」，不暴露外部存储或任意路径。
+
+  ⚠️ 两个根都必须保留（2026-11-02 事故）：
+  · files-path → data/updates/   现行落点（getFilesDir() = <data-root>，见
+                                 lib/core/storage/ayla_storage_paths.dart，Android 分支 =
+                                 getApplicationSupportDirectory() = getFilesDir()）；
+  · cache-path → updates/ + .    旧版本落点（getTemporaryDirectory() = cacheDir），
+                                 保留以支持「从旧版本升级上来」的用户。
+-->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path name="files_updates" path="updates/" />
+    <files-path name="files_root" path="." />
     <cache-path name="updates" path="updates/" />
     <cache-path name="cache_root" path="." />
 </paths>
