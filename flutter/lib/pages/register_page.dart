@@ -163,7 +163,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       //（`state/auth_bootstrap.dart:95`），逐条包含：拉 /me/、写令牌、connectAll、
       // chat/presence owner attach+connect、徽标、预加载门、**以及三条帧桥的重装**。
       // 注册成功与登录成功在服务端契约上等价（都返回 access/refresh/user），
-      // 因此复用同一条链 —— 不再在这里维护第二份、必然漂移的副作��清单。
+      // 因此复用同一条链 —— 不再在这里维护第二份、必然漂移的副作用清单。
       // 先取容器再 await（避免 `use_build_context_synchronously`）。
       if (!mounted) return;
       final ProviderContainer container =
