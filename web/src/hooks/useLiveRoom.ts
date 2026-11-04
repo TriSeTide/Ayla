@@ -73,6 +73,11 @@ export function useLiveRoom(
       activityRoute,
       keepLiveActivity: keepLiveActivityRef.current,
       ownerConsoleRoute,
+      // 端语义决定静音偏好的键与缺省值（开播控制台缺省静音 / 观众端缺省有声）。
+      // 用 ref 取最新值而不是进 deps：isOwnerConsole 在进房瞬间会随 current.channel
+      // 被 clearCurrent 清空而翻转，进 deps 会触发 enter/leave 死循环（c78c27f 事故）。
+      // 端语义真实变化时由 runtime 的 applyMutedOwner 重新应用偏好（同频道重进分支）。
+      isOwnerConsole: isOwnerConsoleRef.current,
     });
     return () => {
       liveSessionRuntime.detachView({
@@ -82,6 +87,15 @@ export function useLiveRoom(
       });
     };
   }, [channelId, activityRoute, ownerConsoleRoute]);
+
+  // 端语义同步（开播控制台 ↔ 观众端）：静音偏好按端分开存，端一变就要按新端偏好
+  // 重新应用静音。单独一个 effect、不进上面的进房 deps——isOwnerConsole 在进房瞬间
+  // 会随 current.channel 被 clearCurrent 清空而翻转，放进进房 deps 会触发
+  // enter/leave 死循环（c78c27f 事故）。带 channelId 是为了让转场期仍挂载的旧页面
+  // 算出的端语义被 runtime 拒绝，不能影响新会话。
+  useEffect(() => {
+    liveSessionRuntime.setOwnerConsole(isOwnerConsoleRef.current, channelId);
+  }, [isOwnerConsole, channelId]);
 
   // 播放器：srsStatus=live 才 attach；idle/degraded 销毁。
   // **小窗模式（页面卸载但会话保留）下不销毁播放器**——video/src/HLS 全部保留，

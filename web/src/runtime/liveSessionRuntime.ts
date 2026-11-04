@@ -46,6 +46,11 @@ export interface LiveSessionOptions {
   activityRoute?: string;
   keepLiveActivity?: boolean;
   ownerConsoleRoute?: string;
+  /**
+   * 本次进房是否开播控制台语义（= showOwnerPanel = Boolean(channel?.is_owner)）。
+   * 决定静音偏好读哪一套键、缺省值是哪一端：开播端缺省静音、观众端缺省有声。
+   */
+  isOwnerConsole?: boolean;
 }
 
 class LiveSessionRuntime {
@@ -81,6 +86,11 @@ class LiveSessionRuntime {
    */
   private healRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private tracksOwnerActivity = false;
+  /**
+   * 当前会话的端语义（开播控制台 = true / 观众端 = false）。
+   * 静音偏好按端分开存：主播在自己控制台静音，不能影响他看别人直播时的声音。
+   */
+  private mutedOwner = false;
   private stallTimer: ReturnType<typeof setTimeout> | null = null;
   private watchdogCleanup: (() => void) | null = null;
   /** video 的暂存容器（z-index:-1 视口内，不暂停）：容器切换间隙的临时落脚点 */
@@ -179,6 +189,9 @@ class LiveSessionRuntime {
   enter(channelId: number, options: LiveSessionOptions = {}): number {
     if (this.channelId === channelId && this.alive) {
       this.options = options;
+      // 同频道重进也可能是端语义变了（群内观众页 ↔ 开播控制台共用一个频道 id）：
+      // 按新端偏好重新应用一次，否则会沿用上一端的静音状态。
+      this.applyMutedOwner(Boolean(options.isOwnerConsole));
       if (useLiveStore.getState().miniPlayer) {
         useLiveStore.getState().setMiniPlayer(null);
       }
@@ -202,6 +215,9 @@ class LiveSessionRuntime {
     this.options = options;
     this.alive = true;
     this.tracksOwnerActivity = false;
+    // 端语义必须先于 ensureVideo 确定：ensureVideo 要按当前端的偏好初始化静音投影
+    this.mutedOwner = Boolean(options.isOwnerConsole);
+    useLiveStore.getState().setMutedOwner(this.mutedOwner);
     // video 元素立即创建：LivePlayer 挂载时即可迁移进容器（loading 阶段 display:none）
     this.ensureVideo();
     const store = useLiveStore.getState();
@@ -384,6 +400,9 @@ class LiveSessionRuntime {
     this.bigHost = null;
     // 静音偏好不在这里写、也不重置：它是跨直播间/跨场次的用户选择，
     // 退房后仍要保留（下次进房按偏好恢复声音）。store.muted 同理保留。
+    // 端语义回到缺省的观众端（退房后没有会话，再进房由 enter 按新端重新确定）。
+    this.mutedOwner = false;
+    useLiveStore.getState().setMutedOwner(false);
     useLiveStore.getState().setCurrentLoading(false);
     useLiveStore.getState().setCurrentError(null);
     useLiveStore.getState().setCurrentPlayerError(null);
@@ -401,7 +420,7 @@ class LiveSessionRuntime {
       v.className = "live-player-video";
       // 静音起播是浏览器的硬约束：非静音的 play() 在无用户手势时会被拒绝
       // （NotAllowedError），直播就停在"加载中"。所以起播一律 muted=true，
-      // 声音由 retrySound() 在真正出帧后按用户偏好恢复（见下方）。
+      // 声音由 retrySound() 在真正出帧后按**当前端**的偏好恢复（见下方）。
       v.muted = true;
       v.autoplay = true;
       v.playsInline = true;
@@ -414,24 +433,72 @@ class LiveSessionRuntime {
     return this.videoEl;
   }
 
+  /**
+   * 切换当前会话的端语义，并按新端的偏好重新应用静音。
+   * 为什么需要"重新应用"：video 元素跨会话复用（同频道重进、观众页 ↔ 开播控制台），
+   * 元素上的 muted 属于上一端的播放状态；端一变就必须按新端的偏好重新决定是否出声。
+   * 端语义没变时不动元素——避免同一端的重复 enter 把用户刚点的静音又翻回去。
+   */
+  private applyMutedOwner(owner: boolean): void {
+    const changed = owner !== this.mutedOwner;
+    this.mutedOwner = owner;
+    useLiveStore.getState().setMutedOwner(owner);
+    if (!changed) return;
+    const video = this.videoEl;
+    if (!video) {
+      // 元素未创建：只把投影对齐到新端偏好，元素创建后由 retrySound 收敛
+      useLiveStore.getState().setMuted(readLiveMuted(owner));
+      return;
+    }
+    if (readLiveMuted(owner)) {
+      video.muted = true;
+      useLiveStore.getState().setMuted(true);
+      return;
+    }
+    // 新端偏好有声：走与出帧恢复同一条路径（带被拒回退），不直接硬设 muted=false
+    this.retrySound();
+  }
+
   // ---------- 静音所有权：偏好持久化 + 起播后自动恢复声音 ----------
   // 根因（2026-10 直播无声）：ensureVideo 写死 muted=true 后全仓没有任何地方设回
   // false，播放器也没有喇叭按钮 ⇒ 直播永远静音。这里把"静音"变成有 owner 的状态：
   // 元素静音（自动播放策略要求）、用户偏好（localStorage）、store 投影三者由本类统一
   // 维护，UI 只读 store、只调 setMuted/toggleMuted。
+  // 偏好**按端分开**（观众端 / 开播控制台各一套键与缺省值）：主播在自己控制台静音，
+  // 不能让他去看别人直播时也没声音，反之亦然。
 
-  /** 当前是否静音（以 video 元素为准；元素未创建时退到用户偏好） */
-  isMuted(): boolean {
-    return this.videoEl ? this.videoEl.muted : readLiveMuted();
+  /** 当前会话是否开播控制台语义（决定读写哪一套静音偏好） */
+  get isOwnerConsole(): boolean {
+    return this.mutedOwner;
   }
 
   /**
-   * 用户显式切换静音：写偏好 → 应用到 video → 镜像 store。
+   * 由视图在端语义**真实变化**时调用（开播控制台 ↔ 观众端）。
+   * 为什么需要独立入口：进房瞬间 current.channel 会被 clearCurrent() 清空，
+   * is_owner 要等详情返回才知道；页面据此算出的端语义会在加载窗口里翻转，
+   * 而 useLiveRoom 的进房 effect 不能跟着重跑（c78c27f 的 enter/leave 死循环）。
+   * 所以端语义由视图观察、经本方法单向通知 runtime，再按新端偏好重新应用静音。
+   */
+  setOwnerConsole(owner: boolean, channelId?: number): void {
+    // 转场期旧页面仍挂载（AnimatePresence）并会重算端语义：只有仍属于当前会话的视图
+    // 才有资格改端语义。否则旧开播控制台在 channel 被清空后算出的 false，会把新控制台
+    // 刚按开播端偏好建立的静音又翻回有声。
+    if (channelId !== undefined && this.channelId !== channelId) return;
+    this.applyMutedOwner(owner);
+  }
+
+  /** 当前是否静音（以 video 元素为准；元素未创建时退到**当前端**的用户偏好） */
+  isMuted(): boolean {
+    return this.videoEl ? this.videoEl.muted : readLiveMuted(this.mutedOwner);
+  }
+
+  /**
+   * 用户显式切换静音：写**当前端**的偏好 → 应用到 video → 镜像 store。
    * 有声分支补一次 play()：静音起播成功后取消静音，个别浏览器会把播放器挂起，
    * 不重新 play 就是"按钮变了但没声音"。
    */
   setMuted(muted: boolean): void {
-    writeLiveMuted(muted);
+    writeLiveMuted(muted, this.mutedOwner);
     const video = this.videoEl;
     if (video) {
       video.muted = muted;
@@ -454,11 +521,12 @@ class LiveSessionRuntime {
    * 由 playing/canplay 触发：此时播放已获准，把 muted 设回 false 通常不会再被拦；
    * 真被拦（NotAllowedError，浏览器把取消静音也当播放请求）就回退静音播放——
    * 画面优先于声音，且**偏好不被篡改**（用户下次仍有声）。
+   * 是否该出声按**当前端**的偏好判定：开播控制台缺省静音，出帧后不会自己响。
    */
   retrySound(): void {
     const video = this.videoEl;
-    // 用户偏好是静音，或元素已经是响的 ⇒ 无事可做（幂等，可被高频事件反复调用）
-    if (!video || !video.muted || readLiveMuted()) return;
+    // 当前端偏好是静音，或元素已经是响的 ⇒ 无事可做（幂等，可被高频事件反复调用）
+    if (!video || !video.muted || readLiveMuted(this.mutedOwner)) return;
     video.muted = false;
     const result = this.playSafely(video);
     if (result === null) {

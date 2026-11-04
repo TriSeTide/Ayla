@@ -523,7 +523,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 #### 12.7.6.2 声音所有权与恢复顺序
 
 - **唯一 owner 是 `liveSessionRuntime`**（与 video 元素同 owner）：`isMuted()` / `setMuted()` / `toggleMuted()` / `retrySound()`，store 只镜像投影（`muted` 字段），组件只读投影、调 runtime。
-- **用户偏好持久化**：localStorage `ayla.live.muted`（`"1"` = 静音）。读不到或存储不可用 → 默认**有声**。偏好跨直播间、跨会话保留；`clearCurrent()`（退房）**不动**偏好。
+- **用户偏好持久化按「端」分开**（2026-11-04 用户裁决，见 §12.7.6.4）：观众端 `ayla.live.muted`、开播端 `ayla.live.owner.muted`，值 `"1"` = 静音。读不到或存储不可用 → 各自回退各自缺省值。偏好跨直播间、跨会话保留；`clearCurrent()`（退房）**不动**偏好。
 - **自动恢复（无手势，尽力而为）**：`playing` / `canplay` 时若偏好「有声」而 video 仍静音 → `muted = false` + `play()`；成功即镜像 store。**被拒（NotAllowedError）就老实回退静音**并保持静音播放——绝不为了出声把画面搞停，也绝不篡改用户偏好（用户没改过它）。
 - **用户手势优先**：点音量键 → `setMuted()` 直接写偏好 + 应用到 video；此时有手势，浏览器一定放行。
 - **起播兜底**：恢复失败时静音继续播，用户点一下音量键即可出声（按钮在左下角，与刷新键并排）。
@@ -533,6 +533,29 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 按钮两态：`muted=true` → `IconSpeakerOff` + `aria-label/title` = 「打开声音」；`muted=false` → `IconSpeaker` + 「静音」。
 - 只在 `showVideo`（`srsStatus === "live"` 且无 `playerError`）时渲染，与其他悬浮钮同层同显隐、共用 3s 无操作自动隐藏与 `focus ring`。
 - 尺寸沿用媒体悬浮钮的 32px 例外口径（§12.7.3 末条），小窗内为 24px（与关闭键一致）。
+
+#### 12.7.6.4 两端默认值不同：观众端默认有声 / 开播控制台默认静音
+
+> 2026-11-04 用户裁决：「默认把声音打开……但是 web 和 Flutter 的**开播界面，默认把声音关闭**。
+> 也就是 web 的开播界面默认保持不变。」
+
+判据是**「我在看别人的直播」还是「我在开我自己的播」**，不是频道属性：
+
+| 场景 | 判据（web） | 判据（Flutter） | 默认 | 偏好键 |
+| --- | --- | --- | --- | --- |
+| 观众端（看别人的直播） | `showOwnerPanel === false` | 非开播控制台 | **有声** | `ayla.live.muted` |
+| 开播控制台（自己的播） | `showOwnerPanel === true`（= `Boolean(channel?.is_owner)`） | `live_studio_page` | **静音** | `ayla.live.owner.muted` |
+
+**为什么两端偏好必须分开**：主播在自己的控制台静音（很常见——避免自己的声音回授/干扰），
+如果和观众端共用一份偏好，他去别人直播间看播时也会没声音，而且他自己根本不知道原因。
+反之观众端静音也不该让他的开播控制台默认静音。
+
+**为什么开播控制台默认静音**：主播开播时同一路流会从 SRS 回环到自己的播放器，
+默认出声等于把主播自己的声音延时回授一遍（回声/啸叫风险），且主播此刻关注的是推流状态与弹幕，
+不是听自己。默认静音让主播显式选择要不要听。
+
+**注意**：这只改**默认值**，两端都仍然完整保留音量键（观众端与开播端都能手动切换），
+且手动切换只影响当前端的偏好键。
 
 ### 12.8 帖子卡 PostCard 与信息流
 

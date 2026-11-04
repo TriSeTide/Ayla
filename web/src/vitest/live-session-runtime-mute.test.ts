@@ -6,10 +6,14 @@
  *
  * 本文件锁定的契约：
  * - 起播仍静音（否则无手势 play() 会被浏览器拒绝，直播停在加载中）；
- * - 出帧（playing/canplay）后按用户偏好自动恢复声音；
+ * - 出帧（playing/canplay）后按**当前端**的用户偏好自动恢复声音；
  * - 用户手动静音/取消静音写 localStorage（"1" = 静音），跨直播间、跨进房保留；
  * - 恢复声音被拒（NotAllowedError）时回退静音播放，且**不篡改用户偏好**；
  * - leave() 不写、不重置偏好。
+ *
+ * 2026-11-04 追加：静音偏好**按端分开**——观众端 `ayla.live.muted`（缺省有声）、
+ * 开播控制台 `ayla.live.owner.muted`（缺省静音）。两端互不污染：主播在自己控制台
+ * 静音不影响他看别人直播，观众端的"有声"也不会让开播控制台自己响起来。
  *
  * jsdom 的 HTMLMediaElement.play() 返回 undefined（不是 Promise），实现必须容错；
  * 被拒分支用 vi.spyOn(video, "play") 返回 rejected Promise 驱动。
@@ -19,6 +23,7 @@ import * as liveApi from "../api/live";
 import { liveSessionRuntime } from "../runtime/liveSessionRuntime";
 import {
   LIVE_MUTED_STORAGE_KEY,
+  LIVE_OWNER_MUTED_STORAGE_KEY,
   readLiveMuted,
   useLiveStore,
   writeLiveMuted,
@@ -96,8 +101,11 @@ async function flush(): Promise<void> {
  * jsdom 的 HTMLMediaElement.play() 是 "not implemented"（返回 undefined 并打 console error），
  * 统一 stub 成 resolved Promise，让成功/被拒两个分支都能被驱动。
  */
-async function enterAndGetVideo(channelId = 7): Promise<HTMLVideoElement> {
-  liveSessionRuntime.enter(channelId, {});
+async function enterAndGetVideo(
+  channelId = 7,
+  opts: { isOwnerConsole?: boolean } = {},
+): Promise<HTMLVideoElement> {
+  liveSessionRuntime.enter(channelId, { isOwnerConsole: opts.isOwnerConsole });
   await flush();
   const video = liveSessionRuntime.getVideoElement();
   if (!video) throw new Error("video 元素未创建");
@@ -343,5 +351,181 @@ describe("静音所有权（runtime）：起播静音 → 出帧恢复声音", (
     liveSessionRuntime.toggleMuted();
     expect(liveSessionRuntime.isMuted()).toBe(false);
     expect(useLiveStore.getState().muted).toBe(false);
+  });
+});
+
+/**
+ * 2026-11-04 需求（用户原话）：「默认把声音打开……但是 web 和 Flutter 的开播界面，
+ * 默认把声音关闭。」
+ * 拆成两条硬契约：观众端缺省有声、开播控制台缺省静音；两套偏好**互不污染**。
+ */
+describe("偏好按端分开：观众端默认有声 / 开播控制台默认静音", () => {
+  it("观众端首次进房：出帧后有声，两端偏好键都仍是 null", async () => {
+    const video = await enterAndGetVideo(7, { isOwnerConsole: false });
+    expect(liveSessionRuntime.isOwnerConsole).toBe(false);
+    firePlaying(video);
+    await flush();
+    expect(video.muted).toBe(false);
+    expect(useLiveStore.getState().muted).toBe(false);
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(LIVE_OWNER_MUTED_STORAGE_KEY)).toBeNull();
+  });
+
+  it("开播控制台首次进房：出帧后仍然静音，两端偏好键都仍是 null", async () => {
+    const video = await enterAndGetVideo(7, { isOwnerConsole: true });
+    expect(liveSessionRuntime.isOwnerConsole).toBe(true);
+    expect(useLiveStore.getState().mutedOwner).toBe(true);
+    // 起播阶段同样静音（自动播放策略）
+    expect(video.muted).toBe(true);
+    firePlaying(video);
+    await flush();
+    // 缺省静音 ⇒ 出帧不会自己响；但这不是"用户选了静音"，所以偏好键仍为空
+    expect(video.muted).toBe(true);
+    expect(useLiveStore.getState().muted).toBe(true);
+    expect(localStorage.getItem(LIVE_OWNER_MUTED_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBeNull();
+  });
+
+  it("在开播控制台取消静音：本次立即出声，只动 owner 键，观众端偏好完全不受影响", async () => {
+    const video = await enterAndGetVideo(7, { isOwnerConsole: true });
+    liveSessionRuntime.setMuted(true); // 先落一个 owner 键，验证取消静音会把它删掉
+    expect(localStorage.getItem(LIVE_OWNER_MUTED_STORAGE_KEY)).toBe("1");
+
+    liveSessionRuntime.setMuted(false);
+    await flush();
+    expect(video.muted).toBe(false);
+    expect(useLiveStore.getState().muted).toBe(false);
+    // 取消静音 = 回到缺省（开播端缺省就是静音）⇒ 删除键，不存 "0"：
+    // 控制台的"开声"是这一次的操作，不是需要长期记住的偏好。
+    expect(localStorage.getItem(LIVE_OWNER_MUTED_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBeNull();
+    // 观众端偏好没有被写脏：主播去看别人直播依然有声音
+    expect(readLiveMuted(false)).toBe(false);
+  });
+
+  it("在开播控制台静音：只写 owner 键，观众端键不受污染（主播去看别人直播仍有声）", async () => {
+    await enterAndGetVideo(7, { isOwnerConsole: true });
+    liveSessionRuntime.setMuted(true);
+    expect(localStorage.getItem(LIVE_OWNER_MUTED_STORAGE_KEY)).toBe("1");
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBeNull();
+    expect(readLiveMuted(false)).toBe(false); // 观众端偏好仍是"有声"
+
+    // 切到别人的直播间（观众端语义）：仍然出声
+    liveSessionRuntime.leave();
+    const video2 = await enterAndGetVideo(9, { isOwnerConsole: false });
+    firePlaying(video2);
+    await flush();
+    expect(video2.muted).toBe(false);
+    expect(useLiveStore.getState().muted).toBe(false);
+  });
+
+  it("在观众端静音：只写观众键，开播端键不受污染（回控制台仍按缺省静音）", async () => {
+    const video = await enterAndGetVideo(7, { isOwnerConsole: false });
+    liveSessionRuntime.setMuted(true);
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBe("1");
+    expect(localStorage.getItem(LIVE_OWNER_MUTED_STORAGE_KEY)).toBeNull();
+    expect(readLiveMuted(true)).toBe(true); // 开播端缺省仍是静音
+
+    firePlaying(video);
+    await flush();
+    expect(video.muted).toBe(true);
+    expect(useLiveStore.getState().muted).toBe(true);
+  });
+
+  it("同频道端语义切换（观众页 ↔ 开播控制台）：按新端偏好重新应用，且不改写任何偏好", async () => {
+    // 观众端进房 → 出帧有声
+    const video = await enterAndGetVideo(7, { isOwnerConsole: false });
+    firePlaying(video);
+    await flush();
+    expect(video.muted).toBe(false);
+
+    // 同一频道切到开播控制台（showOwnerPanel 翻转 → 同频道重进分支）
+    liveSessionRuntime.enter(7, { isOwnerConsole: true });
+    await flush();
+    expect(liveSessionRuntime.isOwnerConsole).toBe(true);
+    expect(useLiveStore.getState().mutedOwner).toBe(true);
+    // 元素被复用：必须按开播端缺省（静音）重新应用
+    expect(video.muted).toBe(true);
+    expect(useLiveStore.getState().muted).toBe(true);
+    // 端语义切换不是用户手势 ⇒ 不得写偏好
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(LIVE_OWNER_MUTED_STORAGE_KEY)).toBeNull();
+  });
+
+  it("端语义不变时重复 enter 不翻动用户刚点的静音（幂等）", async () => {
+    const video = await enterAndGetVideo(7, { isOwnerConsole: false });
+    firePlaying(video);
+    await flush();
+    liveSessionRuntime.setMuted(true); // 用户手动静音
+    expect(video.muted).toBe(true);
+
+    liveSessionRuntime.enter(7, { isOwnerConsole: false }); // 同端重进
+    await flush();
+    expect(video.muted).toBe(true);
+    expect(useLiveStore.getState().muted).toBe(true);
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBe("1");
+  });
+
+  it("setOwnerConsole：端语义后到（加载完成才知道 is_owner）时按新端偏好重新应用", async () => {
+    // 进房时还不知道是不是自己的直播间（current.channel 被 clearCurrent 清空）
+    const video = await enterAndGetVideo(7, { isOwnerConsole: false });
+    firePlaying(video);
+    await flush();
+    expect(video.muted).toBe(false); // 先按观众端出声
+
+    // 详情返回：这是自己的直播间 → 视图通知端语义变为开播控制台
+    liveSessionRuntime.setOwnerConsole(true);
+    expect(liveSessionRuntime.isOwnerConsole).toBe(true);
+    expect(useLiveStore.getState().mutedOwner).toBe(true);
+    expect(video.muted).toBe(true); // 控制台缺省静音：立刻安静下来
+    expect(useLiveStore.getState().muted).toBe(true);
+    // 端语义切换不是用户手势 ⇒ 不写偏好
+    expect(localStorage.getItem(LIVE_OWNER_MUTED_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBeNull();
+
+    // 切回观众端语义（离开控制台）：按观众端偏好恢复声音
+    vi.spyOn(video, "play").mockResolvedValue(undefined);
+    liveSessionRuntime.setOwnerConsole(false);
+    await flush();
+    expect(video.muted).toBe(false);
+    expect(useLiveStore.getState().muted).toBe(false);
+  });
+
+  it("setOwnerConsole 带 channelId：转场期旧页面的通知被拒绝（不影响新会话）", async () => {
+    const video = await enterAndGetVideo(7, { isOwnerConsole: true });
+    expect(video.muted).toBe(true);
+    // 旧页面（频道 6）在转场期仍在渲染并重算端语义：必须被拒
+    liveSessionRuntime.setOwnerConsole(false, 6);
+    expect(liveSessionRuntime.isOwnerConsole).toBe(true);
+    expect(video.muted).toBe(true);
+    // 当前会话自己的通知照常生效
+    liveSessionRuntime.setOwnerConsole(true, 7);
+    expect(liveSessionRuntime.isOwnerConsole).toBe(true);
+  });
+
+  it("setOwnerConsole 幂等：重复同一端语义不动用户刚点的静音", async () => {
+    const video = await enterAndGetVideo(7, { isOwnerConsole: false });
+    firePlaying(video);
+    await flush();
+    liveSessionRuntime.setMuted(true); // 用户手动静音
+    expect(video.muted).toBe(true);
+
+    liveSessionRuntime.setOwnerConsole(false); // 视图重渲染再次通知同一端
+    expect(video.muted).toBe(true);
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBe("1");
+  });
+
+  it("存储不可用：两端各自回退自己的缺省值（观众有声 / 开播静音）", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    expect(readLiveMuted(false)).toBe(false);
+    expect(readLiveMuted(true)).toBe(true);
+
+    const video = await enterAndGetVideo(7, { isOwnerConsole: true });
+    firePlaying(video);
+    await flush();
+    expect(video.muted).toBe(true); // 开播端缺省静音
+    expect(useLiveStore.getState().muted).toBe(true);
   });
 });

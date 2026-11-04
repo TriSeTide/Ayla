@@ -19,31 +19,60 @@ import { sortLiveChannels } from "../utils/sortChannels";
 /** 实时弹幕队列上限；完整历史由 useCursorHistory 通过 cursor/before_id 独立续读。 */
 export const DANMAKU_MAX_ITEMS = 500;
 
-/** 直播静音偏好存储键：值 "1" = 静音；无记录 = 有声音（默认） */
+/**
+ * 观众端（看别人的直播）静音偏好存储键：值 "1" = 静音；无记录 = 有声音（缺省）。
+ * 键名保持 68a4e93 的现状，已存用户偏好继续生效，不做迁移。
+ */
 export const LIVE_MUTED_STORAGE_KEY = "ayla.live.muted";
 
 /**
- * 读取静音偏好。
- * 存储不可用（隐私模式/被禁用/无 localStorage）时返回 false（有声音）：
- * 静音必须是用户的显式选择，不能因为读不到偏好就替用户关掉声音。
+ * 开播控制台（自己的直播间，showOwnerPanel / is_owner）静音偏好存储键。
+ * 与观众端分开存：主播在自己控制台静音只是"控制台不要出声"，不能把他去别人直播间
+ * 的观看偏好也改成静音。值 "1" = 用户显式静音；无记录 = 缺省（静音）。
  */
-export function readLiveMuted(): boolean {
+export const LIVE_OWNER_MUTED_STORAGE_KEY = "ayla.live.owner.muted";
+
+/**
+ * 各端静音偏好的缺省值：观众端缺省有声（用户来看直播就是要听声音），
+ * 开播端缺省静音（自己的控制台主要用来盯画面/调试，声音是额外打扰）。
+ */
+export function defaultLiveMuted(owner: boolean): boolean {
+  return owner;
+}
+
+/**
+ * 读取静音偏好（owner=true 读开播端，缺省静音；否则读观众端，缺省有声）。
+ * 存储不可用（隐私模式/被禁用/无 localStorage）时回退到**该端自己的**缺省值：
+ * 静音必须是用户的显式选择，不能因为读不到偏好就替观众关掉声音。
+ */
+export function readLiveMuted(owner = false): boolean {
   try {
+    if (owner) {
+      // 开播端缺省静音：没有记录 = 静音（产品要求"开播界面默认把声音关掉"）。
+      // 取消静音会删键回到缺省（见 writeLiveMuted），所以"开声"只对当场生效，
+      // 下次打开控制台依旧安静——这是刻意的产品语义，不是漏掉持久化。
+      // 仍兼容读取 "0"，将来若要支持"记住开声"只需改写侧、不必动读侧契约。
+      const raw = localStorage.getItem(LIVE_OWNER_MUTED_STORAGE_KEY);
+      return raw === null ? defaultLiveMuted(true) : raw !== "0";
+    }
     return localStorage.getItem(LIVE_MUTED_STORAGE_KEY) === "1";
   } catch {
-    return false;
+    return defaultLiveMuted(owner);
   }
 }
 
 /**
- * 写入静音偏好。
- * 取消静音时删除键（缺省 = 有声音），不存 "0"——避免"从没静音过"与"曾取消静音"
- * 变成两种需要迁移的状态。存储不可用/写满时静默：偏好只在本会话内存生效，不阻断播放。
+ * 写入静音偏好（owner 语义同 readLiveMuted）。
+ * 取消静音时删除键，不存 "0"——避免"从没静音过"与"曾取消静音"变成两种需要迁移的状态。
+ * 开播端由此得到一个明确的产品语义：**取消静音只对当前这场生效**，下次打开控制台
+ * 仍回到缺省的静音（用户要的是"开播界面默认不吵"，不是记住某次临时开声）。
+ * 存储不可用/写满时静默：偏好只在本会话内存生效，不阻断播放。
  */
-export function writeLiveMuted(muted: boolean): void {
+export function writeLiveMuted(muted: boolean, owner = false): void {
   try {
-    if (muted) localStorage.setItem(LIVE_MUTED_STORAGE_KEY, "1");
-    else localStorage.removeItem(LIVE_MUTED_STORAGE_KEY);
+    const key = owner ? LIVE_OWNER_MUTED_STORAGE_KEY : LIVE_MUTED_STORAGE_KEY;
+    if (muted) localStorage.setItem(key, "1");
+    else localStorage.removeItem(key);
   } catch {
     // 存储不可用：静默降级，播放不受影响
   }
@@ -88,8 +117,15 @@ interface LiveState {
   /**
    * 直播静音状态（喇叭按钮与 video.muted 的 UI 投影，权威偏好在 localStorage）。
    * 跨直播间保留：换台不清空（用户选的是"这场直播要不要出声"，不是某个频道的属性）。
+   * 具体读写哪一套偏好由 mutedOwner 决定。
    */
   muted: boolean;
+  /**
+   * 当前会话是否开播控制台语义（决定 muted 对应哪套偏好：开播端 `ayla.live.owner.muted`
+   * 缺省静音 / 观众端 `ayla.live.muted` 缺省有声）。
+   * 由 runtime.enter 按 isOwnerConsole 写入；**只有 runtime 会改它**，UI 只读。
+   */
+  mutedOwner: boolean;
   lastFetched: number | null;
   /** 最近一次列表请求是否携带 only_live=1；null 表示尚未按筛选条件请求。 */
   channelsOnlyLive: boolean | null;
@@ -113,6 +149,8 @@ interface LiveState {
    * video 元素的 muted 也由 runtime 应用——store 只是投影。
    */
   setMuted: (muted: boolean) => void;
+  /** 切换当前会话的端语义（开播控制台 ↔ 观众端）；同样只镜像，不写存储。 */
+  setMutedOwner: (owner: boolean) => void;
 
   /** 房内在看人数/预览（弹幕 WS `viewers` 帧或 REST 快照）；仅对当前直播间生效 */
   setViewers: (channelId: number, count: number, viewers: LiveViewerItem[]) => void;
@@ -155,6 +193,7 @@ const initialState = {
   currentPlayerError: null,
   miniPlayer: null,
   muted: false,
+  mutedOwner: false,
   lastFetched: null,
   channelsOnlyLive: null,
 };
@@ -190,6 +229,7 @@ export const useLiveStore = create<LiveState>((set) => ({
   // 冷启动按已保存的偏好初始化（刷新后仍保持用户上次的选择）。
   // 读在 create 回调里而不是模块顶层：测试/SSR 下 localStorage 可能晚于模块存在。
   muted: readLiveMuted(),
+  mutedOwner: false,
 
   setChannels: (list, onlyLive = false) =>
     set({
@@ -260,6 +300,8 @@ export const useLiveStore = create<LiveState>((set) => ({
    */
   setMuted: (muted) => set({ muted }),
 
+  setMutedOwner: (owner) => set({ mutedOwner: owner }),
+
   setViewers: (channelId, count, viewers) =>
     set((state) => {
       const current = state.current.channel?.id === channelId
@@ -313,11 +355,15 @@ export const useLiveStore = create<LiveState>((set) => ({
       currentPlayerError: null,
     }),
 
-  /** 全量重置（退出登录/测试基线）：muted 回到已持久化的偏好，而不是硬编码默认值 */
+  /**
+   * 全量重置（退出登录/测试基线）：muted 回到**观众端**已持久化的偏好，而不是硬编码默认值
+   * （reset 之后没有会话，端语义回到缺省的观众端）。
+   */
   reset: () =>
     set({
       ...initialState,
       muted: readLiveMuted(),
+      mutedOwner: false,
     }),
 }));
 

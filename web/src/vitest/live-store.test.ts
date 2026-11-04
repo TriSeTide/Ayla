@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DANMAKU_MAX_ITEMS,
   LIVE_MUTED_STORAGE_KEY,
+  LIVE_OWNER_MUTED_STORAGE_KEY,
   readLiveMuted,
   useLiveStore,
   writeLiveMuted,
@@ -243,6 +244,66 @@ describe("live store", () => {
 
     writeLiveMuted(false);
     useLiveStore.getState().reset();
+    expect(useLiveStore.getState().muted).toBe(false);
+  });
+
+  it("静音偏好按端分开：观众端缺省有声、开播端缺省静音，两套键互不覆盖", () => {
+    // 缺省值：两端各自的默认（这是本次需求的核心）
+    expect(readLiveMuted(false)).toBe(false); // 观众端：默认有声
+    expect(readLiveMuted(true)).toBe(true); // 开播端：默认静音
+
+    // 观众端静音只写观众键
+    writeLiveMuted(true, false);
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBe("1");
+    expect(localStorage.getItem(LIVE_OWNER_MUTED_STORAGE_KEY)).toBeNull();
+    expect(readLiveMuted(true)).toBe(true); // 开播端仍缺省静音
+
+    // 开播端取消静音只动 owner 键（取消静音 = 回缺省 = 删键）
+    writeLiveMuted(false, true);
+    expect(localStorage.getItem(LIVE_OWNER_MUTED_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBe("1"); // 观众端偏好未被污染
+    expect(readLiveMuted(false)).toBe(true);
+
+    // 观众端取消静音：只删观众键，两端都回到各自缺省
+    writeLiveMuted(false, false);
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBeNull();
+    expect(readLiveMuted(false)).toBe(false);
+    expect(readLiveMuted(true)).toBe(true);
+  });
+
+  it("静音偏好按端分开：存储不可用时两端各回退自己的缺省值", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage denied");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage denied");
+    });
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("storage denied");
+    });
+    // 读不到 ≠ 用户选了静音：观众端必须回落到"有声音"
+    expect(readLiveMuted(false)).toBe(false);
+    // 开播端反过来：读不到就按缺省静音（开播界面默认不出声）
+    expect(readLiveMuted(true)).toBe(true);
+    expect(() => writeLiveMuted(true, false)).not.toThrow();
+    expect(() => writeLiveMuted(false, true)).not.toThrow();
+  });
+
+  it("setMutedOwner 只镜像端语义、不写存储；clearCurrent 不动 muted/mutedOwner", () => {
+    useLiveStore.getState().setMutedOwner(true);
+    expect(useLiveStore.getState().mutedOwner).toBe(true);
+    expect(localStorage.getItem(LIVE_OWNER_MUTED_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBeNull();
+
+    useLiveStore.getState().setMuted(true);
+    useLiveStore.getState().clearCurrent();
+    // 退房不清端语义与投影：端语义由 runtime 在 leave/enter 显式管理
+    expect(useLiveStore.getState().mutedOwner).toBe(true);
+    expect(useLiveStore.getState().muted).toBe(true);
+
+    useLiveStore.getState().reset();
+    // 重置后没有会话 ⇒ 端语义回到缺省的观众端，投影回到观众端已存偏好
+    expect(useLiveStore.getState().mutedOwner).toBe(false);
     expect(useLiveStore.getState().muted).toBe(false);
   });
 

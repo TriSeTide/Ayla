@@ -110,11 +110,16 @@ export function LiveRoomBody({
   }, [isNarrowProp]);
   const isNarrow = isFullscreen ? frozenNarrowRef.current : isNarrowProp;
 
+  // isOwnerConsole 决定静音偏好走哪一端（开播控制台缺省静音 / 观众端缺省有声）：
+  // 它随 current.channel 在进房瞬间被 clearCurrent 清空而翻转，所以不能进 useLiveRoom
+  // 的 effect deps（c78c27f 的 enter/leave 死循环）。进房时先按当前已知的端语义建立会话，
+  // 加载完成/切换端后由下面的 effect 单向通知 runtime 重新应用偏好。
+  const isOwnerConsole = showOwnerPanel && Boolean(channel?.is_owner);
   const { loading, error, playerError, retryPlayer, refreshPlayer, videoRef } = useLiveRoom(channelId, {
     activityRoute,
     keepLiveActivity,
     isNarrow,
-    isOwnerConsole: showOwnerPanel,
+    isOwnerConsole,
   });
   const { danmaku, sending, sendOwner, sendError, send, listRef, hasNewBelow, scrollToBottom, handleListScroll, history } =
     useDanmaku(channelId);
