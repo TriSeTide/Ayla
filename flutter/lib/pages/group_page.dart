@@ -46,6 +46,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api/chat_api.dart';
+import '../core/app_init.dart' show AppInit, AppInitStatus;
 import '../core/api/directory_page.dart' show AylaDirectoryPage;
 import '../core/api/live_api.dart';
 import '../core/api/voice_api.dart';
@@ -249,6 +250,20 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   String? _syncedGroupId;
   AylaGroupScene? _syncedScene;
 
+  /// 宽屏**第一列（群头像侧栏）本次是否播入场** —— 判定与生命周期边界见本文件末「宽屏第一列入场 owner」长注释。
+  ///
+  /// 取值时机固定为「本 State 挂载那一帧」（[initState] 记录，[build] 读）：
+  /// 挂载 = 进入主页 ⇒ true（播）；同一页面内切群 / 切场景只走 `didUpdateWidget`、
+  /// State 被复用 ⇒ 保持原值（已播完，不重播）。
+  ///
+  /// ⚠️ **不要改成「每次 build 都重新判定」**：`build` 在一帧内可能跑多次
+  /// （LayoutBuilder / 依赖变化）⇒ 判定会被自己吃掉，连首帧都拿不到入场
+  /// （历史实现踩过，`server_rail_test` 的入场用例就是这么红的）。
+  bool _railEntrance = false;
+
+  /// 预加载门打开后要执行的回调（见 [_armRailEntrance]）。
+  VoidCallback? _gateListener;
+
   // ---- 窄屏手势状态 ----
   bool _entered = false;
   bool _leaving = false;
@@ -284,8 +299,35 @@ class _GroupPageState extends ConsumerState<GroupPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() => _entered = true);
     });
+    // 宽屏第一列的入场边界：**本 State 挂载 = 一次「进入主页」**（见本文件末「宽屏第一列入场 owner」长注释）。
+    // 冷启动时若全屏预加载门正盖着（`layout/app_gate.dart` 的 Offstage），
+    // 入场会在看不见的时候跑完 ⇒ 改为「门开那一帧再播」。
+    _armRailEntrance();
     // 返回键接管登记（见文件末 [aylaGroupBackHandler] 的机制说明）。
     aylaGroupBackHandler = _handleSystemBack;
+  }
+
+  /// 抬起第一列的入场标志（详见本文件末「宽屏第一列入场 owner」长注释）。
+  ///
+  /// - 门没盖着（常态）⇒ 立刻置 true，本帧就播；
+  /// - 门盖着（冷启动预加载中）⇒ 先记「欠一次」，等 `AppInit` 离开 loading 再生产
+  ///   （门打开那一帧路由子树才开始被绘制，此刻入场对用户才可见）。
+  void _armRailEntrance() {
+    if (AppInit.instance.status != AppInitStatus.loading) {
+      _railEntrance = true;
+      return;
+    }
+    void onGateOpened() {
+      if (AppInit.instance.status == AppInitStatus.loading) return;
+      AppInit.instance.removeListener(onGateOpened);
+      _gateListener = null;
+      if (!mounted) return;
+      setState(() => _railEntrance = true);
+    }
+    // 门的状态用 `AppInit.instance` 的 listenable 消费：状态一旦离开 loading，
+    // 说明路由子树即将被绘制 ⇒ 此刻抬起标志即与用户可见的第一帧同步。
+    AppInit.instance.addListener(onGateOpened);
+    _gateListener = onGateOpened;
   }
 
   @override
@@ -429,6 +471,11 @@ class _GroupPageState extends ConsumerState<GroupPage> {
     // 且新页的 initState 总在旧页 dispose **之前**跑不到（切群是同实例 didUpdateWidget，
     // 不重建 State）。⇒ 不存在「旧页清掉新页登记」的窗口。
     if (aylaGroupBackHandler != null) aylaGroupBackHandler = null;
+    final VoidCallback? gateListener = _gateListener;
+    if (gateListener != null) {
+      AppInit.instance.removeListener(gateListener);
+      _gateListener = null;
+    }
     _leaveTimer?.cancel();
     _resetTimer?.cancel();
     _dragResetTimer?.cancel();
@@ -884,6 +931,8 @@ class _GroupPageState extends ConsumerState<GroupPage> {
               // 且它自己 catch 了异常（web 的静默语义在组件里已有第二道保障）。
               onTogglePin: (String id, bool pinned) =>
                   aylaToggleConversationPin(chat, id, pinned),
+              // 第一列入场 owner = **本页 State 生命周期**（见 [_railEntrance]）。
+              animateEntrance: _railEntrance,
             ),
             AylaChannelSidebar(
               groupId: widget.groupId,
@@ -1637,3 +1686,48 @@ typedef AylaGroupBackHandler = Future<bool> Function();
 /// ⚠️ 只能是**单实例**：路由保证同一时刻最多一个 GroupPage（5 条群路由共用
 /// `kAylaGroupShellPageKey`，见 `router/app_router.dart:91`）。
 AylaGroupBackHandler? aylaGroupBackHandler;
+
+/// ## 宽屏第一列入场 owner 的**事实源与生命周期边界**（与 `_GroupPageState._railEntrance` 配对）
+///
+/// ### 一、web 的两层 owner（design.md §12.3 的原文要求）
+///
+/// > 宽屏切换群时…ServerRail owner…不重挂…首次进入主页的左移入场与同一主页内切群
+/// > 须由不同生命周期边界控制，避免第一列反复滑入。
+///
+/// 1. `ServerRail.tsx:90–99` 的 `motion.nav`：`initial={reduced ? false : "enter"}`
+///    ⇒ 只在**它自己被挂载**时播 `panelVariants(reduced,'left')`
+///    （x −20 → 0 + opacity 0 → 1，300ms easeInOut）；
+/// 2. `PageTransition.tsx:56–60` 的 `resolvePageKey`：`/group/*` 全部归一成
+///    **`wide-group-shell`** 作 page key ⇒ `/group/a → /group/b`（切群）、
+///    `/group/a → /group/a/voice`（切场景）**不换 key**，React 复用同一个 `GroupPage`；
+///    只有**离开主页再进来**才换 key ⇒ 重挂 ⇒ 重播。
+///
+/// ### 二、Flutter 侧的等价边界
+///
+/// 5 条群路由共用 `kAylaGroupShellPageKey`（`router/app_router.dart`），切群 / 切场景
+/// 复用同一个 `GroupPage` State ⇒ **「进入主页」= GroupPage 的 State 被新建**。
+/// 于是页面在 `initState` 记录、`build` 读、下传给第一列即可，见 `_railEntrance`。
+///
+/// ### 三、为什么废弃「组件自己记一个模块级已播标记」（本文件历史实现）
+///
+/// 那样在**离开主页再回来**时也不播了 —— 而 web 是会播的（外壳被重新挂载）。
+/// 用户先后两次实报的正是这两个极端：「每次渲染都播」与「切走再回来没动画」；
+/// 正确边界只有**本 State 的挂载**这一个。
+///
+/// ### 四、与预加载门的关系（同轮修复，实测证据）
+///
+/// 冷启动时 `layout/app_gate.dart` 把路由子树 `Offstage` 起来 ——
+/// **Offstage 不绘制，但动画照跑**（`Offstage` 文档原文：
+/// “Animations continue to run in offstage children”）。
+/// ⇒ 入场会在用户看不见的时候跑完，首次进主页时侧栏是**静止**的。
+/// 实测（本机 Flutter 3.47.4，1440×900 真实路由 + 真实 `AylaAppGate`）：
+///
+/// ```text
+/// GATE-0:      reveal=1 glassLeft=-8.0    ← 门关着，入场已在跑
+/// GATE-640ms:  reveal=1 glassLeft=12.0    ← 门还关着，入场已跑完
+/// OPEN-0..7:   reveal=1 glassLeft=12.0    ← 门打开，用户看到的是终态（无动画）
+/// ```
+///
+/// 修法：`initState` 时若门正盖着（`AppInit.status == loading`），**先不抬起**标志，
+/// 挂 `AppInit` 监听，等它离开 loading（门打开那一帧）再 `setState` 抬起
+/// ⇒ 入场对用户可见（实测开门后逐帧 `-8.0 → -7.9 → -7.5 → … → 12.0`）。

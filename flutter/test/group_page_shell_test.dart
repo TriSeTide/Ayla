@@ -110,10 +110,9 @@ double contentAreaOpacity(WidgetTester tester) {
 // 里的 `Transform` 仍在，位移判据不受影响）。
 
 void main() {
-  // ⚠️ 服务器列（左侧群头像列）入场是**每个 app 会话只播一次**（kAylaServerRailEntered）——
-  // web 宽屏给 .server-rail 写了 animation: none（auroraqua.css:293 + 310–313），
-  // 由 motion 按 owner 编排。用例间必须重置，否则「第二列入场」类断言会串味。
-  setUp(() => kAylaServerRailEntered = false);
+  // 第一列入场的 owner 是 **GroupPage 的 State 生命周期**（`_railEntrance`，
+  // 见 `group_page.dart` 文件末「宽屏第一列入场 owner」长注释）；组件层已无模块级
+  // 状态 ⇒ 用例之间不需要复位（历史实现里的 `kAylaServerRailEntered` 已删除）。
   group('宽屏：切群保留壳与侧栏（实报 ①）', () {
     testWidgets('整条外壳链（AppShell→TopNav→GroupPage→两列侧栏）的 State 跨群不重建', (
       WidgetTester tester,

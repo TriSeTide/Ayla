@@ -93,9 +93,11 @@ class AylaServerRailGroup {
 ///
 /// **高度由父约束**（宽屏三列 shell 的一行拉伸；web 同为 flex 行内 flex:none），
 /// 内部列表自持滚动。GroupPage.tsx:409–414 是 web 的装配点。
-/// 本 app 会话内服务器列是否已经播过入场（见 [AylaServerRail] 的 `animateEntrance` 分支）。
-bool kAylaServerRailEntered = false;
-
+///
+/// ## 入场 owner：**页面（GroupPage）**，不是本件
+///
+/// 见 [AylaServerRail.animateEntrance] 的文档 —— 本件只负责「按传入的开关播/不播」，
+/// 「什么时候该播」由持有宽屏三列 shell 的页面决定。
 class AylaServerRail extends StatefulWidget {
   const AylaServerRail({
     super.key,
@@ -147,7 +149,33 @@ class AylaServerRail extends StatefulWidget {
   /// 加载中数据被更新（触发自动刷新）。
   final bool invalidated;
 
-  /// 是否播放入场（panelVariants(reduced,'left')）。
+  /// 本次是否播**入场**（web `panelVariants(reduced,'left')`）。
+  ///
+  /// 语义是 **replay 开关**（不是「只给首帧用」）：从 false 翻到 true 的那一刻播一次，
+  /// 之后保持 true 不重播；由 false 变回 false 不动作。
+  ///
+  /// ## 为什么由页面传、本件不自持状态（2026-11-02 用户实报「每次进主页都滑入」）
+  ///
+  /// web 事实源（`auroraqua.css:293` 的 `@media (min-width:769px)` 内 `310–313`）：
+  ///
+  /// ```css
+  /// /* 宽屏进入/切群由React motion按各自owner编排，避免叠加CSS整列入场。 */
+  /// .server-rail, .channel-sidebar, .wide-messages-sidebar { animation: none; }
+  /// ```
+  ///
+  /// ⇒ 入场**不是 CSS 的「挂载即播」**，而是 `ServerRail.tsx:90–99` 的 `motion.nav`
+  /// 按 `initial={reduced ? false : "enter"} animate="center"` 播一次。
+  /// 这个 owner 的生命周期边界 = **宽屏群工作区外壳**：
+  /// `PageTransition.tsx:56–60` 把 `/group/*` 归一成 `wide-group-shell` 作 page key
+  /// ⇒ 只有**首次进入主页**（或离开主页后再进来）才会挂载这个 owner；
+  /// 主页内**切群 / 切场景**只换 prop，owner 不重挂 ⇒ 第一列**不该滑入**（design.md §12.3
+  /// 原话：「首次进入主页的左移入场与同一主页内切群须由不同生命周期边界控制，
+  /// 避免第一列反复滑入」）。
+  ///
+  /// Flutter 侧的等价边界见 `pages/group_page.dart` 的 `kAylaGroupPageEntered`：
+  /// 判定在 **GroupPage 的 State 生命周期**上做（挂载=进主页 ⇒ 播；切群/切场景=复用 State ⇒ 不播），
+  /// 本件只按传入值渲染。**不要**改回「本件自己记一个模块级标记」——
+  /// 那样「离开主页再回来」也不会播了（web 那里是会播的，因为外壳被重新挂载）。
   final bool animateEntrance;
 
   /// **只用于预览/画布样张**：强制显示某个群的悬停面板（无鼠标事件）。
@@ -259,26 +287,50 @@ class _AylaServerRailState extends State<AylaServerRail> {
   /// 已测量的选中 id（避免重复 setState）。
   String? _indicatorId;
 
-  /// 本次挂载是否播入场（见 [initState] 的判定）。
-  bool _enter = false;
+  /// 入场动画的**重播代号**（每次该播入场就 +1）。
+  ///
+  /// ## 为什么需要「代号」而不是一个 bool（2026-11-02 用户实报）
+  ///
+  /// `AylaRevealItem` 只在自己**被新建**时才播入场（`initState` → `_startEntry`）；
+  /// 同一个 widget 实例被复用时它不会再播。而这里「该不该播」是**页面传下来的开合位**
+  /// （[AylaServerRail.animateEntrance]），它可能在**本件 State 已经存在**的同一时刻
+  /// 由 false 翻成 true（例：主页外壳被复用、但工作区被要求重播入场）。
+  /// ⇒ 光靠 bool 无法把「请再播一次」表达给已经存在的 `AylaRevealItem`
+  /// ⇒ 用 `ValueKey(代号)` 换掉它（**只重挂入场层，不重挂列本身**：
+  /// 列表滚动位置、悬停面板、指示条测量全在 [State] 上，不受影响）。
+  int _enterTick = 0;
+
+  /// 是否已按当前 [AylaServerRail.animateEntrance] 播过（防每帧重播）。
+  bool _enterPlayed = false;
 
   @override
   void initState() {
     super.initState();
-    // ⚠️ **判定必须放 initState，不能放 build**：build 在一帧内可能跑多次
-    //（LayoutBuilder / 依赖变化）⇒ 放 build 里会在第一次 build 就把模块级标记吃掉，
-    // 结果「首帧」也拿不到入场（实测就是这么红的）。
-    if (widget.animateEntrance && !kAylaServerRailEntered) {
-      kAylaServerRailEntered = true;
-      _enter = true;
-    }
+    _syncEnter();
     _syncKeys();
     _scheduleLayoutSync();
+  }
+
+  /// 依据 [AylaServerRail.animateEntrance] 决定是否（重新）播入场。
+  ///
+  /// 语义见该参数的文档：**false → true 的那一刻播一次**，true 期间不重播。
+  void _syncEnter() {
+    if (!widget.animateEntrance) {
+      _enterPlayed = false; // 复位：下一次翻 true 时再播
+      return;
+    }
+    if (_enterPlayed) return;
+    _enterPlayed = true;
+    _enterTick += 1;
+    // 无需 setState：`_syncEnter()` 由 `initState` / `didUpdateWidget` 调用，
+    // 而 `Element.update` 在 `didUpdateWidget` 之后**紧接着**就会跑本件 build
+    // ⇒ 本帧读到的一定是推进后的 [_enterPlayed] / [_enterTick]。
   }
 
   @override
   void didUpdateWidget(covariant AylaServerRail oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _syncEnter();
     _syncKeys();
     // ⚠️ **必须按 id 序列比较，不能只比长度**（2026-10-02 用户实报：
     // 「重新排序后那个导航条没跟上去，还停留在原位置」）。
@@ -453,6 +505,10 @@ class _AylaServerRailState extends State<AylaServerRail> {
     }
   }
 
+  /// reduced-motion（web `usePrefersReducedMotion`）：`initial={reduced ? false : "enter"}`
+  /// ⇒ 直接到终态、**不挂**入场层。
+  bool get _reduceMotion => MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+
   @override
   Widget build(BuildContext context) {
     Widget rail = Padding(
@@ -470,17 +526,14 @@ class _AylaServerRailState extends State<AylaServerRail> {
       ),
     );
 
-    // ⚠️ **每个 app 会话只播一次**（2026-10-01 用户实报：「每次进入主页都要加载群头像侧栏，
-    // 这个动画肯定有问题」）。web 事实源：`auroraqua.css:293` 的 `@media (min-width: 769px)`
-    // 内给 `.server-rail` / `.channel-sidebar` 写了 **`animation: none`**
-    //（原文注释：「宽屏进入/切群由 React motion 按各自 owner 编排，避免叠加 CSS 整列入场」）
-    // ⇒ **只在「进入 / 切群」时播，不是每次渲染**。Flutter 的 `AylaRevealItem` 是
-    //「每次挂载都播」⇒ 切到语音/直播再切回主页，左侧列又滑入一次 = 用户看到的「每次都要加载」。
-    // 服务器列展示的是**全部群**、不随 groupId 变化 ⇒ 这里按「会话内是否已播过」判断。
-    if (_enter) {
+    // 入场**开关由调用方给**（[AylaServerRail.animateEntrance] 的长注释说明了 owner 边界）。
+    // ⚠️ key 必须带 [_enterTick]：`AylaRevealItem` 只在**新建**时播入场，
+    // 复用同一实例时「再播一次」的请求会被它静默忽略（见 [_enterTick] 的注释）。
+    if (_enterPlayed && !_reduceMotion) {
       // panelVariants(reduced, "left")（auroraquaMotion.ts 37–51）：
       // x −20 → 0 + opacity 0 → 1，duration 0.3 easeInOut。
       rail = AylaRevealItem(
+        key: ValueKey<int>(_enterTick),
         fadeGlass: false,
         offset: const Offset(-AylaRevealMotion.distance, 0),
         duration: AylaDurations.auroraqua,
@@ -904,20 +957,42 @@ class _ServerRailDemoState extends State<_ServerRailDemo> {
   /// 当前群（点行切换 → 指示条迁移；两个样张共享同一状态，便于左右对照）。
   String _currentId = 'g1';
 
+  /// 第一列的入场开关（`AylaServerRail.animateEntrance` 是 **replay 开关**：
+  /// false → true 的那一刻播一次）。样张里由「重播入场」按钮驱动，
+  /// 复刻真实页面的两种时机：进入主页（播）／切群（不播）。
+  bool _entrance = false;
+
+  /// 重播一次入场：先落回 false 复位，下一帧再抬 true ⇒ 本件换 key 重挂入场层。
+  void _replayEntrance() {
+    setState(() => _entrance = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _entrance = true);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        _rail('常态（点行切群 · 滚动看上下渐隐）'),
+        _rail(
+          '常态（点行切群 · 滚动看上下渐隐）',
+          entrance: _entrance,
+          onReplay: _replayEntrance,
+        ),
         const SizedBox(width: AylaSpacing.sp8),
         _rail('悬停面板形态（静态注入 .server-pop）', hovered: 'g3'),
       ],
     );
   }
 
-  Widget _rail(String label, {String? hovered}) {
+  Widget _rail(
+    String label, {
+    String? hovered,
+    bool entrance = false,
+    VoidCallback? onReplay,
+  }) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
@@ -926,12 +1001,14 @@ class _ServerRailDemoState extends State<_ServerRailDemo> {
           child: AylaServerRail(
             groups: _groups,
             currentGroupId: _currentId,
-            // 点行 → 切群（画布审核用；真实回调由页面层接）
+            // 点行 → 切群（画布审核用；真实回调由页面层接）。
+            // ⚠️ 切群**不重播**入场 = web 语义（第一列是选项卡，motion owner 不重挂），
+            // 所以这里只动 `_currentId`，不碰 `_entrance`。
             onSelectGroup: (String id) => setState(() => _currentId = id),
             onCreateGroup: _createNoop,
             loadMore: _loadNoop,
             refresh: _loadNoop,
-            animateEntrance: false,
+            animateEntrance: entrance,
             previewHoveredGroupId: hovered,
           ),
         ),
@@ -946,6 +1023,10 @@ class _ServerRailDemoState extends State<_ServerRailDemo> {
             ),
           ),
         ),
+        if (onReplay != null) ...<Widget>[
+          const SizedBox(height: AylaSpacing.sp2),
+          AylaGlassButton(label: '重播入场', minHeight: 32, onPressed: onReplay),
+        ],
       ],
     );
   }

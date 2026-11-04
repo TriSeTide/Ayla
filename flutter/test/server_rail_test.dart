@@ -39,10 +39,9 @@ const List<AylaServerRailGroup> kGroups = <AylaServerRailGroup>[
 ];
 
 void main() {
-  // ⚠️ 服务器列入场是**每个 app 会话只播一次**（`kAylaServerRailEntered`，见
-  // `server_rail.dart` 的注释：web 宽屏 `animation: none`、由 motion 按 owner 编排）
-  // ⇒ 用例间必须重置这个模块级标记，否则后面的用例拿不到入场。
-  setUp(() => kAylaServerRailEntered = false);
+  // 入场是**调用方给的开关**（`animateEntrance`），本件不持有任何模块级状态
+  // ⇒ 用例之间无需复位（历史实现里的 `kAylaServerRailEntered` 已随 2026-11-02
+  // 的 owner 迁移删除，见 `server_rail.dart` 的 `animateEntrance` 文档）。
   String? selected;
   int createTaps = 0;
   String? pinnedId;
@@ -419,12 +418,45 @@ void main() {
     expect(find.byType(AylaRevealItem), findsNothing);
   });
 
+  /// ⚠️ `AylaRevealItem` **只在被新建时**播入场；复用同一实例时「再播一次」
+  /// 会被它静默忽略 ⇒ 本件用 `_enterTick` 换 key 表达重播（见 `server_rail.dart`）。
+  /// 这条锁住「开关 false→true 必须重播」与「true 期间不重播」。
+  ///
+  /// ⚠️ 宿主必须自己 setState 改 prop：`pumpWidget` 对同一个 `MaterialApp`
+  /// **不会**重建 `home:` 路由（实测 `widget.animateEntrance` 仍是旧值），
+  /// 那样写出来的用例是假绿。
+  testWidgets('入场：animateEntrance false→true 重播一次；true 期间不重播', (
+    WidgetTester tester,
+  ) async {
+    final GlobalKey<_RailToggleBodyState> key = GlobalKey<_RailToggleBodyState>();
+    await tester.pumpWidget(_EntranceToggle(animate: false, bodyKey: key));
+    await tester.pumpAndSettle();
+    expect(find.byType(AylaRevealItem), findsNothing);
+
+    key.currentState!.arm();
+    await tester.pump();
+    final Finder reveals = find.byType(AylaRevealItem);
+    expect(reveals, findsOneWidget, reason: '抬起开关必须把入场层挂上');
+    final AylaRevealItem fired = tester.widget(reveals);
+    expect(fired.offset.dx, -20);
+    expect(fired.duration, AylaDurations.auroraqua);
+    expect(fired.curve, AylaCurves.auroraquaEaseInOut);
+    final Key? firedKey = fired.key;
+
+    // true 期间再触发若干次重建：key 不得变（换 key = 入场重来一次）。
+    await tester.pumpAndSettle();
+    key.currentState!.rebuild();
+    await tester.pump();
+    expect(
+      tester.widget(reveals).key,
+      firedKey,
+      reason: 'true 期间不得重播（换 key 会让入场再来一次）',
+    );
+  });
+
   testWidgets('入场：animateEntrance=true → 左入 -20 / 300ms easeInOut', (
     WidgetTester tester,
   ) async {
-    // ⚠️ 入场是**每个 app 会话只播一次**（`kAylaServerRailEntered`）⇒ 用例内显式复位，
-    // 否则同文件前序用例的挂载会把这个标记置位（`setUp` 之外的双保险）。
-    kAylaServerRailEntered = false;
     await tester.pumpWidget(host(animateEntrance: true));
     await tester.pump();
     final AylaRevealItem reveal = tester.widget(find.byType(AylaRevealItem));
@@ -433,9 +465,85 @@ void main() {
     expect(reveal.curve, AylaCurves.auroraquaEaseInOut);
   });
 
+
   testWidgets('无选中群时不画指示条', (WidgetTester tester) async {
     await tester.pumpWidget(host(currentGroupId: null));
     await tester.pumpAndSettle();
     expect(find.byType(AylaNavHighlight), findsNothing);
   });
+}
+
+/// 入场开关的**可切换宿主**（「false→true 重播」用例用）。
+///
+/// ⚠️ 两层结构**都是必须的**：
+/// - `MaterialApp` 只建一次，`home:` 里放的是下面那个 **StatefulWidget** ———
+///   `MaterialApp` 的 `home` 会被包进**一次性的 route builder**，随后台壳层
+///   setState 再传新 `home` **不会**更新已存在的路由子树
+///   （实测：宿主 `animate=false` 已重建，而 `tester.widget<AylaServerRail>().animateEntrance`
+///   仍是旧值 ⇒ 用例会假绿）。
+/// - 开关必须落在 route 内部的有状态件上，才能真正驱动本组件的 `didUpdateWidget`。
+class _EntranceToggle extends StatefulWidget {
+  const _EntranceToggle({super.key, required this.animate, required this.bodyKey});
+
+  final bool animate;
+
+  /// 挂在 route **内部**那个可切换板上的 key（宿主类自己是被 route 包住的，拿不到 State）。
+  final GlobalKey<_RailToggleBodyState> bodyKey;
+
+  @override
+  State<_EntranceToggle> createState() => _EntranceToggleState();
+}
+
+class _EntranceToggleState extends State<_EntranceToggle> {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: previewScope(
+        _RailToggleBody(key: widget.bodyKey, animate: widget.animate),
+      ),
+    );
+  }
+}
+
+/// route 内部的可切换板（[GlobalKey] 就挂在它上面）。
+class _RailToggleBody extends StatefulWidget {
+  const _RailToggleBody({super.key, required this.animate});
+
+  final bool animate;
+
+  @override
+  State<_RailToggleBody> createState() => _RailToggleBodyState();
+}
+
+class _RailToggleBodyState extends State<_RailToggleBody> {
+  late bool _animate = widget.animate;
+
+  /// 抬起入场开关（= 页面把 `_railEntrance` 由 false 翻成 true）。
+  void arm() => setState(() => _animate = true);
+
+  /// 纯重建（开关不变），验证 true 期间不重播。
+  void rebuild() => setState(() {});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: <Widget>[
+        Positioned(
+          left: 0,
+          top: 0,
+          height: 480,
+          width: 200,
+          child: AylaServerRail(
+            groups: kGroups,
+            currentGroupId: 'g1',
+            onSelectGroup: (String id) {},
+            onCreateGroup: () {},
+            loadMore: () async {},
+            refresh: () async {},
+            animateEntrance: _animate,
+          ),
+        ),
+      ],
+    );
+  }
 }

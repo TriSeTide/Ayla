@@ -1125,9 +1125,9 @@ class _ComponentGalleryState extends State<ComponentGallery> {
               title:
                   'AylaServerRail（layout/ServerRail.tsx 1–184 + group.css 484–678 + auroraqua.css 216 / 217–229 / 270 / 311–313 / 125–138）',
               source:
-                  '宽屏服务器列 72px：--glass-bg + blur24 sat1.4 + 1px 亮边 + --glass-shadow + radius-card 16 · 外距 12/0/12/12（auroraqua 270 覆写右 0）· 内 1px 占位（CSS border 占布局、Flutter 不占）· 列表 padding 20/77 + 行距 12 + clip-path 15 + 上 20/下 16 mask 渐隐 · 群头像 48 + 光环（选中 scale 52/48 · 180ms）· 选中指示条 3×32 --glow-500（group.css 的 ::before 版被 auroraqua 216 关掉，实际用 --rail 变体）· 未读 = 消息 + 帖子（左下角 -3/-3、99+ 截断、.server-item-badge 档）· 置顶 pin 左上 -6/-4 45° 粉 · 状态角标（直播/语音/桌游，右上竖列）· 悬停行 → 180ms 后展开置顶面板（行右缘 +2、垂直居中；浮层走 Overlay，否则溢出区收不到指针）· 底部 53 加号复用 AylaIconButton · 入场 panelVariants(left) 左入 20 / 300ms easeInOut · **滚动条已关**（web base.css 372–383 全局隐藏原生滚动条；自绘覆盖层条属 §B6 OverlayScrollbar）· **9 个群超出列高** → 可滚动，验收上 20 / 下 16 渐隐与「底部 77 让位悬浮加号」',
+                  '宽屏服务器列 72px：--glass-bg + blur24 sat1.4 + 1px 亮边 + --glass-shadow + radius-card 16 · 外距 12/0/12/12（auroraqua 270 覆写右 0）· 内 1px 占位（CSS border 占布局、Flutter 不占）· 列表 padding 20/77 + 行距 12 + clip-path 15 + 上 20/下 16 mask 渐隐 · 群头像 48 + 光环（选中 scale 52/48 · 180ms）· 选中指示条 3×32 --glow-500（group.css 的 ::before 版被 auroraqua 216 关掉，实际用 --rail 变体）· 未读 = 消息 + 帖子（左下角 -3/-3、99+ 截断、.server-item-badge 档）· 置顶 pin 左上 -6/-4 45° 粉 · 状态角标（直播/语音/桌游，右上竖列）· 悬停行 → 180ms 后展开置顶面板（行右缘 +2、垂直居中；浮层走 Overlay，否则溢出区收不到指针）· 底部 53 加号复用 AylaIconButton · **入场 panelVariants(left) 左入 20 / 300ms easeInOut**（开关 animateEntrance 由页面给：进入主页播、切群不播，见 docs/flutter/44）· **滚动条已关**（web base.css 372–383 全局隐藏原生滚动条；自绘覆盖层条属 §B6 OverlayScrollbar）· **9 个群超出列高** → 可滚动，验收上 20 / 下 16 渐隐与「底部 77 让位悬浮加号」',
               child:
-                  aylaServerRailSamples(), // 可交互：点行切群看指示条 300ms 迁移 / 悬停头像看置顶面板 / 滚轮看上下渐隐
+                  aylaServerRailSamples(), // 可交互：点行切群看指示条 300ms 迁移（切群**不重播**入场）/ 点「重播入场」看左入 20 · 300ms / 悬停头像看置顶面板 / 滚轮看上下渐隐
             ),
             const SizedBox(height: AylaSpacing.sp6),
 
