@@ -177,6 +177,15 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
     chat: ref.read(chatWsProvider),
     // 点回直播间（小窗主体）的导航目标（web `LiveStudioPage.tsx:148`）。
     activityRoute: '/live/start/$channelId',
+    // 开播控制台语义（web `useLiveRoom` 的 `isOwnerConsole: showOwnerPanel`）：
+    // 决定静音偏好读/写**开播端**那一套键（`ayla.live.owner.muted`，缺省静音）。
+    // 用户 2026-11-04：「web 和 Flutter 的开播界面，默认把声音关闭」。
+    //
+    // ⚠️ 这里给 `true` 是**页面类型**的判定（本页就是开播控制台），而不是
+    // `channel.is_owner`：后者要等详情回来才知道（本方法在 initState 里跑），
+    // 等它到位后由 [build] 的 `session.setMuteOwner(isOwner)` 收敛（web 同：
+    // `showOwnerPanel = Boolean(channel?.is_owner)` 也是后到的）。
+    isOwnerConsole: true,
     // 活动态索引的两个注入点（web 读 `useAuthStore.getState()`）：当前用户 id 决定
     // 「本会话是否为主播自己的会话」（`tracksOwnerActivity`），媒体活动位写在会话启停处。
     currentUserId: () => ref.read(authNotifierProvider).user?.id,
@@ -461,6 +470,14 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
     final bool isOwner = channel?.isOwner ?? false;
     _narrow = narrow; // dispose 的视图分离判定（见字段注释）
     _ownerConsole = isOwner;
+    // 端语义收敛（web `applyMutedOwner(isOwnerConsole)`）：`isOwner` 要等频道详情回来
+    // 才知道，会话却在 initState 就建好了 ⇒ 这里在每次 build 里对齐一次（幂等：端语义
+    // 没变时是 no-op，不会把用户刚点的静音翻回去）。
+    //
+    // ⚠️ **必须等 channel 到位才切**：`isOwner` 的缺省是 false，若在详情回来之前就
+    // 按它切端语义，控制台会先按观众端（有声）响一下、详情到了再切回静音 —— 那一下
+    // 正是用户要避免的「自己的回授」。channel == null ⇒ 保持构造函数给的「控制台」语义。
+    if (channel != null) unawaited(session.setMuteOwner(isOwner));
     final AylaPagedList<AylaDirectoryLiveEntry>? directory = _directory;
     final bool listEmpty = directory != null &&
         directory.loaded &&
@@ -560,6 +577,11 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
       deletingChannelId: _deletingId,
       onRetryPlayer: () => unawaited(session.retryPlayer()),
       onRefreshPlayer: () => unawaited(session.refreshPlayer()),
+      // 音量键：开播控制台缺省**静音**（用户 2026-11-04：「开播界面默认把声音关闭」），
+      // 偏好键与观众端分开（`ayla.live.owner.muted`）—— 主播在自己控制台静音不能让他
+      // 去看别人直播时也没声音。静音状态由会话层持有，本页只读投影 + 交回点击。
+      muted: session.muted,
+      onToggleMute: () => unawaited(session.toggleMuted()),
       // 「小窗」键：只在桌面端渲染（同 `live_room_page.dart` 的说明）。
       onEnterMiniPlayer: aylaDetachedLivePlatformSupported &&
               defaultTargetPlatform == TargetPlatform.windows

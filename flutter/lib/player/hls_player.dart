@@ -104,6 +104,17 @@ abstract class HlsPlatformPlayer {
   /// 视频渲染视图（无画面需求的场景返回 null，如纯音频链路）。
   Widget? buildView();
 
+  /// 设置静音 / 取消静音（= web 的 video.muted）。
+  ///
+  /// ## 为什么是**必填**成员而不是可选能力接口
+  /// 音量不是「有就用」的增强：任何平台播放器都有音量，漏实现就等于直播永远满音量。
+  /// 所以这里定成抽象成员，平台实现必须给出明确落地
+  /// （Windows = mpv 音量 0/100；Android/iOS = 0.0/1.0）。
+  ///
+  /// 实现纪律：**不得抛异常**。静音只是「没生效」，不能让它打断挂载与起播
+  /// （画面优先于声音，与 [HlsPlaybackController] 的自愈状态机同一条优先级）。
+  Future<void> setMuted(bool muted);
+
   /// 销毁（幂等）。
   Future<void> dispose();
 }
@@ -174,6 +185,29 @@ class HlsPlaybackController {
     return null;
   }
 
+  /// 当前是否静音（控制器记住的偏好状态；见 [_muted]）。
+  bool get isMuted => _muted;
+
+  /// 设置静音 / 取消静音，并**记住**该状态。
+  ///
+  /// 幂等：重复设同一个值仍会重新下发一次 —— 平台实例可能刚被重建、或上一次下发
+  /// 时实例还没建好，重复下发是唯一能自愈的写法，代价只是一次属性写。
+  /// 不抛异常（[HlsPlatformPlayer.setMuted] 的契约）：静音失败不能让播放链路崩。
+  Future<void> setMuted(bool muted) async {
+    _muted = muted;
+    final HlsPlatformPlayer? p = _player;
+    if (p == null) return;
+    try {
+      await p.setMuted(muted);
+    } catch (e) {
+      // 平台实例已释放 / 属性不可写 ⇒ 只记日志：静音是「没生效」，不是播放失败。
+      _log('下发静音失败（$muted）：$e');
+    }
+  }
+
+  /// 切换静音（音量键的语义）。
+  Future<void> toggleMuted() => setMuted(!_muted);
+
   String? _lastPositionKey; // 上一次 position 快照（自愈判定用）
   Timer? _stallTimer;
   DateTime _lastRebuildAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -200,6 +234,17 @@ class HlsPlaybackController {
 
   /// 本次挂载是否已真正出过画面（位置前进过）。
   bool _started = false;
+
+  /// 当前是否静音（**控制器记住的状态**，不是平台播放器的瞬时值）。
+  ///
+  /// ## 为什么必须由控制器持有（2026-11-04 需求的关键点）
+  /// 自愈重建（[rebuild]）与每次 [attach] 都会 **new 一个平台播放器**
+  /// （`_makePlatform()`），新实例的音量是平台默认值（mpv 100 / video_player 1.0）
+  /// ⇒ 只要不同步重新下发，**重建一次就恢复满音量**：用户明明静音了，画面黑一下
+  /// 自愈之后声音又炸出来。所以状态记在这里，[attach] 里每建好一个实例就立刻回放。
+  ///
+  /// 默认 `false`（不静音）：平台播放器自身的默认态就是有声，控制器不必额外下发一次。
+  bool _muted = false;
 
   /// 平台播放器实例是否**健康**（B3）。
   ///
@@ -260,6 +305,11 @@ class HlsPlaybackController {
     p.onPosition = _onPlatformPosition;
     try {
       await p.attach(url);
+      // ⚠️ **每次 attach 之后必须重新下发静音**（2026-11-04 需求的关键点）：
+      // `_makePlatform()` 每次都是**新的平台播放器**，音量回到平台默认（有声）。
+      // 自愈重建走 [rebuild] → [attach]，同样经过这里 ⇒ 一处下发覆盖所有重建路径。
+      // 放在 play() 之前：先静音再出声，避免重建后有一瞬间满音量的声音漏出来。
+      if (_muted) await setMuted(true);
       await p.play();
     } catch (e) {
       _events.onError?.call('播放器挂载失败: $e');

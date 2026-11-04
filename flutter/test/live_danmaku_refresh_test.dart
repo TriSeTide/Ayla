@@ -60,6 +60,9 @@ class _FakePlatformPlayer implements HlsPlatformPlayer {
   @override
   Widget? buildView() => const ColoredBox(color: Color(0xFF2A3550));
   @override
+  Future<void> setMuted(bool muted) async {}
+
+  @override
   Future<void> dispose() async {}
 }
 

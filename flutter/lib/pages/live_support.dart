@@ -169,7 +169,13 @@ class AylaLiveRoomSession extends ChangeNotifier {
         onMediaActivity,
     /// 「脱离应用」的平台动作（默认走真实通道；测试注入假实现）。
     AylaDetachedLivePresenter detached = const AylaDetachedLivePresenter(),
+    /// 本会话是否为**开播控制台**语义（web `enter(channelId, { isOwnerConsole })`）。
+    ///
+    /// 决定静音偏好读/写哪一套键与缺省值：观众端 `ayla.live.muted`（缺省有声）／
+    /// 开播端 `ayla.live.owner.muted`（缺省静音）。见 design.md §12.7.6.4。
+    bool isOwnerConsole = false,
   })  : _detachedPresenter = detached,
+        _mutedOwner = isOwnerConsole,
         _live = liveState,
         _ws = liveWs,
         _chat = chat,
@@ -203,6 +209,20 @@ class AylaLiveRoomSession extends ChangeNotifier {
 
   /// 「脱离应用」的平台动作（见构造参数）。
   final AylaDetachedLivePresenter _detachedPresenter;
+
+  /// 本会话是否**开播控制台**语义（web `mutedOwner`）。
+  ///
+  /// 与 [_tracksOwnerActivity] 不同：那个判「是不是主播自己的会话」（按 `owner_id`），
+  /// 本字段判「**这一屏**是不是开播控制台」—— 判据是页面类型（web `showOwnerPanel`），
+  /// 因为同一个人也可能以观众身份进别人的直播间。
+  ///
+  /// **可变**：控制台页的 `isOwner` 要等频道详情回来才知道（`_createSession` 在
+  /// `initState` 里跑，那时还没有 channel），端语义因此可能**晚于会话创建**才确定 ⇒
+  /// 由 [setMuteOwner] 重新应用（= web `applyMutedOwner` 的「端语义变化」分支）。
+  bool _mutedOwner;
+
+  /// 本会话当前是否开播控制台语义（只读；测试与 UI 可用）。
+  bool get isOwnerConsole => _mutedOwner;
 
   /// 活动态索引归属：本会话是否为**频道 owner 的会话**（web `tracksOwnerActivity`）。
   ///
@@ -247,6 +267,37 @@ class AylaLiveRoomSession extends ChangeNotifier {
 
   bool get alive => _alive;
   int get epoch => _epoch;
+
+  /// 当前是否静音（喇叭键的两态；权威在播放器与偏好，见 [setMuted]）。
+  bool get muted => _player.isMuted;
+
+  /// 用户点音量键：写**当前端**的偏好 → 应用到播放器 → 镜像 store。
+  ///
+  /// 逐条对照 web `liveSessionRuntime.setMuted`：偏好写入的唯一入口就在这里
+  /// （store 的 `setMuted` 只做投影）。有用户手势，浏览器一定放行，不需要 retrySound。
+  Future<void> setMuted(bool muted) async {
+    aylaWriteLiveMuted(muted: muted, owner: _mutedOwner);
+    await _player.setMuted(muted);
+    if (!_live.isDisposed) _live.setMuted(muted);
+  }
+
+  /// 切换静音（音量键）。
+  Future<void> toggleMuted() => setMuted(!muted);
+
+  /// 切换「当前端」语义并按**新端**的偏好重新应用静音（web `applyMutedOwner`）。
+  ///
+  /// ## 为什么需要「重新应用」
+  /// 控制台页的 `isOwner` 要等频道详情回来才知道（会话在 `initState` 就建好了）⇒
+  /// 端语义可能晚于会话创建才确定。此时必须按**新端**的偏好重新决定是否出声，
+  /// 否则开播控制台会按观众端缺省（有声）先响一下 —— 正是「默认把声音关闭」的反面。
+  ///
+  /// 端语义没变时**什么都不做**：避免同一端的重复调用把用户刚点的静音又翻回去
+  /// （web 同款守卫）。
+  Future<void> setMuteOwner(bool owner) async {
+    if (owner == _mutedOwner) return;
+    _mutedOwner = owner;
+    await _initMute();
+  }
 
   /// 缺省播放器工厂（注入点见构造参数 [playerFactory]）。
   HlsPlaybackController _defaultPlayerFactory() {
@@ -486,7 +537,28 @@ class AylaLiveRoomSession extends ChangeNotifier {
       ));
     });
 
+    // ---- 静音偏好：进房先按**当前端**的偏好初始化，再挂播放器 ----
+    // 顺序要求：必须在 `_enterAsync()` 的 `_attachPlayer()` **之前** ——
+    // 控制器记住偏好后，attach 会给新平台实例回放同一个值（见
+    // `HlsPlaybackController.attach` 的下发点）。反过来先挂再设，用户会听到
+    // 一小段满音量的声音（开播端就是自己的回授）。
+    await _initMute();
+
     await _enterAsync();
+  }
+
+  /// 按当前端的偏好初始化静音（幂等，可重复调用）。
+  ///
+  /// web `liveSessionRuntime.enter()` 里 `applyMutedOwner(isOwnerConsole)` 的等价物：
+  /// 端语义一变就按**新端**的偏好重新决定是否出声；端语义没变时也不动元素
+  /// —— 避免同一端的重复 enter 把用户刚点的静音又翻回去（控制器记住的是同一值）。
+  Future<void> _initMute() async {
+    await aylaLoadLiveMutePrefs();
+    final bool pref = aylaReadLiveMuted(owner: _mutedOwner);
+    await _player.setMuted(pref);
+    if (_live.isDisposed) return;
+    _live.setMutedOwner(_mutedOwner);
+    _live.setMuted(pref);
   }
 
   Future<void> _enterAsync() async {
@@ -690,6 +762,13 @@ class AylaLiveRoomSession extends ChangeNotifier {
     _live.setCurrentPlayerError(null);
     _playerAttached = true;
     await _player.attach(url);
+    // ⚠️ **attach 之后再下发一次静音**（2026-11-04 需求的关键点）。
+    // 控制器内部已经在 attach 里回放过记住的值，这里补一次是给「平台实例建好之后
+    // 才拿到静音状态」的时序兜底：`start()` 的 `_initMute()` 与 `_attachPlayer()`
+    // 都在 `_enterAsync()` 的同一条链上，但自愈重建（`HlsPlaybackController.rebuild`）
+    // 完全在播放器内部发生 —— 那条路径由控制器自己保证，本行保证的是会话侧
+    // 重新挂载（小窗让位恢复 / 脱离态回来 / 刷新重建）之后 UI 与设备仍然一致。
+    await _player.setMuted(_player.isMuted);
     if (!_disposed) notifyListeners();
   }
 

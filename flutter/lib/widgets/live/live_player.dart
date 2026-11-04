@@ -228,6 +228,8 @@ class AylaLivePlayer extends StatefulWidget {
     this.videoAspectRatio,
     this.onRetry,
     this.onRefresh,
+    this.muted = false,
+    this.onToggleMute,
     this.onSendDanmaku,
     this.danmakuOwner,
     this.danmakuError,
@@ -281,6 +283,19 @@ class AylaLivePlayer extends StatefulWidget {
 
   /// 跳到直播最新画面（左下刷新键，tsx 325）。
   final VoidCallback? onRefresh;
+
+  /// 当前是否静音（tsx 175 `muted`）。
+  ///
+  /// ## 为什么是「投影」而不是组件内部状态（tsx 8–9 的既有语义）
+  /// 声音所有权在会话层（web = `liveSessionRuntime`，Flutter = `AylaLiveRoomSession`
+  /// 的 `HlsPlaybackController`）：静音偏好要跨直播间/跨重建存活，而播放器组件会随
+  /// 路由与全屏层重建。组件只读投影、只把点击交回去（[onToggleMute]）。
+  final bool muted;
+
+  /// 切换静音/有声（tsx 176；由调用方交给会话层，用户手势此时必定放行）。
+  ///
+  /// **null = 不渲染音量键**（画布样张/测试里不接线的场景保持既有渲染）。
+  final VoidCallback? onToggleMute;
 
   /// 全屏发弹幕（tsx 171）；null = 不渲染全屏输入框。
   final Future<bool> Function(String content)? onSendDanmaku;
@@ -519,6 +534,16 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     if (!mounted) return;
     _setStateAndSync(() => _controlsVisible = false);
     _clearHideTimer();
+  }
+
+  // ---- 音量键（tsx 335–338 `handleToggleMute`）----
+  //
+  // 只有一件事必须做对：**点按钮 = 有动作 ⇒ 重置自动隐藏计时**，否则 3s 后整层
+  // 淡出，用户刚切换完就看不到按钮状态。真正的静音动作在会话层（见
+  // [AylaLivePlayer.onToggleMute] 的说明）。
+  void _handleToggleMute() {
+    _armHideTimer();
+    widget.onToggleMute?.call();
   }
 
   // ---- 刷新（tsx 321–329：0.65s 后复位；用计时器保证 reduced-motion 下也能复位）----
@@ -883,14 +908,35 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
         curve: AylaCurves.easeOut,
         child: Stack(
           children: <Widget>[
+            // 左下角两个钮横排（web `.live-player-left`：`left/bottom: var(--sp-2)` +
+            // `display: flex; gap: var(--sp-2)`，app.css:3606–3612）——**定位由容器持有**，
+            // 两个钮只负责材质与命中区。音量键是 2026-11-04 新增的第二位
+            // （web `LivePlayer.tsx:397–417`：先「跳到最新」、后「音量」）。
             Positioned(
               left: AylaSpacing.sp2,
               bottom: AylaSpacing.sp2,
-              child: _btn(
-                icon: aylaIconByName('iconRefresh')!,
-                label: '跳到最新画面',
-                onPressed: _handleRefresh,
-                spinning: _spinning,
+              child: Row(
+                spacing: AylaSpacing.sp2, // `.live-player-left { gap: var(--sp-2) }`
+                children: <Widget>[
+                  _btn(
+                    icon: aylaIconByName('iconRefresh')!,
+                    label: '跳到最新画面',
+                    onPressed: _handleRefresh,
+                    spinning: _spinning,
+                  ),
+                  // 音量键：**只在接了线时渲染**（web 的两个 prop 是必填；Flutter 侧
+                  // 画布样张/单测不接线，保留 null 档避免样张里出现一个点了没反应的键）。
+                  if (widget.onToggleMute != null)
+                    _btn(
+                      // tsx 415：`muted ? <IconSpeakerOff/> : <IconSpeaker/>`
+                      icon: aylaIconByName(
+                        widget.muted ? 'iconSpeakerOff' : 'iconSpeaker',
+                      )!,
+                      // tsx 412–413 的 aria-label / title 同文案：静音中 ⇒「打开声音」
+                      label: widget.muted ? '打开声音' : '静音',
+                      onPressed: _handleToggleMute,
+                    ),
+                ],
               ),
             ),
             Positioned(
@@ -1310,10 +1356,38 @@ Widget aylaLivePlayerSamples() {
       _Stage(
         viewport: const Size(640, 360),
         label:
-            '播放器 · live（`.live-player` 16:9 / rgba(70,91,146,.12) / radius 16 / 1px 亮边）· 可交互：**悬停或点击**显示悬浮键（左下刷新 / 右下全屏），显示后 **3s 无操作自动隐藏**；点刷新看 0.6s 旋转',
+            '播放器 · live（`.live-player` 16:9 / rgba(70,91,146,.12) / radius 16 / 1px 亮边）· 可交互：**悬停或点击**显示悬浮键（左下**跳到最新 + 音量** / 右下全屏），显示后 **3s 无操作自动隐藏**；点刷新看 0.6s 旋转、点音量键看图标与文案两态切换',
         child: _PlayerDemo(
           srsStatus: AylaLiveSrsStatus.live,
           video: true,
+        ),
+      ),
+      const SizedBox(height: AylaSpacing.sp6),
+      // ---- 音量键两态（2026-11-04 新增；design.md §12.7.3 / §12.7.6.3）----
+      _Stage(
+        viewport: const Size(640, 360),
+        label:
+            '**音量键两态**（web `LivePlayer.tsx:397–417`）· `.live-player-left` 内两个 32px 圆钮横排、gap = `--sp-2` = 8：左「跳到最新」、右「音量」· 材质 = `.live-player-btn`（`rgba(70,91,146,.32)` + 1px `rgba(255,255,255,.28)` + 白图标 16 + blur8 sat1.2，hover `.52`）· **左档 = 有声**（`IconSpeaker` + 文案「静音」）· **右档 = 静音**（`IconSpeakerOff` + 文案「打开声音」）· 两档都可点（样张内只切图标/文案，真实静音动作在会话层）',
+        child: Row(
+          spacing: AylaSpacing.sp3,
+          children: <Widget>[
+            Expanded(
+              child: _PlayerDemo(
+                srsStatus: AylaLiveSrsStatus.live,
+                video: true,
+                muted: false,
+                label: '有声档（缺省：观众端）',
+              ),
+            ),
+            Expanded(
+              child: _PlayerDemo(
+                srsStatus: AylaLiveSrsStatus.live,
+                video: true,
+                muted: true,
+                label: '静音档（缺省：开播控制台）',
+              ),
+            ),
+          ],
         ),
       ),
       const SizedBox(height: AylaSpacing.sp6),
@@ -1327,21 +1401,74 @@ Widget aylaLivePlayerSamples() {
   );
 }
 
-class _PlayerDemo extends StatelessWidget {
-  const _PlayerDemo({required this.srsStatus, this.video = false});
+class _PlayerDemo extends StatefulWidget {
+  const _PlayerDemo({
+    required this.srsStatus,
+    this.video = false,
+    this.muted = false,
+    this.label,
+  });
 
   final AylaLiveSrsStatus? srsStatus;
   final bool video;
 
+  /// 初始静音档（样张内可点音量键来回切，用于看两态图标与文案）。
+  final bool muted;
+
+  /// 画面上的档位标注（仅样张用；null = 不标注）。
+  final String? label;
+
+  @override
+  State<_PlayerDemo> createState() => _PlayerDemoState();
+}
+
+class _PlayerDemoState extends State<_PlayerDemo> {
+  late bool _muted = widget.muted;
+
+  @override
+  void didUpdateWidget(_PlayerDemo old) {
+    super.didUpdateWidget(old);
+    // 样张换了初始档 ⇒ 跟随（否则来回滚动画布时状态不重置）。
+    if (old.muted != widget.muted) _muted = widget.muted;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return AylaLivePlayer(
-      srsStatus: srsStatus,
-      optimisticStatus: AylaLiveStatus.live,
-      videoView: video ? const _FakeVideo() : null,
-      onRefresh: () {},
-      onRetry: () {},
-      onSendDanmaku: (String content) async => true,
+    // `.live-player { aspect-ratio: 16 / 9 }`：样张里也必须按 16:9 出盒。
+    // 不套这一层时，两档并排（Row + Expanded）会给播放面一个 316×360 的松约束，
+    // `_content` 的 AspectRatio 在紧约束下被忽略 ⇒ 画面被拉成竖条（看错就是看错）。
+    return AspectRatio(
+      aspectRatio: 16 / 9,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          AylaLivePlayer(
+            srsStatus: widget.srsStatus,
+            optimisticStatus: AylaLiveStatus.live,
+            videoView: widget.video ? const _FakeVideo() : null,
+            muted: _muted,
+            // 样张里切图标/文案（真实静音动作在会话层 —— 画布没有播放器）。
+            onToggleMute: () => setState(() => _muted = !_muted),
+            onRefresh: () {},
+            onRetry: () {},
+            onSendDanmaku: (String content) async => true,
+          ),
+          if (widget.label != null)
+            Positioned(
+              top: AylaSpacing.sp2,
+              left: AylaSpacing.sp2,
+              child: IgnorePointer(
+                child: Text(
+                  widget.label!,
+                  style: AylaTextStyles.of(context).body.copyWith(
+                    fontSize: 11,
+                    color: Colors.white70,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

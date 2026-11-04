@@ -387,6 +387,11 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       onBack: () => context.canPop() ? context.pop() : context.go('/live'),
       onRetryPlayer: () => unawaited(session.retryPlayer()),
       onRefreshPlayer: () => unawaited(session.refreshPlayer()),
+      // 音量键：观众端（看别人的直播）缺省**有声**（用户 2026-11-04：
+      // 「默认把声音打开」）。静音状态由会话层持有（偏好键 `ayla.live.muted`，
+      // 跨直播间保留），本页只读投影、只把点击交回去。
+      muted: session.muted,
+      onToggleMute: () => unawaited(session.toggleMuted()),
       // 「小窗」键：只在桌面端渲染 —— 用户原话「电脑需要点按钮使直播变为悬浮小窗，
       // 但手机退出直播间自动续直播悬浮小窗」⇒ 移动端保持既有的自动续接路径。
       onEnterMiniPlayer: aylaDetachedLivePlatformSupported &&

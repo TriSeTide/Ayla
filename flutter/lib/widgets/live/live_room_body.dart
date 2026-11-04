@@ -177,6 +177,8 @@ class AylaLiveRoomBody extends StatefulWidget {
     this.deletingChannelId,
     this.onRetryPlayer,
     this.onRefreshPlayer,
+    this.muted = false,
+    this.onToggleMute,
     this.onEnterMiniPlayer,
     this.onSendDanmaku,
     this.onPickDanmakuImage,
@@ -251,6 +253,14 @@ class AylaLiveRoomBody extends StatefulWidget {
   /// 播放重试 / 跳最新。
   final VoidCallback? onRetryPlayer;
   final VoidCallback? onRefreshPlayer;
+
+  /// 当前是否静音（页面从会话层投影注入；见 `AylaLivePlayer.muted`）。
+  final bool muted;
+
+  /// 切换静音（页面交给会话层：`session.toggleMuted()`）。
+  ///
+  /// **null = 播放器不渲染音量键**（画布样张等不接线的场景保持既有渲染）。
+  final VoidCallback? onToggleMute;
 
   /// 「小窗」键（把直播变成**应用窗口之外**的悬浮小窗）。
   ///
@@ -433,6 +443,11 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     videoAspectRatio: widget.videoAspectRatio,
     onRetry: widget.onRetryPlayer,
     onRefresh: widget.onRefreshPlayer,
+    // 音量键（web `LiveRoomBody.tsx` 把 store 的 `muted` + runtime.toggleMuted 递给
+    // `LivePlayer`）。⚠️ 中间层必须透传：漏传 = 音量键根本不渲染（skill 第五批
+    // 「加了参数 ≠ 接通了线」的同一类缺陷）。
+    muted: widget.muted,
+    onToggleMute: widget.onToggleMute,
     // 「小窗」键（桌面端才有；null ⇒ 不渲染，移动端走「退出页面自动续」）。
     onEnterMiniPlayer: widget.onEnterMiniPlayer,
     onSendDanmaku: widget.onSendDanmaku == null
@@ -1468,6 +1483,9 @@ Widget aylaLiveRoomBodySamples() {
           // 画布档：可点但无导航（样张无 GoRouter；与 danmaku.dart 样张同写法）
           onOpenSenderProfile: (String _) {},
           onOpenHostProfile: (String _) {},
+          // 音量键（2026-11-04）：本样张不接线 ⇒ 播放器不渲染该键（保持既有渲染）。
+          // 两态视觉看 `aylaLivePlayerSamples()` 的「音量键两态」那一档；真实静音动作
+          // 由会话层持有（本组件只透传，见 `muted` / `onToggleMute` 字段）。
         ),
       ),
       const SizedBox(height: AylaSpacing.sp6),

@@ -330,6 +330,24 @@ class MediaKitHls implements HlsPlatformPlayer {
     await _player?.play();
   }
 
+  /// 设置静音（= web `video.muted`）。
+  ///
+  /// ## 为什么落成**音量 0/100** 而不是 mpv 的 `mute` 属性
+  /// `mute` 是独立开关，与用户/系统音量叠加，而且 mpv 在重建实例后回到 false；
+  /// 音量值是 media_kit 的一等公民 API（`Player.setVolume(0..100)`，默认 100），
+  /// 语义与 web 的 `video.muted` 等价（0 = 无声、100 = 满音量），且不会与将来要做的
+  /// 「音量滑杆」冲突（那时这里换成真实音量即可，不必再改抽象层）。
+  ///
+  /// 不抛异常：播放器已 dispose / 原生侧拒绝时只当作「没生效」（画面优先于声音）。
+  @override
+  Future<void> setMuted(bool muted) async {
+    try {
+      await _player?.setVolume(muted ? 0 : 100);
+    } catch (_) {
+      // 实例已释放 / 属性不可写 ⇒ 静音没生效而已，不打断播放链路。
+    }
+  }
+
   /// 跳到直播真实边缘（开发文档 §3 R1）。
   ///
   /// 改前：`seek(duration)` —— 而直播的 `duration` 是**整个 playlist 的总长**

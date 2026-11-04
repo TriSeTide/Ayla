@@ -49,6 +49,9 @@ class _FakePlatform implements HlsPlatformPlayer {
   Widget? buildView() => null;
 
   @override
+  Future<void> setMuted(bool muted) async {}
+
+  @override
   Future<void> dispose() async {
     disposeCalls += 1;
   }

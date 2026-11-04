@@ -89,6 +89,22 @@ class VideoPlayerHls implements HlsPlatformPlayer, HlsVideoMetrics {
     return aylaLiveEdgeSeekTarget(duration: c.value.duration);
   }
 
+  /// 设置静音（= web `video.muted`）。
+  ///
+  /// 落成 `setVolume(0.0 / 1.0)`：`video_player` 的 `setVolume` 就是 `<video>.volume`
+  /// 的等价物（0.0–1.0 线性），与 web 的 `muted` 在听感上一致，且不引入第二条状态
+  /// （`muted` 与 `volume` 在 ExoPlayer 内部是同一组音频参数）。
+  ///
+  /// 不抛异常：控制器已释放 / 未初始化时静音只是「没生效」，不能打断播放链路。
+  @override
+  Future<void> setMuted(bool muted) async {
+    try {
+      await _controller?.setVolume(muted ? 0.0 : 1.0);
+    } catch (_) {
+      // 实例已 dispose / 尚未 initialize ⇒ 忽略。
+    }
+  }
+
   @override
   Future<void> play() async {
     final c = _controller;

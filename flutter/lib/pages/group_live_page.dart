@@ -592,6 +592,11 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
       onCreateNewChannel: _openCreate,
       onRetryPlayer: () => unawaited(session.retryPlayer()),
       onRefreshPlayer: () => unawaited(session.refreshPlayer()),
+      // 音量键：群内直播是**观众端**语义 ⇒ 缺省有声（用户 2026-11-04：
+      // 「默认把声音打开」）。静音状态由会话层持有（偏好键 `ayla.live.muted`），
+      // 本页只读投影、只把点击交回去。
+      muted: session.muted,
+      onToggleMute: () => unawaited(session.toggleMuted()),
       onSendDanmaku: session.sendDanmaku,
       // 自给自足档（web `LiveRoomBody.tsx:260/328`）：收藏键自己加载自己，
       // 页面不再需要 pre-load（根因 A 的结构性修复）。
