@@ -2,6 +2,8 @@
  * LivePlayer 交互测试（直播体验增量）：
  * - live：渲染 video 无原生控制条（无 controls），渲染左下「跳到最新」刷新键 + 右下「全屏」键；
  * - 点刷新键 → onRefresh 回调 + 进入旋转动画（is-spinning）；
+ * - 左下音量键：muted 两态（「打开声音」+ 静音图标 / 「静音」+ 有声图标），点击 → onToggleMute；
+ *   与刷新键并排于 .live-player-left；非 live / 播放错误态不渲染（与其他悬浮钮同显隐）；
  * - 点全屏键 → requestFullscreen；支持画中画时点画中画键 → requestPictureInPicture，不支持不渲染；
  * - idle 占位：默认「主播未开播」，乐观已开播「等待推流信号…」；
  * - playerError：渲染「播放失败 + 重试」，点重试 → onRetry。
@@ -24,6 +26,9 @@ function renderPlayer(
     videoRef,
     onRetry: vi.fn(),
     onRefresh: vi.fn(),
+    // 静音两态由 store 投影经 props 传入（声音所有权在 liveSessionRuntime）
+    muted: false,
+    onToggleMute: vi.fn(),
     // 模拟 runtime.attachVideoTo：把 video 原子移入宿主容器
     onVideoHostMount: vi.fn((host: HTMLElement) => {
       if (videoRef.current) host.appendChild(videoRef.current);
@@ -63,6 +68,71 @@ describe("LivePlayer", () => {
     fireEvent.click(btn);
     expect(props.onRefresh).toHaveBeenCalledTimes(1);
     expect(btn.classList.contains("is-spinning")).toBe(true);
+  });
+
+  it("muted=true：音量键显示「打开声音」与静音图标，点击调 onToggleMute", () => {
+    const onToggleMute = vi.fn();
+    const { container } = renderPlayer({ muted: true, onToggleMute });
+    const btn = screen.getByLabelText("打开声音");
+    expect(btn.getAttribute("title")).toBe("打开声音");
+    // IconSpeakerOff = 喇叭 + 叉（两条 line）；IconSpeaker 无声波叉
+    expect(btn.querySelectorAll("line")).toHaveLength(2);
+    // 与其他悬浮钮同材质：复用 .live-player-btn，不新增视觉语言
+    expect(btn.classList.contains("live-player-btn")).toBe(true);
+    expect(btn.classList.contains("live-player-volume")).toBe(true);
+    // 与刷新键并排于左下容器（定位由父容器持有）
+    expect(btn.closest(".live-player-left")).toBe(container.querySelector(".live-player-left"));
+    expect(container.querySelector(".live-player-left")?.querySelector(".live-player-refresh")).toBeTruthy();
+    fireEvent.click(btn);
+    expect(onToggleMute).toHaveBeenCalledTimes(1);
+  });
+
+  it("muted=false：音量键显示「静音」与有声图标，点击调 onToggleMute", () => {
+    const onToggleMute = vi.fn();
+    renderPlayer({ muted: false, onToggleMute });
+    const btn = screen.getByLabelText("静音");
+    expect(btn.getAttribute("title")).toBe("静音");
+    expect(btn.querySelectorAll("line")).toHaveLength(0);
+    fireEvent.click(btn);
+    expect(onToggleMute).toHaveBeenCalledTimes(1);
+    // 点击音量键不误触刷新
+    expect(screen.getByLabelText("跳到最新画面")).toBeTruthy();
+  });
+
+  it("点击音量键重置自动隐藏计时（不立即隐藏控件层）", () => {
+    vi.useFakeTimers();
+    const onToggleMute = vi.fn();
+    const { container } = renderPlayer({ muted: true, onToggleMute });
+    const player = container.querySelector(".live-player") as HTMLElement;
+    const controls = container.querySelector(".live-player-controls") as HTMLElement;
+    fireEvent.click(player); // 触屏唤醒
+    expect(controls.classList.contains("is-visible")).toBe(true);
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    fireEvent.click(screen.getByLabelText("打开声音"));
+    expect(onToggleMute).toHaveBeenCalledTimes(1);
+    // 计时被重置：再过 2s 仍在显示（原计时若未重置会在此隐藏）
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(controls.classList.contains("is-visible")).toBe(true);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(controls.classList.contains("is-visible")).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it("非 live / 播放错误态不渲染音量键（与其他悬浮钮一致）", () => {
+    const idle = renderPlayer({ srsStatus: "idle", optimisticStatus: null });
+    expect(screen.queryByLabelText("静音")).toBeNull();
+    expect(screen.queryByLabelText("打开声音")).toBeNull();
+    idle.unmount();
+
+    renderPlayer({ srsStatus: "live", playerError: "boom" });
+    expect(screen.queryByLabelText("静音")).toBeNull();
+    expect(screen.queryByLabelText("打开声音")).toBeNull();
   });
 
   it("点击全屏键触发 requestFullscreen", () => {

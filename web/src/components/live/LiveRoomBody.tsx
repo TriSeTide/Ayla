@@ -119,6 +119,9 @@ export function LiveRoomBody({
   const { danmaku, sending, sendOwner, sendError, send, listRef, hasNewBelow, scrollToBottom, handleListScroll, history } =
     useDanmaku(channelId);
   const srsStatus = useLiveStore((s) => s.current.srsStatus);
+  // 静音投影：权威偏好在 runtime（localStorage），这里只读 store、只调 runtime 的动作，
+  // 页面不自己改 video.muted——否则播放器重建/元素迁移后会与偏好脱节。
+  const muted = useLiveStore((s) => s.muted);
   // 在看人数/头像条：store 里的读数是"当前直播间"的投影，切台转场期间旧场景仍挂载，
   // 必须按 id 校验，否则退出场景会短暂显示新直播间的人数。缺读数时退到 descriptor
   // 里的快照值（进房详情已带）；两者都没有 = 未知 → 头像条不渲染（不显示 0 冒充没人看）。
@@ -210,6 +213,8 @@ export function LiveRoomBody({
       videoRef={videoRef}
       onRetry={retryPlayer}
       onRefresh={refreshPlayer}
+      muted={muted}
+      onToggleMute={() => liveSessionRuntime.toggleMuted()}
       onSendDanmaku={send}
       danmakuOwner={sendOwner}
       danmakuError={sendError}

@@ -3600,10 +3600,15 @@
   outline-offset: 2px;
 }
 
-.live-player-refresh {
+/* 左下角两个按钮（跳到最新 + 音量）横排：定位由容器持有，
+   .live-player-refresh / .live-player-volume 只负责材质与命中区（类名保持不变，
+   旋转动画与既有测试依赖它） */
+.live-player-left {
   position: absolute;
   left: var(--sp-2);
   bottom: var(--sp-2);
+  display: flex;
+  gap: var(--sp-2);
 }
 
 /* 右下角两个按钮（画中画 + 全屏）横排 */

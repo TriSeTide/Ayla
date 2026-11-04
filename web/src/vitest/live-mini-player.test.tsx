@@ -5,6 +5,8 @@
  * - miniPlayer 非空 → 渲染小窗（含关闭按钮）；null → 不渲染；
  * - 点击小窗主体 → navigate(sourceRoute) 回直播间；
  * - 点击关闭 → liveSessionRuntime.leave()（完整销毁）；
+ * - 左上音量键：按 store.muted 两态渲染（「打开声音」/「静音」），点击 →
+ *   liveSessionRuntime.toggleMuted()，不触发返回直播间、不启动拖动；
  * - 拖动（位移超阈值）→ 位置更新，且拖动结束的合成 click 不触发返回；
  * - 挂载时把 runtime video 元素迁移进小窗容器。
  */
@@ -36,6 +38,7 @@ vi.mock("../runtime/liveSessionRuntime", () => ({
     attachVideoTo: vi.fn(),
     detachMiniPlayer: vi.fn(),
     leave: vi.fn(),
+    toggleMuted: vi.fn(),
   },
 }));
 
@@ -62,9 +65,12 @@ const channel: LiveChannelDescriptor = {
 
 beforeEach(() => {
   vi.stubGlobal("PointerEvent", MockPointerEvent);
+  // 静音偏好持久化在 localStorage（reset() 会重新读取）：先清掉，用例才有确定初值
+  window.localStorage.clear();
   useLiveStore.getState().reset();
   navigate.mockClear();
   vi.mocked(liveSessionRuntime.leave).mockClear();
+  vi.mocked(liveSessionRuntime.toggleMuted).mockClear();
   vi.mocked(liveSessionRuntime.attachVideoTo).mockClear();
   vi.mocked(liveSessionRuntime.detachMiniPlayer).mockClear();
 });
@@ -124,6 +130,52 @@ describe("LiveMiniPlayer", () => {
     fireEvent.click(screen.getByLabelText("关闭小窗"));
     expect(liveSessionRuntime.leave).toHaveBeenCalledTimes(1);
     // 关闭按钮不触发返回
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("音量键：默认有声渲染「静音」，点击调 toggleMuted 且不触发返回/关闭", () => {
+    useLiveStore.getState().setMiniPlayer({ channelId: 7, channel, sourceRoute: "/live/7" });
+    useLiveStore.getState().setMuted(false);
+    render(<LiveMiniPlayer />);
+    const btn = screen.getByLabelText("静音");
+    expect(btn.classList.contains("live-mini-player-mute")).toBe(true);
+    expect(btn.getAttribute("title")).toBe("静音");
+    // 有声态 = IconSpeaker（无喇叭叉），静音态 = IconSpeakerOff（两条 line）
+    expect(btn.querySelectorAll("line")).toHaveLength(0);
+    fireEvent.click(btn);
+    expect(liveSessionRuntime.toggleMuted).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(liveSessionRuntime.leave).not.toHaveBeenCalled();
+  });
+
+  it("音量键：静音态渲染「打开声音」与静音图标", () => {
+    useLiveStore.getState().setMiniPlayer({ channelId: 7, channel, sourceRoute: "/live/7" });
+    useLiveStore.getState().setMuted(true);
+    render(<LiveMiniPlayer />);
+    const btn = screen.getByLabelText("打开声音");
+    expect(btn.getAttribute("title")).toBe("打开声音");
+    expect(btn.querySelectorAll("line")).toHaveLength(2);
+    fireEvent.click(btn);
+    expect(liveSessionRuntime.toggleMuted).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("音量键不启动拖动：按住/移动/抬起后小窗位置不变且不触发返回", () => {
+    useLiveStore.getState().setMiniPlayer({ channelId: 7, channel, sourceRoute: "/live/7" });
+    const { container } = render(<LiveMiniPlayer />);
+    const el = container.querySelector(".live-mini-player") as HTMLElement;
+    const btn = container.querySelector(".live-mini-player-mute") as HTMLElement;
+    expect(btn).toBeTruthy();
+    const before = { left: el.style.left, top: el.style.top };
+    // pointerdown 直接落在音量键上（冒泡到小窗）：应被排除列表挡下，不进入拖动会话
+    fireEvent.pointerDown(btn, { pointerId: 1, clientX: 100, clientY: 100, pointerType: "touch" });
+    fireEvent.pointerMove(el, { pointerId: 1, clientX: 160, clientY: 150 });
+    fireEvent.pointerUp(el, { pointerId: 1 });
+    expect(el.style.left).toBe(before.left);
+    expect(el.style.top).toBe(before.top);
+    // 抬起后点音量键本身：只切静音，不返回直播间
+    fireEvent.click(btn);
+    expect(liveSessionRuntime.toggleMuted).toHaveBeenCalledTimes(1);
     expect(navigate).not.toHaveBeenCalled();
   });
 

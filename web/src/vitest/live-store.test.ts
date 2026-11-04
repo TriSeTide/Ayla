@@ -5,8 +5,14 @@
  * - 状态三态徽章语义（srsStatus 优先，null 用乐观兜底）
  * - 频道列表 upsert/remove；clearCurrent 退房清理
  */
-import { afterEach, describe, expect, it } from "vitest";
-import { DANMAKU_MAX_ITEMS, useLiveStore } from "../stores/live";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  DANMAKU_MAX_ITEMS,
+  LIVE_MUTED_STORAGE_KEY,
+  readLiveMuted,
+  useLiveStore,
+  writeLiveMuted,
+} from "../stores/live";
 import type { DanmakuItem, LiveChannelDescriptor } from "../api/types";
 
 function danmaku(id: string, createdAt: string, content = "hi"): DanmakuItem {
@@ -39,6 +45,8 @@ const CHANNEL: LiveChannelDescriptor = {
 
 afterEach(() => {
   useLiveStore.getState().reset();
+  localStorage.clear();
+  vi.restoreAllMocks();
 });
 
 describe("live store", () => {
@@ -184,6 +192,58 @@ describe("live store", () => {
     expect(useLiveStore.getState().channelsOnlyLive).toBe(true);
     s.setChannels([CHANNEL], false);
     expect(useLiveStore.getState().channelsOnlyLive).toBe(false);
+  });
+
+  it("静音偏好：readLiveMuted 只认 \"1\"；writeLiveMuted 静音写 \"1\"、取消静音删键", () => {
+    expect(readLiveMuted()).toBe(false); // 无记录 = 有声音
+    writeLiveMuted(true);
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBe("1");
+    expect(readLiveMuted()).toBe(true);
+    writeLiveMuted(false);
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBeNull();
+    expect(readLiveMuted()).toBe(false);
+  });
+
+  it("静音偏好：存储不可用（隐私模式/配额耗尽）时读写都静默，默认有声音", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage denied");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage denied");
+    });
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("storage denied");
+    });
+    // 读不到 ≠ 用户选了静音：必须回落到"有声音"，否则读不到偏好就把用户声音关掉
+    expect(readLiveMuted()).toBe(false);
+    expect(() => writeLiveMuted(true)).not.toThrow();
+    expect(() => writeLiveMuted(false)).not.toThrow();
+  });
+
+  it("setMuted 只镜像投影、不写存储（偏好写入唯一入口是 runtime.setMuted 的用户手势）", () => {
+    useLiveStore.getState().setMuted(true);
+    expect(useLiveStore.getState().muted).toBe(true);
+    // 关键防回归：ensureVideo/retrySound 失败分支也走这个 action，
+    // 若在这里写存储就会把用户偏好改写成"静音"
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBeNull();
+
+    useLiveStore.getState().setMuted(false);
+    expect(useLiveStore.getState().muted).toBe(false);
+    expect(localStorage.getItem(LIVE_MUTED_STORAGE_KEY)).toBeNull();
+  });
+
+  it("clearCurrent 不动静音投影；reset 回到已持久化的偏好（不是硬编码默认值）", () => {
+    writeLiveMuted(true);
+    useLiveStore.getState().setMuted(true);
+    useLiveStore.getState().clearCurrent();
+    expect(useLiveStore.getState().muted).toBe(true); // 换台/退房不清用户偏好
+
+    useLiveStore.getState().reset();
+    expect(useLiveStore.getState().muted).toBe(true); // 重置回已存偏好
+
+    writeLiveMuted(false);
+    useLiveStore.getState().reset();
+    expect(useLiveStore.getState().muted).toBe(false);
   });
 
   it("clearCurrent：退房清当前直播间与 WS 状态，保留大厅列表", () => {

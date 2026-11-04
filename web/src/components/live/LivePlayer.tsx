@@ -5,7 +5,8 @@
  *   （去进度条/倍速，B 站式纯直播观看），悬浮小按钮**非常态显示 + 无操作自动隐藏**：
  *   - 桌面：悬停/移动播放器显示、移出隐藏；触屏：点击视频显示；
  *   - 显示后 3s 无操作（鼠标静止/无点击）自动隐藏，鼠标移动或点按钮重置计时、不常驻；
- *   - 左下「刷新」：跳到直播最新画面（点击带旋转动画）；
+ *   - 左下「刷新」+「音量」：刷新跳到直播最新画面（点击带旋转动画）；音量键切换静音/有声
+ *     （两态由 props 传入，声音所有权在 liveSessionRuntime，本组件只做投影与手势回调）；
  *   - 右下「画中画」+「全屏」：画中画保留小窗（支持才显示；**窄屏隐藏**——手机端
  *     小窗由 App 内浮动小窗承担，不强行调浏览器原生 PiP）；全屏对容器全屏，
  *     窄屏（手机）锁横屏、iOS 走原生视频全屏（webkitEnterFullscreen 自动横屏）。
@@ -18,7 +19,14 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { LiveSrsStatus } from "../../api/types";
-import { IconFullscreen, IconPip, IconRefresh, IconSend } from "../icons";
+import {
+  IconFullscreen,
+  IconPip,
+  IconRefresh,
+  IconSend,
+  IconSpeaker,
+  IconSpeakerOff,
+} from "../icons";
 
 /** 悬浮按钮无操作自动隐藏时长 */
 const AUTO_HIDE_MS = 3000;
@@ -145,6 +153,8 @@ export function LivePlayer({
   videoRef,
   onRetry,
   onRefresh,
+  muted,
+  onToggleMute,
   hidePipButton = false,
   onVideoHostMount,
   onVideoHostUnmount,
@@ -161,6 +171,10 @@ export function LivePlayer({
   onRetry: () => void;
   /** 跳到直播最新画面（左下角刷新键） */
   onRefresh: () => void;
+  /** 当前是否静音（store 投影；声音所有权在 liveSessionRuntime，本组件只读投影） */
+  muted: boolean;
+  /** 切换静音/有声（用户手势：由调用方交给 runtime.setMuted，浏览器此时必定放行） */
+  onToggleMute: () => void;
   /** 窄屏（手机端）隐藏浏览器原生画中画按钮：小窗由 App 内浮动小窗承担 */
   hidePipButton?: boolean;
   /** 宿主容器挂载：把 video 原子移入本容器（源容器在文档中 → 不脱离不暂停） */
@@ -318,6 +332,11 @@ export function LivePlayer({
     }
   };
 
+  const handleToggleMute = () => {
+    armHideTimer(); // 点按钮 = 有动作，重置自动隐藏
+    onToggleMute();
+  };
+
   const handleRefresh = () => {
     armHideTimer(); // 点按钮 = 有动作，重置自动隐藏
     if (spinning) return;
@@ -375,15 +394,27 @@ export function LivePlayer({
       {children}
       {showVideo && (
         <div className={`live-player-controls${controlsVisible ? " is-visible" : ""}`}>
-          <button
-            type="button"
-            className={`live-player-btn live-player-refresh${spinning ? " is-spinning" : ""}`}
-            onClick={handleRefresh}
-            aria-label="跳到最新画面"
-            title="跳到最新画面"
-          >
-            <IconRefresh width={16} height={16} />
-          </button>
+          {/* 左下并排两个钮（跳到最新 + 音量）：定位由父容器持有，按钮只负责材质与命中区 */}
+          <div className="live-player-left">
+            <button
+              type="button"
+              className={`live-player-btn live-player-refresh${spinning ? " is-spinning" : ""}`}
+              onClick={handleRefresh}
+              aria-label="跳到最新画面"
+              title="跳到最新画面"
+            >
+              <IconRefresh width={16} height={16} />
+            </button>
+            <button
+              type="button"
+              className="live-player-btn live-player-volume"
+              onClick={handleToggleMute}
+              aria-label={muted ? "打开声音" : "静音"}
+              title={muted ? "打开声音" : "静音"}
+            >
+              {muted ? <IconSpeakerOff width={16} height={16} /> : <IconSpeaker width={16} height={16} />}
+            </button>
+          </div>
           <div className="live-player-corner">
             {pipSupported && !hidePipButton && (
               <button

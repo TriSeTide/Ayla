@@ -12,7 +12,7 @@
  */
 import * as liveApi from "../api/live";
 import type { DanmakuFrame, LiveViewersFrame } from "../api/types";
-import { useLiveStore } from "../stores/live";
+import { readLiveMuted, useLiveStore, writeLiveMuted } from "../stores/live";
 import { useAuthStore } from "../stores/auth";
 import { liveWS } from "../ws/live";
 import { chatWS } from "../ws/chat";
@@ -382,6 +382,8 @@ class LiveSessionRuntime {
     this.options = {};
     this.currentHlsUrl = null;
     this.bigHost = null;
+    // 静音偏好不在这里写、也不重置：它是跨直播间/跨场次的用户选择，
+    // 退房后仍要保留（下次进房按偏好恢复声音）。store.muted 同理保留。
     useLiveStore.getState().setCurrentLoading(false);
     useLiveStore.getState().setCurrentError(null);
     useLiveStore.getState().setCurrentPlayerError(null);
@@ -397,14 +399,103 @@ class LiveSessionRuntime {
     if (!this.videoEl) {
       const v = document.createElement("video");
       v.className = "live-player-video";
+      // 静音起播是浏览器的硬约束：非静音的 play() 在无用户手势时会被拒绝
+      // （NotAllowedError），直播就停在"加载中"。所以起播一律 muted=true，
+      // 声音由 retrySound() 在真正出帧后按用户偏好恢复（见下方）。
       v.muted = true;
       v.autoplay = true;
       v.playsInline = true;
       this.videoEl = v;
       // 常驻暂存容器：永不脱离文档（脱离会暂停 → 容器切换黑屏）
       this.ensureStaging().appendChild(v);
+      // UI 投影与元素状态一致：起播阶段喇叭按钮显示"静音中"
+      useLiveStore.getState().setMuted(true);
     }
     return this.videoEl;
+  }
+
+  // ---------- 静音所有权：偏好持久化 + 起播后自动恢复声音 ----------
+  // 根因（2026-10 直播无声）：ensureVideo 写死 muted=true 后全仓没有任何地方设回
+  // false，播放器也没有喇叭按钮 ⇒ 直播永远静音。这里把"静音"变成有 owner 的状态：
+  // 元素静音（自动播放策略要求）、用户偏好（localStorage）、store 投影三者由本类统一
+  // 维护，UI 只读 store、只调 setMuted/toggleMuted。
+
+  /** 当前是否静音（以 video 元素为准；元素未创建时退到用户偏好） */
+  isMuted(): boolean {
+    return this.videoEl ? this.videoEl.muted : readLiveMuted();
+  }
+
+  /**
+   * 用户显式切换静音：写偏好 → 应用到 video → 镜像 store。
+   * 有声分支补一次 play()：静音起播成功后取消静音，个别浏览器会把播放器挂起，
+   * 不重新 play 就是"按钮变了但没声音"。
+   */
+  setMuted(muted: boolean): void {
+    writeLiveMuted(muted);
+    const video = this.videoEl;
+    if (video) {
+      video.muted = muted;
+      if (!muted) {
+        // 取消静音后补一次 play：静音起播成功后个别浏览器会把播放器挂起。
+        // 被拒也不回退——用户是显式点的喇叭，偏好以他的选择为准（下次进房仍尝试出声）。
+        const result = this.playSafely(video);
+        if (result) void result.catch(() => {});
+      }
+    }
+    useLiveStore.getState().setMuted(muted);
+  }
+
+  toggleMuted(): void {
+    this.setMuted(!this.isMuted());
+  }
+
+  /**
+   * 静音 → 有声的无手势重试（幂等）。
+   * 由 playing/canplay 触发：此时播放已获准，把 muted 设回 false 通常不会再被拦；
+   * 真被拦（NotAllowedError，浏览器把取消静音也当播放请求）就回退静音播放——
+   * 画面优先于声音，且**偏好不被篡改**（用户下次仍有声）。
+   */
+  retrySound(): void {
+    const video = this.videoEl;
+    // 用户偏好是静音，或元素已经是响的 ⇒ 无事可做（幂等，可被高频事件反复调用）
+    if (!video || !video.muted || readLiveMuted()) return;
+    video.muted = false;
+    const result = this.playSafely(video);
+    if (result === null) {
+      // 没有 play() 返回 Promise（jsdom / 老实现）：无法判定是否被拒，
+      // 只镜像 store，交给后续真实事件再收敛
+      useLiveStore.getState().setMuted(false);
+      return;
+    }
+    void result.then(
+      () => {
+        // 期间用户手动静音/换台：以当前元素状态为准，不覆盖用户动作
+        if (!video.muted) useLiveStore.getState().setMuted(false);
+      },
+      () => {
+        // 被自动播放策略拒绝：回退静音播放，保持画面，偏好保持"有声"待下次事件重试
+        video.muted = true;
+        const fallback = this.playSafely(video);
+        // 静音重播同样可能失败（元素已移除/源未就绪）：吞掉，不留未处理的 rejection
+        if (fallback) void fallback.catch(() => {});
+        useLiveStore.getState().setMuted(true);
+      },
+    );
+  }
+
+  /**
+   * 安全 play()：返回 Promise 或 null。
+   * - 同步抛错（元素已移除/源未就绪）→ 吞掉，返回 null；
+   * - 返回 undefined（jsdom 的 HTMLMediaElement.play 实现）→ null，
+   *   调用方必须容错，不能直接 .then（否则 TypeError 打断整条事件链）。
+   */
+  private playSafely(video: HTMLVideoElement): Promise<void> | null {
+    try {
+      const result = video.play() as Promise<void> | undefined;
+      return result && typeof result.then === "function" ? result : null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -616,6 +707,9 @@ class LiveSessionRuntime {
       // 出帧 = 自愈成功：连续失败计数归零、撤销封顶后的延迟重试（B2，有界语义闭环）
       this.consecutiveRebuilds = 0;
       this.clearHealRetry();
+      // 出帧后按用户偏好恢复声音：静音起播（自动播放策略）到这一步才算"播放已获准"，
+      // 此刻取消静音最不容易被浏览器拦截；幂等，重复事件无副作用。
+      this.retrySound();
       // 播放恢复（SRS 恢复/开播）→ 补拉一次 SRS 实时判定
       if (this.channelId !== null) void this.refreshSrsStatus(this.channelId);
     };

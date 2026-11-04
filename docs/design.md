@@ -473,11 +473,12 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 - **无原生控制条**：`<video>` 不带 `controls`——去掉进度条、手动倍速与原生全屏，纯直播观看（对齐 B 站直播体验）；画中画小窗能力保留。
 - **低延迟起播**：hls.js 分支开 `lowLatencyMode` + `liveSyncDurationCount=2`，`startLoad(-1)` 从直播边缘起播（连上推流即显示最新画面，不从头回放历史）；**不做追帧倍速**（保持 `liveSyncPlaybackRate` 默认 1.0，画面不自动加速）；延迟延后由用户手动刷新跳边。Safari 原生 HLS 分支维持原生贴边行为。
-- **悬浮小按钮（非常态显示 + 无操作自动隐藏）**：三个 32px 圆形悬浮钮，indigo 半透明底（`rgba(70,91,146,0.32)`，与 tokens `--overlay-dim` 同源）+ 白线性图标 + `blur(8px)`；**默认隐藏**，桌面悬停/移动播放器显示、移出隐藏，触屏点击视频显示；**显示后 3 秒无操作（鼠标静止/无点击）自动隐藏**，鼠标移动或点按钮重置计时、不常驻；淡入淡出 `opacity` 180ms。
-  - 左下「跳到最新」刷新键（`IconRefresh`）：**健康播放**（视频已有当前帧 `readyState ≥ HAVE_CURRENT_DATA`）→ `refreshToLiveEdge()` 跳边秒跳（hls.js 用 `liveSyncPosition`、兜底 seek 到 `seekable` 末尾、再兜底 reload+play）；**黑屏/实例缺失/未就绪** → 重建播放器（销毁 + 重新 attach，`startLoad(-1)` 从边缘起播 = 跳到最新）；图标旋转 0.6s 反馈（`prefers-reduced-motion` 下禁用旋转）。
+- **悬浮小按钮（非常态显示 + 无操作自动隐藏）**：四个 32px 圆形悬浮钮（左下两个：跳到最新 / 音量；右下两个：画中画 / 全屏），indigo 半透明底（`rgba(70,91,146,0.32)`，与 tokens `--overlay-dim` 同源）+ 白线性图标 + `blur(8px)`；**默认隐藏**，桌面悬停/移动播放器显示、移出隐藏，触屏点击视频显示；**显示后 3 秒无操作（鼠标静止/无点击）自动隐藏**，鼠标移动或点按钮重置计时、不常驻；淡入淡出 `opacity` 180ms。
+  - 左下「跳到最新」刷新键（`IconRefresh`，与音量键并排于 `.live-player-left`，间距 `--sp-2`）：**健康播放**（视频已有当前帧 `readyState ≥ HAVE_CURRENT_DATA`）→ `refreshToLiveEdge()` 跳边秒跳（hls.js 用 `liveSyncPosition`、兜底 seek 到 `seekable` 末尾、再兜底 reload+play）；**黑屏/实例缺失/未就绪** → 重建播放器（销毁 + 重新 attach，`startLoad(-1)` 从边缘起播 = 跳到最新）；图标旋转 0.6s 反馈（`prefers-reduced-motion` 下禁用旋转）。
+  - 左下「音量」（`IconSpeaker` / `IconSpeakerOff`，见 §12.7.6）：静音/有声两态切换，用户偏好跨直播间保留。
   - 右下「画中画」（`IconPip`）：仅浏览器支持时渲染（`document.pictureInPictureEnabled` 或 Safari `webkitSetPresentationMode`）。
   - 右下「全屏」（`IconFullscreen`）：对整个 `.live-player` 容器 `requestFullscreen`（全屏黑底铺满、圆角/边框去除），悬浮按钮仍在全屏画面内；**窄屏（手机）全屏后锁横屏**（`screen.orientation.lock("landscape")`），**iOS Safari 走 `webkitEnterFullscreen()` 原生视频全屏（自动横屏）**；退出全屏（含 ESC/系统返回）经 `fullscreenchange` 解锁方向。
-  - **全屏弹幕输入框**（标准容器全屏时，屏幕下方中间）：与其他输入区共用浅玻璃材料，外框至少50px高，宽度为`min(320px, calc(100% - 120px))`，给两侧媒体控制按钮让位；内部input透明，发送按钮为40px、12px圆角的`.btn-primary`。保持bottom 8px及原控制条显隐（3s无操作隐藏、移动唤醒、聚焦暂停隐藏）。Enter或发送按钮发弹幕，成功只清除本次提交对应草稿，新输入保留；错误在全屏内可见。iOS原生视频全屏无自定义UI时不显示。
+  - **全屏弹幕输入框**（标准容器全屏时，屏幕下方中间）：与其他输入区共用浅玻璃材料，外框至少50px高，宽度为`min(320px, calc(100% - 176px))`，给两侧媒体控制按钮让位（左下已由 1 个钮变 2 个钮，右侧留 120px 两侧对称）；内部input透明，发送按钮为40px、12px圆角的`.btn-primary`。保持bottom 8px及原控制条显隐（3s无操作隐藏、移动唤醒、聚焦暂停隐藏）。Enter或发送按钮发弹幕，成功只清除本次提交对应草稿，新输入保留；错误在全屏内可见。iOS原生视频全屏无自定义UI时不显示。
 - **黑屏自动恢复**（切台/切界面后画面不加载的根治，学 B 站「减少黑屏 + 真黑屏立马刷新」）：
   - `videoRef` 用**粘性 ref 代理 + videoVersion 重建信号**：沉浸式上下滑切台（`AnimatePresence mode="sync"`）与宽窄屏切换时，旧 video 卸载（React 把共享 ref 置 null，忽略）、新 video 挂载即 `setVideoVersion` 触发播放器 effect **重新 attach 到新 video**——根治「video 重建但 effect 依赖 srsStatus/hlsUrl 不变 → 不重 attach → 永久黑屏」，video 挂载即接上、不靠轮询；
   - **全屏冻结 isNarrow**：手机点全屏锁横屏会改变 viewport 宽度 → `isNarrow` 翻转 → 窄↔宽布局切换 → 播放器(video)重建 → 黑屏；`LiveRoomBody` 在 `fullscreenchange`（方向变化前触发）冻结进入全屏前的 `isNarrow`，全屏期间布局不切换、播放器不重建，从根源减少「点全屏就黑屏」；
@@ -495,6 +496,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **交互**：点击小窗主体 → 回到直播间大窗（`sourceRoute`：一级直播 `/live/:id`，群内直播 `/group/:id/live`）；右上关闭按钮 → 完整销毁会话（hls → WS → 轮询 → store → 活动态）；单指拖动（pointer 位移超阈值，clamp 视口内）；双指缩放（120–320px 宽，保持 16:9，右下角锚定）。
 - **样式**：fixed 右下角 16px，默认 168×94（16:9），`z-index: 60`（活动态悬浮球 55 之上、弹层遮罩 70 之下）；外层无 `overflow:hidden`（关闭按钮突出在小窗**右上角外侧**，不遮挡画面），内层 `.live-mini-player-video-wrap` 负责圆角/边框/投影/裁剪（`--glass-bg-strong` + `--glass-filter` + `--glass-shadow-compact` + `--glass-border` + `--radius-input`）。
 - **唯一 owner**：同一时间至多一个小窗（store `miniPlayer` 唯一）；小窗激活时隐藏 SessionActivityIndicator 的直播悬浮球（避免重复入口）；退出登录/切直播间完整清理。
+- **音量**：小窗**左上**角外侧 24px 圆钮 `.live-mini-player-mute`（材质与右上关闭键同源：`rgba(70,91,146,0.32)` + 白线性图标 + `blur(8px)`），`IconSpeaker` / `IconSpeakerOff` 两态；点击切换同一份全局静音偏好，**不触发返回直播间、不启动拖动**。
 
 ### 12.7.5 直播间在看观众（人数角标 + 观众条 + 名单弹层）
 
@@ -507,6 +509,30 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **入场动画归 `LiveRoomBody` 统一编排**：观众条加入分区重播目标（`mediaPanels`），与 video 同从下方 20px 滑入（300ms easeOut，`usePanelReplayMotion`）——窄屏即"从视频画面下方滑出"，宽屏即"从下方滑入"。位移用 transform，不改变布局高度，所以画面尺寸不受影响。<br>组件自身**不带入场动画**，避免同一节点两个动画 owner。
 - **名单弹层**：复用 `CreateSheet` 配方（portal 到 body，规避侧栏 `backdrop-filter` 的 stacking context 裁剪；遮罩 `rgba(70,91,146,0.25)`）。宽屏 = 居中 modal（`min(480px,100%)`、`--glass-bg-strong` + `--radius-panel` + `--glass-shadow-modal`）；窄屏 = 底部上滑（全宽、上沿 24px 圆角、250ms `--ease-out`），**高度 60vh**（需求指定，`.live-viewer-sheet-card` 媒体查询）。标题行固定、只有名单自身滚动（`.live-viewer-sheet-body`）。每行 = 36px `Avatar` + 昵称（15px/600），整行是按钮（≥48px），点击跳个人主页（自己 → `/profile`，他人 → `/user/:id`）。名单按上限截断时提示「仅显示前 N 位」；presence 不可用（503）时明示「暂时读不到在看名单」并提供重试，**不得回落为空名单冒充没人看**。
 - **实时链路**：房内帧走弹幕 WS（`{"type":"viewers", count, viewers}`，`viewers` 是上限 12 位的头像预览，最近活跃优先）；列表热更新走 chat WS 的 `live.viewers.changed`（只带频道 id + 人数，客户端 patch 已加载列表项）。进房另有一次权威快照 `GET /live/channels/<id>/viewers/`（列表 WS 掉线时人数仍然正确）。**命名边界**：该帧刻意不叫 `live.channel.*`——那一名空间承载目录成员/元数据变化，前端多处按 `startsWith("live.channel.")` 判定目录失效与活动排序；在线人数是瞬态投影，放进该空间会无谓作废列表游标。
+
+### 12.7.6 直播声音（静音起播 + 偏好恢复 + 音量键）
+
+> 2026-11-04 用户实报「Ayla web 的直播没有声音」。根因不是服务端：SRS 流音频轨健康（AAC 48kHz 立体声，TS 分片 ffprobe 有 audio stream），是 web 播放器**只静音、从不恢复**——见 §12.7.6.1。
+
+#### 12.7.6.1 为什么必须静音起播，又为什么必须自己恢复
+
+浏览器自动播放策略（Chrome/Safari 一致）：**无用户手势时只有 `muted` 的媒体能自动 `play()`**。直播间是路由直达页，用户没点过播放器，所以 `<video>` 必须以 `muted = true` 创建（`liveSessionRuntime.ensureVideo()`），否则 `play()` 直接被拒 → 黑屏。
+
+但「静音起播」只是**起播手段**，不是**最终状态**：一旦播放真正开始（`playing` / `canplay`），静音这个理由就消失了。2026-11-04 之前的实现把手段当成了终态——`v.muted = true` 写死后全仓没有任何一处设回 `false`，播放器也没有音量键，于是直播永远无声。
+
+#### 12.7.6.2 声音所有权与恢复顺序
+
+- **唯一 owner 是 `liveSessionRuntime`**（与 video 元素同 owner）：`isMuted()` / `setMuted()` / `toggleMuted()` / `retrySound()`，store 只镜像投影（`muted` 字段），组件只读投影、调 runtime。
+- **用户偏好持久化**：localStorage `ayla.live.muted`（`"1"` = 静音）。读不到或存储不可用 → 默认**有声**。偏好跨直播间、跨会话保留；`clearCurrent()`（退房）**不动**偏好。
+- **自动恢复（无手势，尽力而为）**：`playing` / `canplay` 时若偏好「有声」而 video 仍静音 → `muted = false` + `play()`；成功即镜像 store。**被拒（NotAllowedError）就老实回退静音**并保持静音播放——绝不为了出声把画面搞停，也绝不篡改用户偏好（用户没改过它）。
+- **用户手势优先**：点音量键 → `setMuted()` 直接写偏好 + 应用到 video；此时有手势，浏览器一定放行。
+- **起播兜底**：恢复失败时静音继续播，用户点一下音量键即可出声（按钮在左下角，与刷新键并排）。
+
+#### 12.7.6.3 状态与无障碍
+
+- 按钮两态：`muted=true` → `IconSpeakerOff` + `aria-label/title` = 「打开声音」；`muted=false` → `IconSpeaker` + 「静音」。
+- 只在 `showVideo`（`srsStatus === "live"` 且无 `playerError`）时渲染，与其他悬浮钮同层同显隐、共用 3s 无操作自动隐藏与 `focus ring`。
+- 尺寸沿用媒体悬浮钮的 32px 例外口径（§12.7.3 末条），小窗内为 24px（与关闭键一致）。
 
 ### 12.8 帖子卡 PostCard 与信息流
 

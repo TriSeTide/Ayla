@@ -944,7 +944,9 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  width: min(320px, calc(100% - 120px));
+  /* 两侧各留 88px：左下从 1 个钮（跳到最新）变 2 个钮（+ 音量），
+     右侧画中画/全屏两钮不变，取两侧较大者对称留白 */
+  width: min(320px, calc(100% - 176px));
   min-height: 50px;
   padding: 4px 4px 4px 12px;
   box-sizing: border-box;
@@ -1088,6 +1090,38 @@
 }
 
 .live-mini-player-close:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* 左上音量按钮：与右上关闭键同材质（indigo 半透明 + 白线性图标 + blur(8px)），
+   位置镜像到左上角外侧，同样不遮挡直播画面；独立点击目标（不触发拖动/缩放/返回） */
+.live-mini-player-mute {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  background: rgba(70, 91, 146, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #fff;
+  backdrop-filter: blur(8px) saturate(1.2);
+  -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  box-shadow: 0 2px 8px rgba(70, 91, 146, 0.2);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.live-mini-player-mute:hover {
+  background: rgba(70, 91, 146, 0.52);
+}
+
+.live-mini-player-mute:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
 }

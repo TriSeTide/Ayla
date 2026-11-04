@@ -8,6 +8,8 @@
  * - 点击小窗主体 → 回到直播间大窗（navigate sourceRoute，页面接管后小窗让位）；
  * - 右上关闭按钮 → 完整销毁会话（hls → WS → 轮询 → store → 活动态）；
  *   **按钮位于小窗右上角外侧**，不遮挡直播画面；
+ * - 左上音量按钮 → 切换同一份全局静音偏好（声音所有权在 liveSessionRuntime）；
+ *   与关闭键同样位于小窗**外侧**，不触发返回、不启动拖动；
  * - 单指拖动（pointer 位移超阈值判定拖动，拖动结束抑制合成 click）；
  * - 双指缩放（pinch）：调整小窗尺寸（保持 16:9，120–320px 宽，右下角锚定）；
  * - 键盘可达：role=button + Enter/Space 打开。
@@ -17,7 +19,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { IconClose } from "../icons";
+import { IconClose, IconSpeaker, IconSpeakerOff } from "../icons";
 import { useLiveStore } from "../../stores/live";
 import { liveSessionRuntime } from "../../runtime/liveSessionRuntime";
 
@@ -43,6 +45,8 @@ function defaultTop(): number {
 export function LiveMiniPlayer() {
   const navigate = useNavigate();
   const mini = useLiveStore((s) => s.miniPlayer);
+  // 静音是全局用户偏好（runtime 为 owner，store 只是投影）：小窗与大窗共用同一份状态
+  const muted = useLiveStore((s) => s.muted);
   const containerRef = useRef<HTMLDivElement | null>(null);
   // 用户拖动后的绝对位置（px）；null = 未拖动，走 CSS 默认（右下角）
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -99,8 +103,8 @@ export function LiveMiniPlayer() {
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     // 仅主按键触发（鼠标左键）；触摸/触控笔无 button 概念，直接通过
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    // 关闭按钮不启动拖动/缩放（独立点击目标）
-    if ((e.target as HTMLElement).closest(".live-mini-player-close")) return;
+    // 关闭/音量按钮不启动拖动/缩放（独立点击目标）
+    if ((e.target as HTMLElement).closest(".live-mini-player-close, .live-mini-player-mute")) return;
     const el = e.currentTarget;
     if (typeof el.setPointerCapture === "function") {
       el.setPointerCapture(e.pointerId);
@@ -211,6 +215,18 @@ export function LiveMiniPlayer() {
     >
       {/* 视频容器：圆角裁剪由内层负责，外层不 overflow:hidden 以便关闭按钮突出在外 */}
       <div className="live-mini-player-video-wrap" ref={containerRef} />
+      <button
+        type="button"
+        className="live-mini-player-mute"
+        aria-label={muted ? "打开声音" : "静音"}
+        title={muted ? "打开声音" : "静音"}
+        onClick={(e) => {
+          e.stopPropagation();
+          liveSessionRuntime.toggleMuted();
+        }}
+      >
+        {muted ? <IconSpeakerOff width={14} height={14} /> : <IconSpeaker width={14} height={14} />}
+      </button>
       <button
         type="button"
         className="live-mini-player-close"

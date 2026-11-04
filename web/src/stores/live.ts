@@ -19,6 +19,36 @@ import { sortLiveChannels } from "../utils/sortChannels";
 /** 实时弹幕队列上限；完整历史由 useCursorHistory 通过 cursor/before_id 独立续读。 */
 export const DANMAKU_MAX_ITEMS = 500;
 
+/** 直播静音偏好存储键：值 "1" = 静音；无记录 = 有声音（默认） */
+export const LIVE_MUTED_STORAGE_KEY = "ayla.live.muted";
+
+/**
+ * 读取静音偏好。
+ * 存储不可用（隐私模式/被禁用/无 localStorage）时返回 false（有声音）：
+ * 静音必须是用户的显式选择，不能因为读不到偏好就替用户关掉声音。
+ */
+export function readLiveMuted(): boolean {
+  try {
+    return localStorage.getItem(LIVE_MUTED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 写入静音偏好。
+ * 取消静音时删除键（缺省 = 有声音），不存 "0"——避免"从没静音过"与"曾取消静音"
+ * 变成两种需要迁移的状态。存储不可用/写满时静默：偏好只在本会话内存生效，不阻断播放。
+ */
+export function writeLiveMuted(muted: boolean): void {
+  try {
+    if (muted) localStorage.setItem(LIVE_MUTED_STORAGE_KEY, "1");
+    else localStorage.removeItem(LIVE_MUTED_STORAGE_KEY);
+  } catch {
+    // 存储不可用：静默降级，播放不受影响
+  }
+}
+
 export interface LiveRoomState {
   channel: LiveChannelDescriptor | null;
   /** SRS 实时判定（权威）；null = 尚未查询，UI 用乐观 status 兜底并标注 */
@@ -55,6 +85,11 @@ interface LiveState {
   currentPlayerError: string | null;
   /** 手机端浮动小窗状态；null = 无小窗（唯一 owner，同一时间至多一个） */
   miniPlayer: MiniPlayerState | null;
+  /**
+   * 直播静音状态（喇叭按钮与 video.muted 的 UI 投影，权威偏好在 localStorage）。
+   * 跨直播间保留：换台不清空（用户选的是"这场直播要不要出声"，不是某个频道的属性）。
+   */
+  muted: boolean;
   lastFetched: number | null;
   /** 最近一次列表请求是否携带 only_live=1；null 表示尚未按筛选条件请求。 */
   channelsOnlyLive: boolean | null;
@@ -73,6 +108,11 @@ interface LiveState {
   setCurrentError: (error: string | null) => void;
   setCurrentPlayerError: (error: string | null) => void;
   setMiniPlayer: (mini: MiniPlayerState | null) => void;
+  /**
+   * 更新静音 UI 投影（不写存储）。偏好写入只由 runtime.setMuted()（用户手势）负责，
+   * video 元素的 muted 也由 runtime 应用——store 只是投影。
+   */
+  setMuted: (muted: boolean) => void;
 
   /** 房内在看人数/预览（弹幕 WS `viewers` 帧或 REST 快照）；仅对当前直播间生效 */
   setViewers: (channelId: number, count: number, viewers: LiveViewerItem[]) => void;
@@ -114,6 +154,7 @@ const initialState = {
   currentError: null,
   currentPlayerError: null,
   miniPlayer: null,
+  muted: false,
   lastFetched: null,
   channelsOnlyLive: null,
 };
@@ -146,6 +187,9 @@ function normalizeDanmaku(list: DanmakuItem[]): DanmakuItem[] {
 
 export const useLiveStore = create<LiveState>((set) => ({
   ...initialState,
+  // 冷启动按已保存的偏好初始化（刷新后仍保持用户上次的选择）。
+  // 读在 create 回调里而不是模块顶层：测试/SSR 下 localStorage 可能晚于模块存在。
+  muted: readLiveMuted(),
 
   setChannels: (list, onlyLive = false) =>
     set({
@@ -207,6 +251,15 @@ export const useLiveStore = create<LiveState>((set) => ({
 
   setMiniPlayer: (mini) => set({ miniPlayer: mini }),
 
+  /**
+   * 只镜像 UI 投影，**不写 localStorage**。
+   * 写偏好是「用户手势」的语义，唯一入口是 runtime.setMuted()（音量键点击）；
+   * ensureVideo()/retrySound() 的失败分支这些**非手势**路径也会调本 action，
+   * 若在这里写存储，就会把用户偏好改写成"静音"——比如用户明明偏好有声，
+   * 只是还没等到 playing 事件，或者浏览器拒绝自动出声，偏好就被永久写脏了。
+   */
+  setMuted: (muted) => set({ muted }),
+
   setViewers: (channelId, count, viewers) =>
     set((state) => {
       const current = state.current.channel?.id === channelId
@@ -247,7 +300,10 @@ export const useLiveStore = create<LiveState>((set) => ({
   clearDanmaku: () =>
     set((state) => ({ current: { ...state.current, danmaku: [] } })),
 
-  /** 退房清理：清当前直播间、弹幕与会话 UI 状态，保留大厅列表（miniPlayer 由 runtime 显式管理） */
+  /**
+   * 退房清理：清当前直播间、弹幕与会话 UI 状态，保留大厅列表（miniPlayer 由 runtime 显式管理）。
+   * **不动 muted**：静音是用户偏好，跨直播间/跨场次保留，换台不该让声音突然炸出来。
+   */
   clearCurrent: () =>
     set({
       current: initialRoom,
@@ -257,9 +313,11 @@ export const useLiveStore = create<LiveState>((set) => ({
       currentPlayerError: null,
     }),
 
+  /** 全量重置（退出登录/测试基线）：muted 回到已持久化的偏好，而不是硬编码默认值 */
   reset: () =>
     set({
       ...initialState,
+      muted: readLiveMuted(),
     }),
 }));
 
