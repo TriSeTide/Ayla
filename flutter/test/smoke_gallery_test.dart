@@ -40,6 +40,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'AylaBottomTabs（layout/BottomTabs.tsx 1–91 + shell.css 77–162）',
     'AylaGroupTopTabs（components/group/GroupTopTabs.tsx 1–125 + group.css 21–91）',
     'AylaTopNav（layout/TopNav.tsx 1–343 / layout/NarrowTopBar.tsx 1–199）',
+    'AylaTitleBar（Windows 自绘标题栏 · 对应系统 caption，web 无此件）',
     'AylaServerRail（layout/ServerRail.tsx 1–184 + group.css 484–678 + auroraqua.css 216 / 217–229 / 270 / 311–313 / 125–138）',
     'AylaChannelSidebar（layout/ChannelSidebar.tsx 1–627 + group.css 680–1370 + auroraqua.css 54–94 / 142–197 / 236–249 / 288–291 / 310–313 / 655–676）',
     'AylaCreateSheet（layout/CreateSheet.tsx 1–61 + private.css 185–275）',

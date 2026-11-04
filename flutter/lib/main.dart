@@ -27,7 +27,10 @@ import 'package:flutter/scheduler.dart' show SchedulerBinding, FrameTiming;
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:window_manager/window_manager.dart' show windowManager;
+// 桌面窗口控制（自绘标题栏 + 边缘缩放）：只在这些平台可用，调用点全部经
+// aylaUsesCustomTitleBar() / aylaUsesDesktopFullscreen() 判定。
+import 'package:window_manager/window_manager.dart';
+
 
 import 'core/media/media_cache.dart';
 import 'core/storage/ayla_storage_diagnosis.dart';
@@ -59,6 +62,13 @@ import 'widgets/live/android_live_mini_window.dart'
 import 'widgets/shell/overlay_window_app.dart'
     show AylaOverlayBallWindowApp, AylaOverlayPayload;
 import 'widgets/shell/overlay_scrollbar.dart';
+import 'widgets/shell/title_bar.dart'
+    show
+        AylaResizeEdges,
+        AylaResizeEdgeSet,
+        AylaTitleBar,
+        aylaSetupCustomTitleBar,
+        aylaUsesCustomTitleBar;
 import 'theme/aurora_background.dart';
 
 /// **实机掉帧探针（debug + profile）** —— 把「哪一帧慢、慢在 build 还是 raster」落到文件。
@@ -246,10 +256,7 @@ void main() {
   // · 只对 window_manager 真正支持的桌面平台调用；Android/iOS 完全不碰这条通道。
   if (aylaUsesDesktopFullscreen()) {
     unawaited(
-      windowManager.ensureInitialized().catchError((
-        Object error,
-        StackTrace stack,
-      ) {
+      aylaSetupCustomTitleBar().catchError((Object error, StackTrace stack) {
         // 窗口控制失败不能拦住启动：直播全屏会退化成「只有 Overlay 内容层」。
         debugPrint(
           '[AYLA-WINDOW] windowManager.ensureInitialized 失败：$error\n$stack',
@@ -641,20 +648,68 @@ class _AppRoot extends ConsumerStatefulWidget {
 }
 
 class _AppRootState extends ConsumerState<_AppRoot>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, WindowListener {
   /// 组件画布舞台（唯一视觉验收面）。
   bool _showGallery = false;
+
+  /// 窗口是否最大化 —— 决定要不要挂边缘缩放带（最大化窗口没有可拖的边）。
+  ///
+  /// 为什么状态放在这里而不是标题栏内部：缩放的**命中带铺在页面之上**，它和标题栏
+  /// 是两棵不相关的子树，唯一共同祖先是根；把状态抬到根是让「窗口状态」只有一个 owner。
+  bool _maximized = false;
+
+  /// 窗口是否处在窗口级全屏（直播）。全屏时窗口贴满显示器，同样不能有缩放带。
+  bool _windowFullscreen = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (aylaUsesCustomTitleBar()) {
+      windowManager.addListener(this);
+      // 首帧同步：事件只覆盖「变化」，不覆盖「启动时就已经最大化」。
+      unawaited(_syncWindowState());
+    }
   }
 
   @override
   void dispose() {
+    if (aylaUsesCustomTitleBar()) windowManager.removeListener(this);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// 首帧读一次真实窗口状态（与标题栏各自读一次：两者可能独立重建）。
+  Future<void> _syncWindowState() async {
+    try {
+      final bool maximized = await windowManager.isMaximized();
+      if (!mounted || maximized == _maximized) return;
+      setState(() => _maximized = maximized);
+    } on Object catch (error) {
+      debugPrint('[AYLA-WINDOW] isMaximized 失败：$error');
+    }
+  }
+
+  void _setMaximized(bool maximized) {
+    if (!mounted || maximized == _maximized) return;
+    setState(() => _maximized = maximized);
+  }
+
+  @override
+  void onWindowMaximize() => _setMaximized(true);
+
+  @override
+  void onWindowUnmaximize() => _setMaximized(false);
+
+  /// 窗口级全屏期间不挂缩放带：窗口覆盖整块显示器，边上没有可拖的余地。
+  @override
+  void onWindowEnterFullScreen() {
+    if (mounted) setState(() => _windowFullscreen = true);
+  }
+
+  @override
+  void onWindowLeaveFullScreen() {
+    if (mounted) setState(() => _windowFullscreen = false);
   }
 
   /// App 前后台切换 ⇒ 直播观看登记的开/关（2026-10-26 用户实报补齐）。
@@ -707,7 +762,29 @@ class _AppRootState extends ConsumerState<_AppRoot>
             child: Scaffold(
           backgroundColor: Colors.transparent,
           body: AylaAuroraBackground(
-            child: Stack(
+            // 桌面：自绘标题栏 + 页面，纵向排列（原生标题栏已由 runner 去掉，
+            // 见 widgets/shell/title_bar.dart 与 windows/runner/win32_window.h）。
+            // 移动端 / Web：aylaUsesCustomTitleBar() 为假 ⇒ 下面这个 Column
+            // 退化成「只有页面」，与改动前的 Stack 完全等价。
+            // 边缘缩放带只在「窗口化」时存在：最大化 / 全屏的边上没有可拖的余地，
+            // 而它是**铺在页面之上**的透明命中带 —— 留着会抢掉边缘几个像素的点击。
+            // ⚠️ 窗口边线**不在 Dart 画**：那是真窗口的边缘，必须由 DWM 画
+            // （`DWMWA_BORDER_COLOR`），否则它和应用内绘制的圆角半径对不上，
+            // 看起来就是「边线圆角没和窗口圆角重合」。详见 win32_window.cpp。
+            child: AylaResizeEdges(
+              // 只挂下 / 左 / 右：**上边归标题条**（窗口键必须压在缩放带之上），
+              // 否则右上角的关闭键会正好落在上边命中带里，点不动。
+              edges: AylaResizeEdgeSet.content,
+              enabled: aylaUsesCustomTitleBar() &&
+                  !_maximized &&
+                  !_windowFullscreen,
+              child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                if (aylaUsesCustomTitleBar())
+                  const AylaTitleBar(),
+                Expanded(
+                  child: Stack(
               children: <Widget>[
                 // 预加载门 × 路由页面的互斥装配（web App.tsx:48–51）——
                 // 见 layout/app_gate.dart 的库文档（含早期 Stack 塌成 0×0 的尺寸陷阱）。
@@ -730,6 +807,10 @@ class _AppRootState extends ConsumerState<_AppRoot>
                     ),
                   ),
               ],
+                  ),
+                ),
+              ],
+            ),
             ),
           ),
             ),

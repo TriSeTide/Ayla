@@ -22,16 +22,9 @@ constexpr UINT kDetachedBallTapMessage = WM_APP + 2;
 // without Dart asking for it.
 constexpr UINT kDetachedBallClosedMessage = WM_APP + 3;
 
-// DWMWA_WINDOW_CORNER_PREFERENCE (Windows 11 22H2+, SDK 10.0.22621+).
-// Redefined here so the runner still compiles against an older SDK header.
-#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
-#define DWMWA_WINDOW_CORNER_PREFERENCE 33
-#endif
-
-// DWM_WINDOW_CORNER_PREFERENCE values (dwmapi.h). Spelled out instead of using
-// the enum so an older SDK header cannot break the build.
-constexpr int kDwmWindowCornerDoNotRound = 1;  // DWMWCP_DONOTROUND
-constexpr int kDwmWindowCornerDefault = 0;     // DWMWCP_DEFAULT
+// NOTE: the DWM corner/border/nc-rendering attributes used to be declared here.
+// They now live in win32_window.cpp next to SyncWindowFrameDecoration, which is
+// their single owner (see that function for why all three act together).
 
 }  // namespace
 
@@ -243,6 +236,21 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // ---- Ayla custom frame (2026-11-04) -------------------------------------
+  // Answered BEFORE the engine: the engine fans these messages out to every
+  // registered top-level proc delegate, and window_manager's delegate implements
+  // WM_NCCALCSIZE too (its "frameless" path inflates the client rect by the
+  // frame thickness, which would make the Flutter view larger than the window).
+  // Whichever delegate answers first wins, so the frame is settled here.
+  // Design, and the reason the resize edges live in Dart, are in win32_window.h.
+  LRESULT frame_result = 0;
+  if (HandleNcCalcSize(message, hwnd, wparam, lparam, &frame_result)) {
+    return frame_result;
+  }
+  if (message == WM_NCHITTEST) {
+    return HitTestFrame(hwnd, lparam);
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =
@@ -369,20 +377,15 @@ void FlutterWindow::SyncFullscreenWindowState(HWND window) {
   const bool frameless =
       (::GetWindowLong(window, GWL_STYLE) & WS_THICKFRAME) == 0;
 
-  // Second, independent geometric signal: in real fullscreen the CLIENT area is
-  // the whole window (WM_NCCALCSIZE returns 0 after window_manager's
-  // SetAsFrameless), whereas a maximized window still has a caption/border band
-  // => client < window. This does not depend on guessing the plugin's
-  // is_frameless_ bookkeeping, so it catches the "maximized + fullscreen did
-  // nothing" case correctly: that window is NOT visually fullscreen.
-  RECT client{};
-  ::GetClientRect(window, &client);
-  const bool client_fills_window =
-      (frame.right - frame.left) - (client.right - client.left) <= 2 &&
-      (frame.bottom - frame.top) - (client.bottom - client.top) <= 2;
-
-  const bool geometric_fullscreen =
-      covers_monitor && (frameless || client_fills_window);
+  // ⚠️ 2026-11-04（Ayla 自绘标题栏）：**不要再用 client-fills-window 当判据**。
+  // 定制边框让 WM_NCCALCSIZE 恒返回 0（客户区 = 整个窗口，见 win32_window.h），
+  // 于是 client == window 在**最大化窗口上也永远成立** —— 拿它做 OR 会让
+  // 「任务栏自动隐藏的显示器上，最大化窗口」被误判成全屏（后果：Win11 圆角被关掉、
+  // is_fullscreen_ 置位后 WM_DPICHANGED 不再重定位，跨显示器拖动会回不去）。
+  //
+  // 现在唯一可靠的几何信号是 WS_THICKFRAME：只有 window_manager 的
+  // SetFullScreen 会把它剥掉（SetAsFrameless / ~WS_THICKFRAME），最大化窗口保留它。
+  const bool geometric_fullscreen = covers_monitor && frameless;
 
   bool is_fullscreen = geometric_fullscreen;
   if (fullscreen_hint_.has_value()) {
@@ -407,22 +410,11 @@ void FlutterWindow::SyncFullscreenWindowState(HWND window) {
 void FlutterWindow::ApplyFullscreenState(HWND window, bool is_fullscreen) {
   SetFullscreen(is_fullscreen);
 
-  // Win11 rounds every app window's corners; in fullscreen that leaves the
-  // desktop colour visible in all four corners. Turn it off while (and only
-  // while) the window covers a monitor, and back to the system default after.
-  if (donotround_hwnd_ == window && donotround_applied_ == is_fullscreen) {
-    return;
-  }
-  const int preference = is_fullscreen ? kDwmWindowCornerDoNotRound
-                                       : kDwmWindowCornerDefault;
-  const HRESULT hr = ::DwmSetWindowAttribute(
-      window, DWMWA_WINDOW_CORNER_PREFERENCE, &preference,
-      sizeof(preference));
-  // Only remember success: on Windows 10 the attribute does not exist and the
-  // call fails, in which case we retry on the next WM_SIZE instead of
-  // pretending the corners are square when they are not.
-  if (SUCCEEDED(hr)) {
-    donotround_hwnd_ = window;
-    donotround_applied_ = is_fullscreen;
-  }
+  // ⚠️ 圆角 / 阴影 / 1px 边线不再在这里设：`Win32Window::SyncWindowFrameDecoration`
+  // 是那三个 DWM 属性的**唯一 owner**（它在 WM_SIZE 里按「窗口化 / 最大化 / 全屏」
+  // 三态统一切换）。这里只需要把全屏状态登记进去并推动一次重算 ——
+  // 两处都写同一个 DWMWA_WINDOW_CORNER_PREFERENCE 会互相覆盖：
+  // 本函数原来在退出全屏时写 DWMWCP_DEFAULT（0），而 DEFAULT 在 Win11 上等于
+  // **圆角**，于是「最大化窗口退出全屏」会拿到圆角 + 贴屏边 ⇒ 四角露桌面色。
+  SyncWindowFrameDecoration(window);
 }

@@ -165,6 +165,7 @@ class AylaTopNav extends StatefulWidget {
     this.onMenuSelected,
     this.onBack,
     this.dropGroups = const <AylaSearchDropGroup>[],
+    this.underTitleBar = false,
   });
 
   /// 当前一级模块（宽屏模块链选中态）。
@@ -200,6 +201,13 @@ class AylaTopNav extends StatefulWidget {
 
   /// 窄屏形态。
   final AylaTopNavVariant variant;
+
+  /// 宽屏条上方是否已经有一条自绘标题栏（`AylaTitleBar`）占掉了那 12px。
+  ///
+  /// true ⇒ 宽屏外边距用 [wideMarginUnderTitleBar]（上边 0）。
+  /// 语义与 web 不冲突：web 没有窗口 chrome，这 12px 一直存在；桌面把窗口 chrome
+  /// 做进应用顶部后，那 12px 归标题条所有（它更宽、可拖拽、可缩放）。
+  final bool underTitleBar;
 
   /// 窄屏 favorites 的标题文案。
   final String favoritesTitle;
@@ -248,6 +256,13 @@ class AylaTopNav extends StatefulWidget {
 
   /// 宽屏外边距（auroraqua.css:263 `margin: var(--sidebar-gutter) var(--sidebar-gutter) 0`）。
   static const EdgeInsets wideMargin = EdgeInsets.fromLTRB(12, 12, 12, 0);
+
+  /// 宽屏外边距的「上边已由 AylaTitleBar 让出」档（桌面自绘标题栏时用）。
+  ///
+  /// 桌面端窗口顶部由 [AylaTitleBar] 占据 44px（其中下沿 12px 就是这块外边距的位置），
+  /// 再用 [wideMargin] 会在玻璃卡上方多出 12px 空带 —— 那一段既不属于标题条也不属于
+  /// 卡片，正是用户实测「点不到」的无效区（截图红框比标题条高 12px）。
+  static const EdgeInsets wideMarginUnderTitleBar = EdgeInsets.fromLTRB(12, 0, 12, 0);
 
   /// logo 隐藏阈值（shell.css:268–272 `@media (max-width: 1240px)`）。
   static const double logoMinWidth = 1240;
@@ -421,7 +436,9 @@ class _AylaTopNavState extends State<AylaTopNav> {
     // 条 = 浮动圆角卡（auroraqua.css:262–270 覆写）⇒ 复用 [AylaGlassCard]；
     // 模糊档取导航 18（shell.css:166 的 blur(18px) saturate(1.4)），不是卡片默认 24。
     return Padding(
-      padding: AylaTopNav.wideMargin,
+      padding: widget.underTitleBar
+          ? AylaTopNav.wideMarginUnderTitleBar
+          : AylaTopNav.wideMargin,
       child: AylaGlassCard(
         padding: EdgeInsets.zero,
         radius: AylaRadii.rCard,

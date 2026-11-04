@@ -22,8 +22,9 @@
 ///      覆盖整块显示器、无标题栏/任务栏 —— 这是 web `requestFullscreen()` 真正对应的行为，
 ///      只做 ① 时用户看到的是「App 窗口内黑一下」（2026-10 实报）。
 ///      进入/退出都是 `Win32Window` 的 HWND 变换，**不新建窗口、不新建 engine**；
-///      退出时追加 `setTitleBarStyle(normal)` 复位 frameless（见
-///      [AylaDesktopWindowController.restoreTitleBar]）。移动端仍走 ① + 锁横屏。
+///      退出时追加 `setTitleBarStyle(hidden)` 复位 frameless（见
+///      [AylaDesktopWindowController.restoreTitleBar]）。⚠️ 2026-11-04 起原生 caption
+///      已被 runner 去掉，恢复档是 `hidden` 而**不是** `normal`。移动端仍走 ① + 锁横屏。
 ///
 /// ## 公开面
 /// `AylaLiveSrsStatus` · `AylaLivePlayer` · 样张 `aylaLivePlayerSamples()`
@@ -113,7 +114,13 @@ abstract class AylaDesktopWindowController {
   /// （`if (::IsZoomed(mainWindow))` 的 else 分支）；而「最大化状态下进全屏」会让
   /// 进全屏那一步先 `SetAsFrameless()` 把 `is_frameless_` 置真，
   /// 退出时走的是 IsZoomed 分支 ⇒ **永久留在 frameless**（标题栏再也不回来）。
-  /// `setTitleBarStyle(TitleBarStyle.normal)` 是唯一能把这两者都复位的入口。
+  /// `setTitleBarStyle(...)` 是唯一能把这两者都复位的入口。
+  ///
+  /// ⚠️ 2026-11-04（Ayla 自绘标题栏）起**必须写 [TitleBarStyle.hidden]**：
+  /// 原生 caption 已由 runner 去掉（`windows/runner/win32_window.*` 的
+  /// WM_NCCALCSIZE 恒返回 0），`normal` 已不再是正确状态 —— 写它会让
+  /// `title_bar_style_` 与真实窗口不一致，之后任何走 window_manager 内部逻辑的操作
+  /// （`ForceRefresh` / `SetFullScreen` 的恢复分支）都会按「有标题栏」算客户区。
   Future<void> restoreTitleBar();
 }
 
@@ -136,8 +143,14 @@ class _AylaWindowManagerController extends AylaDesktopWindowController {
       windowManager.setFullScreen(fullscreen);
 
   @override
+  // ⚠️ 恢复的是 **Ayla 的无标题栏档**（`hidden`），不是系统档（`normal`）。
+  // 2026-11-04 起原生 caption 由 runner 去掉（`windows/runner/win32_window.*` 的
+  // WM_NCCALCSIZE 恒返回 0），系统档已不再是「正确状态」：写 `normal` 会让
+  // `title_bar_style_` 与真实窗口不一致，之后任何走 window_manager 内部逻辑的操作
+  // （`ForceRefresh` / `SetFullScreen` 的恢复分支）都会按「有标题栏」算客户区。
+  // 语义不变：它仍然是把 `is_frameless_` / `title_bar_style_` 双双复位的那一个入口。
   Future<void> restoreTitleBar() =>
-      windowManager.setTitleBarStyle(TitleBarStyle.normal);
+      windowManager.setTitleBarStyle(TitleBarStyle.hidden);
 }
 
 /// 系统栏（状态栏 / 导航栏）的隐藏与恢复 —— 可注入，便于测试断言「进/退全屏各做了什么」。
@@ -702,7 +715,7 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     // `HlsPlaybackController.videoView` → `buildView()` **每次调用都构造一个新的
     // `Video` widget**（`media_kit_impl.dart` 的 `Video(key: ObjectKey(vc), ...)`）
     // ⇒ `identical` **恒为 false** ⇒ 每帧都 force 同步 ⇒ `_fsRevision.value += 1`
-    // ⇒ ValueListenableBuilder 重�建 ⇒ 父级再次 setState ⇒ **无限自激**，
+    // ⇒ ValueListenableBuilder 重建 ⇒ 父级再次 setState ⇒ **无限自激**，
     // 表现为进直播间立刻卡死/闪退（Windows 直接进程崩溃）。
     //
     // 正确判据：只比较**值语义**的输入（比例 / SRS 状态 / 错误），它们是可空的

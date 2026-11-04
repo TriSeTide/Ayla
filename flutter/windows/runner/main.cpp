@@ -118,10 +118,25 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
-  Win32Window::Size size(1280, 720);
+  // Size at Create() only needs to be sane; the visible restore geometry is
+  // computed later from the maximised size (see SetStartMaximized below), because
+  // the ratio that matters is "the maximised shape, a bit smaller".
+  Win32Window::Size size(1280, 800);
   if (!window.Create(L"ayla_flutter", origin, size)) {
     return EXIT_FAILURE;
   }
+  // The app starts maximised (see SetStartMaximized below), which is the Ayla
+  // default the user asked for ("Ayla 启动默认最大化").
+
+  // 用户要求：「最大化到窗口化时，默认窗口比例不对，要和最大化时等比，窗口小一些」。
+  //
+  // 这里的次序是有讲究的：等比只有拿到「最大化后的尺寸」才成立，而它是在窗口被
+  // 最大化之后才由系统通过 WM_GETMINMAXINFO 给出的。所以必须先最大化、再取、
+  // 再按比例设回。见 Win32Window::SetRestoreFromCurrent（实现与推导在那里）。
+  window.SetMaximizeThenShrinkRestore();
+  // First Show() maximises the window (SW_SHOWMAXIMIZED), so there is no frame
+  // where the app is visible at its restore size.
+  window.SetStartMaximized(true);
   window.SetQuitOnClose(true);
 
   ::MSG msg;

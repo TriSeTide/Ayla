@@ -79,6 +79,7 @@ import '../widgets/shell/create_sheet.dart' show AylaRootOverlay;
 import '../widgets/shell/overlay_window_app.dart'
     show AylaOverlayKind, AylaOverlayPayload;
 import '../widgets/shell/session_activity.dart';
+import '../widgets/shell/title_bar.dart' show aylaUsesCustomTitleBar;
 import '../widgets/shell/top_nav.dart';
 import 'app_back.dart';
 import 'create_sheet_forms.dart';
@@ -251,6 +252,8 @@ class _AppShellState extends ConsumerState<AppShell> {
                 ? 'favorites'
                 : 'default';
     final Widget userAvatarFreeTopNav = AylaTopNav(
+      // 桌面自绘标题栏时，玻璃卡上方那 12px 归标题条（可拖拽/缩放），此处不再留。
+      underTitleBar: aylaUsesCustomTitleBar(),
       module: moduleKey,
       messagesActive: aylaIsMessagesRoute(pathname),
       messageBadge: messageBadge,

@@ -58,8 +58,8 @@ class FlutterWindow : public Win32Window {
   // Which window's Win11 corner rounding we have switched off, if any.
   // See FlutterWindow::SyncFullscreenWindowState (win32 corner rounding leaves
   // the desktop colour visible in the four corners of a fullscreen window).
-  HWND donotround_hwnd_ = nullptr;
-  bool donotround_applied_ = false;
+  // (旧 `donotround_hwnd_` / `donotround_applied_` 已删除：圆角状态现在由
+  //  `Win32Window::SyncWindowFrameDecoration` 单点持有。)
 
   // Explicit "the Dart side says this window is in window-level fullscreen"
   // hint, pushed through the ayla/desktop_window channel by
