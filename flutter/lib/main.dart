@@ -55,7 +55,8 @@ import 'state/chat_state.dart' show aylaRegisterChatStateCurrentUserId;
 import 'pages/live_support.dart' show aylaHandleLiveViewingLifecycle;
 import 'state/room_providers.dart';
 import 'theme/app_theme.dart';
-import 'widgets/live/live_player.dart' show aylaUsesDesktopFullscreen;
+import 'widgets/live/live_player.dart'
+    show aylaLiveWindowFullscreen, aylaUsesDesktopFullscreen;
 import 'widgets/live/live_window_surface.dart' show AylaDetachedLiveWindowApp;
 import 'widgets/live/android_live_mini_window.dart'
     show AylaAndroidLiveMiniWindowApp;
@@ -659,12 +660,18 @@ class _AppRootState extends ConsumerState<_AppRoot>
   bool _maximized = false;
 
   /// 窗口是否处在窗口级全屏（直播）。全屏时窗口贴满显示器，同样不能有缩放带。
+  ///
+  /// 来源 = [aylaLiveWindowFullscreen]（播放器广播），不是 window_manager 的事件
+  /// —— 后者在本 app 的进全屏路径上不会发出。
   bool _windowFullscreen = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // 直播窗口级全屏 ⇒ 标题条与缩放带一起让位（窗口覆盖整块显示器）。
+    aylaLiveWindowFullscreen.addListener(_onLiveFullscreenChanged);
+    _windowFullscreen = aylaLiveWindowFullscreen.value;
     if (aylaUsesCustomTitleBar()) {
       windowManager.addListener(this);
       // 首帧同步：事件只覆盖「变化」，不覆盖「启动时就已经最大化」。
@@ -674,6 +681,7 @@ class _AppRootState extends ConsumerState<_AppRoot>
 
   @override
   void dispose() {
+    aylaLiveWindowFullscreen.removeListener(_onLiveFullscreenChanged);
     if (aylaUsesCustomTitleBar()) windowManager.removeListener(this);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -690,6 +698,13 @@ class _AppRootState extends ConsumerState<_AppRoot>
     }
   }
 
+  void _onLiveFullscreenChanged() {
+    if (!mounted) return;
+    final bool value = aylaLiveWindowFullscreen.value;
+    if (value == _windowFullscreen) return;
+    setState(() => _windowFullscreen = value);
+  }
+
   void _setMaximized(bool maximized) {
     if (!mounted || maximized == _maximized) return;
     setState(() => _maximized = maximized);
@@ -701,16 +716,10 @@ class _AppRootState extends ConsumerState<_AppRoot>
   @override
   void onWindowUnmaximize() => _setMaximized(false);
 
-  /// 窗口级全屏期间不挂缩放带：窗口覆盖整块显示器，边上没有可拖的余地。
-  @override
-  void onWindowEnterFullScreen() {
-    if (mounted) setState(() => _windowFullscreen = true);
-  }
-
-  @override
-  void onWindowLeaveFullScreen() {
-    if (mounted) setState(() => _windowFullscreen = false);
-  }
+  // ⚠️ 不再用 `onWindowEnterFullScreen` / `onWindowLeaveFullScreen`：
+  // window_manager 只在 `wParam == SIZE_MAXIMIZED` 时发这两个事件，而本 app 进全屏
+  // 走 `SetWindowPos` 铺满显示器 ⇒ 事件永不发出（详见 aylaLiveWindowFullscreen 的
+  // 文档）。全屏状态改由播放器广播，本件在 initState 里订阅。
 
   /// App 前后台切换 ⇒ 直播观看登记的开/关（2026-10-26 用户实报补齐）。
   ///
@@ -782,7 +791,9 @@ class _AppRootState extends ConsumerState<_AppRoot>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 if (aylaUsesCustomTitleBar())
-                  const AylaTitleBar(),
+                  // `fullscreenActive` 由播放器广播驱动：直播窗口级全屏时标题条整条让位，
+                  // 否则它压在整屏画面上（2026-11-04 用户实报）。
+                  AylaTitleBar(fullscreenActive: _windowFullscreen),
                 Expanded(
                   child: Stack(
               children: <Widget>[

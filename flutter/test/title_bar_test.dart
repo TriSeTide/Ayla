@@ -29,6 +29,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:window_manager/window_manager.dart'
     show ResizeEdge, WindowListener;
 
+import '../lib/theme/app_theme.dart' show buildAylaTheme;
 import '../lib/theme/preview_theme.dart';
 import '../lib/widgets/shell/title_bar.dart';
 import '../lib/widgets/shell/top_nav.dart' show AylaTopNav;
@@ -248,27 +249,53 @@ void main() {
     expect(chrome.calls, contains('maximize'));
   });
 
-  testWidgets('窗口级全屏（直播）时标题栏让位：条高归零', (
+  testWidgets('直播窗口级全屏时标题栏让位：条高归零（fullscreenActive 驱动）', (
     WidgetTester tester,
   ) async {
-    final FakeChrome chrome = FakeChrome();
-    final FakeWindowSource source = FakeWindowSource();
-    await tester.pumpWidget(host(AylaTitleBar(controller: chrome, events: source)));
+    // ⚠️ 这条**不能**用 `onWindowEnterFullScreen` 去驱动：window_manager 只在
+    // `wParam == SIZE_MAXIMIZED` 时才发该事件，而本 app 进全屏走 SetWindowPos
+    // 铺满显示器 ⇒ 事件永不发出（2026-11-04 实报「直播全屏画面时不用这个标题栏」
+    // 就是第一版监听了这个从不触发的信号）。
+    // 现在的契约：调用方把播放器广播的 aylaLiveWindowFullscreen 传进
+    // `fullscreenActive`，标题条据此让位。
+    //
+    // 宿主必须用 **MaterialApp + Align**：
+    // · `host()` 是 `Column` 宿主 —— 让位后组件返回的 `SizedBox(width: infinity)`
+    //   没有高度约束，会被 Column 撑回 32，量到的永远是旧高度；
+    // · 每次断言前都要 `pump()` 两次（pumpWidget 一帧 + 布局稳定一帧），
+    //   否则 `getSize` 读到的是上一帧的布局结果。
+    // 与 `test/tmp_iso` 里已验证可行的宿主一致（MaterialApp + Scaffold + Align）。
+    Widget hosted(Widget child) => MaterialApp(
+      theme: buildAylaTheme(),
+      home: Scaffold(
+        body: Align(alignment: Alignment.topLeft, child: child),
+      ),
+    );
+
+    await tester.pumpWidget(hosted(const AylaTitleBar()));
+    await tester.pump();
     await tester.pump();
     expect(
       tester.getSize(find.byType(AylaTitleBar)).height,
       AylaTitleBarMetrics.height,
     );
 
-    source.onWindowEnterFullScreen();
+    await tester.pumpWidget(hosted(const AylaTitleBar(fullscreenActive: true)));
     await tester.pump();
-    expect(tester.getSize(find.byType(AylaTitleBar)).height, 0);
+    await tester.pump();
+    expect(
+      tester.getSize(find.byType(AylaTitleBar)).height,
+      0,
+      reason: '直播全屏时标题条必须整条让位，否则压在视频画面上',
+    );
 
-    source.onWindowLeaveFullScreen();
+    await tester.pumpWidget(hosted(const AylaTitleBar()));
+    await tester.pump();
     await tester.pump();
     expect(
       tester.getSize(find.byType(AylaTitleBar)).height,
       AylaTitleBarMetrics.height,
+      reason: '退出全屏后标题条要回来',
     );
   });
 

@@ -199,6 +199,7 @@ class AylaTitleBar extends StatefulWidget {
     this.title = 'Ayla',
     this.controller = const _AylaWindowManagerChrome(),
     this.events = const AylaWindowManagerEvents(),
+    this.fullscreenActive = false,
   });
 
   /// 品牌文案（默认品牌名）。
@@ -210,6 +211,17 @@ class AylaTitleBar extends StatefulWidget {
   /// 窗口状态事件源（生产 = `windowManager`；测试注入替身以直接派发事件）。
   final AylaWindowEvents events;
 
+  /// 窗口是否处在**直播窗口级全屏**（铺满整块显示器）。
+  ///
+  /// true ⇒ 整条标题栏让位（高度归零），把屏幕让给视频画面。
+  ///
+  /// ⚠️ 由调用方（`main.dart` 的 `_AppRootState`）用播放器广播的
+  /// `aylaLiveWindowFullscreen` 驱动，**不能**靠 [events] 的进/退全屏事件：
+  /// window_manager 只在 `wParam == SIZE_MAXIMIZED` 时才发那两个事件，
+  /// 而本 app 进全屏走 `SetWindowPos` 铺满显示器 ⇒ 事件永不发出。
+  /// （回归锁：`test/title_bar_test.dart` 的「全屏信号契约」一例。）
+  final bool fullscreenActive;
+
   @override
   State<AylaTitleBar> createState() => _AylaTitleBarState();
 }
@@ -217,9 +229,6 @@ class AylaTitleBar extends StatefulWidget {
 class _AylaTitleBarState extends State<AylaTitleBar> {
   /// 当前是否最大化（以窗口事件为准）。
   bool _maximized = false;
-
-  /// 窗口是否处在窗口级全屏（直播全屏）—— 那时本条整体让位。
-  bool _fullscreen = false;
 
   /// 是否正在等一次窗口动作返回（防连点：`SC_MOVE` 是系统级模态）。
   bool _busy = false;
@@ -279,13 +288,6 @@ class _AylaTitleBarState extends State<AylaTitleBar> {
     setState(() => _maximized = maximized);
   }
 
-  /// 窗口级全屏（直播全屏）期间整条让位：那时窗口覆盖整块显示器，留着这条会压在
-  /// 视频画面上。事件来自 window_manager 的 `enter-full-screen` / `leave-full-screen`
-  /// （原生 `SetFullScreen` 内 `_EmitEvent`）。
-  void _onWindowFullscreenChanged(bool fullscreen) {
-    if (!mounted || fullscreen == _fullscreen) return;
-    setState(() => _fullscreen = fullscreen);
-  }
 
   /// 执行一次窗口动作（独立 try/catch：任何失败都必须复位 [_busy]）。
   Future<void> _run(Future<void> Function() action) async {
@@ -310,7 +312,7 @@ class _AylaTitleBarState extends State<AylaTitleBar> {
   @override
   Widget build(BuildContext context) {
     // 窗口级全屏（直播）时让位：高度归零，页面吃满整屏。
-    if (_fullscreen) return const SizedBox(width: double.infinity);
+    if (widget.fullscreenActive) return const SizedBox(width: double.infinity);
     final AylaTextStyles t = AylaTextStyles.of(context);
     // ⚠️ 本条**不铺任何底色/模糊**（理由见库文档「视觉」节）：
     // 它直接坐在 AylaAuroraBackground 的极光上，只有品牌字与三键可见。
@@ -391,7 +393,7 @@ class _AylaTitleBarState extends State<AylaTitleBar> {
     );
   }
   /// 是否可缩放：最大化时窗口已铺满工作区，没有可拖的边。
-  bool get resizable => !_maximized && !_fullscreen;
+  bool get resizable => !_maximized && !widget.fullscreenActive;
 
 
   /// 起一次原生缩放（`WM_SYSCOMMAND / SC_SIZE`，与系统边框同源）。
@@ -479,11 +481,7 @@ class _ChromeListener with WindowListener {
   @override
   void onWindowUnmaximize() => _state._onWindowMaximized(false);
 
-  @override
-  void onWindowEnterFullScreen() => _state._onWindowFullscreenChanged(true);
 
-  @override
-  void onWindowLeaveFullScreen() => _state._onWindowFullscreenChanged(false);
 }
 
 /// 品牌圆点（`--pink-500` 实心点；不带辉光阴影 ⇒ 不产生离屏层）。
@@ -1238,7 +1236,10 @@ Widget aylaTitleBarSamples() {
             caption: '③ 直播窗口级全屏（整条让位：高度归零）',
             child: AylaTitleBar(
               controller: fake,
-              events: _AylaGalleryEvents(fullscreen: true),
+              events: _AylaGalleryEvents(),
+              // 全屏档直接传参：生产里由 main.dart 的 _AppRootState 用播放器广播的
+              // aylaLiveWindowFullscreen 驱动（不能靠 window_manager 的事件，见该字段文档）。
+              fullscreenActive: true,
             ),
           ),
           // 悬停态：静态画面无法触发 hover，故直接画两个「已悬停」的键。
@@ -1320,22 +1321,14 @@ class _AylaGalleryChrome extends AylaWindowChromeController {
   Future<bool> isMaximized() async => maximized;
 }
 
-
-/// 样张用事件源：可选择一开始就处在全屏（第 ③ 档），并吞掉订阅。
+/// 样张用事件源：只吞掉订阅（不往真实通道注册任何监听）。
+///
+/// 全屏那一档不再经过事件源 —— 由 `AylaTitleBar.fullscreenActive` 直接给。
 class _AylaGalleryEvents extends AylaWindowEvents {
-  _AylaGalleryEvents({this.fullscreen = false});
-
-  final bool fullscreen;
+  _AylaGalleryEvents();
 
   @override
-  void addListener(WindowListener listener) {
-    if (fullscreen) {
-      // 下一帧再派发：build 期间不能 setState。
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => listener.onWindowEnterFullScreen(),
-      );
-    }
-  }
+  void addListener(WindowListener listener) {}
 
   @override
   void removeListener(WindowListener listener) {}

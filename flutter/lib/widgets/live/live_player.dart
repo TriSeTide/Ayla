@@ -59,6 +59,26 @@ enum AylaLiveSrsStatus { degraded, idle, live }
 /// 悬浮按钮无操作自动隐藏时长（tsx 24 `AUTO_HIDE_MS = 3000`）。
 const Duration kLivePlayerAutoHide = Duration(milliseconds: 3000);
 
+/// 直播是否处于**窗口级全屏**（桌面端窗口跳出应用边框、铺满整块显示器）。
+///
+/// ## 为什么需要这个全局信号（2026-11-04 用户实报「直播全屏画面时不用这个标题栏」）
+/// 自绘标题栏 AylaTitleBar 必须在直播全屏时整条让位，否则它压在视频画面上。
+/// 第一版让它监听 window_manager 的 onWindowEnterFullScreen / LeaveFullScreen ——
+/// **那是死路**：读插件源码（windows/window_manager_plugin.cpp 的 WM_SIZE 分支），
+/// 这两个事件只在 wParam == SIZE_MAXIMIZED / SIZE_RESTORED 时才 _EmitEvent，
+/// 而本 app 进全屏走的是 SetWindowPos 直接铺满显示器（窗口没被 maximize）
+/// ⇒ 事件**永远不会发出**，标题栏在直播全屏里一直挂着。
+///
+/// ## 为什么用静态 ValueNotifier 而不是 Provider
+/// 全屏的 owner 是播放器（_AylaLivePlayerState），消费者是应用根（main.dart）里的
+/// 标题栏 —— 两者之间隔着 Navigator / Scaffold，没有现成的 provider 通路；
+/// 而这是**进程级单例状态**（同一时刻只可能一块屏幕在播），静态 notifier 与语义一致，
+/// 也避免为了一个布尔量去改 provider 图。
+///
+/// 消费者：lib/main.dart 的 _AppRootState（标题条与缩放带一起让位）。
+final ValueNotifier<bool> aylaLiveWindowFullscreen =
+    ValueNotifier<bool>(false);
+
 /// 刷新键旋转时长（app.css 3619 `live-refresh-spin 0.6s`；tsx 328 的复位计时 650ms）。
 const Duration kLivePlayerSpin = Duration(milliseconds: 600);
 const Duration kLivePlayerSpinReset = Duration(milliseconds: 650);
@@ -448,6 +468,13 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
   ///    （否则全屏层已插、窗口没进 —— 用户看到「黑一下」且退不回去）。
   Future<void> _applyDesktopFullscreen(bool fullscreen) async {
     final AylaDesktopWindowController window = _window;
+    // 先广播「正在进/退全屏」：标题栏与缩放带据此让位。
+    // 不能监听 window_manager 的 onWindowEnterFullScreen —— 见
+    // aylaLiveWindowFullscreen 的说明（该事件在本 app 的进全屏路径上不会发出）。
+    // 放在 setFullScreen 之前：进全屏时标题栏要在窗口跳出去之前就让位（避免
+    // 一帧「标题栏压在整屏画面顶部」的闪烁）；退全屏时提前恢复也没有副作用
+    // （此时窗口还在全屏，标题栏被裁在窗口内，不会溢出到屏幕边缘）。
+    aylaLiveWindowFullscreen.value = fullscreen;
     if (fullscreen) {
       try {
         if (await window.isMaximized()) {
