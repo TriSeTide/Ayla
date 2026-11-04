@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Ayla Windows (服务器后端)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "windows",
+      "toolArgs": [
+        "--dart-define=AYLA_API_BASE=https://s.ayla.trise.top:26211"
+      ]
+    },
+    {
+      "name": "Ayla Windows (本地后端 127.0.0.1:8100)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "windows"
+    }
+  ]
+}
