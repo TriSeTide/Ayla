@@ -518,7 +518,21 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
             ),
         ],
         // 权威名单（web 弹层打开时自拉；Flutter 侧由页面持有、经本投影注入）
-        viewerSheet: viewerSheet.value,
+        viewerSheet: viewerSheet.value.copyWith(
+          // 名单行点击 → 个人主页（web `LiveViewerSheet.tsx:121–124` 的
+          // `goUserProfile(me, viewer.user_id)` + `onClose()`）。
+          // ⚠️ 同 `live_room_page.dart` 的说明：该字段此前三页都没赋值 ⇒ 点行只关弹层。
+          onOpenProfile: (AylaLiveViewerItem viewer) =>
+              AylaLiveViewerSheetController.openProfile(
+            context,
+            currentUserId: selfId,
+            targetUserId: viewer.userId,
+          ),
+          // 失败态「重试」键（web `LiveViewerSheet.tsx:94–100` 的 reloadToken 自增）。
+          // ⚠️ 同 `live_room_page.dart` 的说明：`onRetry` 此前三页都不赋值 ⇒ 点了没反应。
+          // `retry` 返回闭包 ⇒ 必须**调用** `viewerSheet.retry(...)`。
+          onRetry: viewerSheet.retry(widget.channelId),
+        ),
         danmaku: session.danmakuEntries(senderOnlineOf: senderOnlineOf),
         sending: session.sending,
         sendError: session.sendError,
@@ -576,8 +590,8 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
       )),
       videoView: session.videoView,
       videoAspectRatio: session.videoAspectRatio,
-      onOpenProfile: (AylaLiveViewerItem item) =>
-          context.push('/user/${Uri.encodeComponent(item.userId)}'),
+      // ⚠️ 这里曾有 `onOpenProfile: …`（死参数，已删除）—— 见 live_room_body.dart 的
+      // 字段注释；名单跳转走 `data.viewerSheet.copyWith(onOpenProfile: …)`。
       // 头像导航（web `DanmakuList.tsx:52–58` 弹幕发送者 + `LiveHostAvatar.tsx:44–49` 主播）：
       // 语义 = `utils/navigation.ts:24–35` 的 goUserProfile（自己 → /profile，
       // 他人 → /user/:id，空 id 不跳）—— 复用名单弹层已实现的同一静态方法。

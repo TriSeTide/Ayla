@@ -191,7 +191,6 @@ class AylaLiveRoomBody extends StatefulWidget {
     this.videoView,
     this.videoAspectRatio,
     this.directoryFooter,
-    this.onOpenProfile,
     this.onOpenSenderProfile,
     this.onOpenHostProfile,
     this.onSaveOwner,
@@ -329,8 +328,11 @@ class AylaLiveRoomBody extends StatefulWidget {
   final Widget? directoryFooter;
   final Widget? railDirectoryFooter;
 
-  /// 观众行跳个人主页。
-  final ValueChanged<AylaLiveViewerItem>? onOpenProfile;
+  // ⚠️ 这里曾有一个 `onOpenProfile` 字段（「观众行跳个人主页」），**全文件零处读取**：
+  // 三个直播页都往它上面挂跳转回调，看起来接好了，实际弹层读的是
+  // `AylaLiveViewerSheetData.onOpenProfile`（`live_viewers.dart:496`）⇒
+  // 「在看名单里点头像点不动」长期存在（2026-11-04 用户实报）。
+  // 已删除该死参数，跳转接线统一走 `data.viewerSheet` 的那一份。
 
   /// 点弹幕发送者头像 → 个人主页（web `DanmakuList.tsx:52–58` 的
   /// `onClick={() => goUserProfile(null, item.sender.user_id)}`；参数 = senderUserId）。

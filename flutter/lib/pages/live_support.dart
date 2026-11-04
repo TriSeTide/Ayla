@@ -1760,6 +1760,14 @@ class AylaLiveViewerSheetController extends ChangeNotifier {
         hasMore: page.hasMore,
         elysiaUserId: _value.elysiaUserId,
         onRetry: _value.onRetry,
+        // ⚠️ 这里的 `onOpenProfile` **恒 null**（`_value` 只由本类写入，本类从不给它赋值）
+        // ⇒ 它**不是**「点名单行跳主页」的接线点。那个回调由**页面在 build 里**注入：
+        // `AylaLiveRoomData.viewerSheet: viewerSheet.value.copyWith(onOpenProfile: …)`
+        // （见 `live_room_page.dart` / `live_studio_page.dart` / `group_live_page.dart`）。
+        // 为什么不放在这里：跳转需要 `BuildContext` 与「当前登录用户 id」，两者都只在
+        // 页面的 build 里可靠可得（控制器是懒建并缓存的，把 context 闭包存进来会用到
+        // 已 dispose 的 context）。2026-11-04 的「在看名单点头像点不动」正是
+        // 把跳转挂在了一个**没人读的字段**上导致的，接线点只能有一个。
         onOpenProfile: _value.onOpenProfile,
       );
     } catch (error) {

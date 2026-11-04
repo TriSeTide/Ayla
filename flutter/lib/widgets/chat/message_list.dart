@@ -1160,6 +1160,18 @@ class _AylaMessageListState extends State<AylaMessageList> {
             // 长按三档的去抖在气泡里（`message_bubble.dart` 的 `_onSenderTap`：
             // 250ms 延迟、双击取消挂起单击、长按后抑制 click），本处只负责「到了就跳」。
             onSenderClick: () => _goUserProfile(m.senderId),
+            // @ 提及胶囊 → 个人主页（web `MediaContent.tsx:428–437` 的
+            // `onClick={() => goUserProfile(currentUserId, seg.user_id)}`）。
+            //
+            // ⚠️ **2026-11-04 修复（胶囊是按钮但点了没反应）**：`onMentionTap` 从
+            // `AylaMessageBubble` 一路透传到 `_MentionToken`（8 层），但**全仓没有
+            // 任何生产调用点传值** ⇒ 最顶层恒 null ⇒ 胶囊仍渲染成按钮外观
+            // （`SystemMouseCursors.click` + `Semantics(button: true)`）却无 onTap。
+            // 与上面 `onSenderClick` **完全同构**：同一条消息里的发送者头像与 @ 胶囊
+            // 都指向「web goUserProfile」，导航归属在本滚动区（已持 `currentUserId`），
+            // 不给页面加参数、不改任何公开签名。
+            // 契约锁：`test/mention_tap_navigation_test.dart`。
+            onMentionTap: _goUserProfile,
             actionsOpen: _activeActionsId == m.id,
             onToggleActions: () => setState(() {
               _activeActionsId = _activeActionsId == m.id ? null : m.id;

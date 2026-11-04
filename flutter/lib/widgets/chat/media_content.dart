@@ -37,6 +37,7 @@ import 'dart:io' show File;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/media/audio_playback.dart';
 import '../../core/media/media_cache.dart';
@@ -136,7 +137,15 @@ class AylaMediaContent extends StatefulWidget {
   /// 点播播放器工厂（null = 按平台创建；测试/预览注入替身）。
   final VodPlayerFactory? vodPlayerFactory;
 
-  /// `mention` 段点击（web `goUserProfile`）—— 导航属页面层，未接线时按钮仍渲染。
+  /// `mention` 段点击（web `goUserProfile`）—— **回调优先**，为 null 时本件自己导航。
+  ///
+  /// ⚠️ 2026-11-04 语义变更（第三次同款缺口的收口）：web 的 `MediaContent.tsx:432`
+  /// 是 `onClick={() => goUserProfile(currentUserId, seg.user_id)}`，而 `currentUserId`
+  /// 由组件自己 `useAuthStore` 取（`:379`）—— **组件自带导航，不依赖父级注入**。
+  /// Flutter 侧此前把导航完全推给上层，于是每新增一个调用点就漏一次
+  /// （`AylaMessageList` 由 task-3 接好；`directory_result_cards.dart:411` 漏了）。
+  /// 现在回调为 null 时由 [_AylaMediaContentState._fallbackGoUserProfile] 兜底，
+  /// 对齐 web「组件自己跳」的语义；**传了回调的调用点行为一字不变**（回调优先）。
   final void Function(String userId)? onMentionTap;
 
   /// 文件下载完成（web 由浏览器托管；Flutter 侧把落盘路径交回调用方提示）。
@@ -176,6 +185,44 @@ class _AylaMediaContentState extends State<AylaMediaContent> {
       _media = widget.msg.media;
       _failed = false;
     }
+  }
+
+  /// `mention` 段的**自带导航回退**（web `MediaContent.tsx:428–437` 的组件内
+  /// `goUserProfile`；`:379` 的 `currentUserId` 在 Flutter 侧由
+  /// [AylaMediaContent.currentUserId] 注入）。
+  ///
+  /// 与 `message_list.dart:958–969` 的 `_goUserProfile` **完全同款**
+  /// （web `utils/navigation.ts:25–35`）：
+  /// · 目标 id 空缺 ⇒ 不跳（web `if (!targetUserId) return`）；
+  /// · 目标 = 当前用户 ⇒ `/profile`（tsx 30–32）；
+  /// · 否则 ⇒ `/user/<encodeURIComponent(id)>`（tsx 33）；
+  /// · 两者都走 `push`（web `navigateTo` 是 history push，可返回上一页）；
+  /// · 无 GoRouter（纯组件测试 / 画布宿主）⇒ 静默 no-op（web 未注册 bridge 时同款，
+  ///   `navigation.ts:21–22` 的 `navigateFn?.(path)`）。
+  ///
+  /// ⚠️ **只在 [AylaMediaContent.onMentionTap] 为 null 时走这里**（回调优先）——
+  /// 已接线的调用点（`message_list.dart`）行为一字不变，也不会两条路都跳。
+  void _fallbackGoUserProfile(String? targetUserId) {
+    final String? target = targetUserId;
+    if (target == null || target.isEmpty) return;
+    final GoRouter? router = GoRouter.maybeOf(context);
+    if (router == null) return;
+    final String? me = widget.currentUserId;
+    if (me != null && me == target) {
+      router.push('/profile');
+      return;
+    }
+    router.push('/user/${Uri.encodeComponent(target)}');
+  }
+
+  /// `mention` 段点击：**回调优先**，未注入回调时本件自己导航。
+  void _handleMentionTap(String userId) {
+    final void Function(String userId)? cb = widget.onMentionTap;
+    if (cb != null) {
+      cb(userId);
+      return;
+    }
+    _fallbackGoUserProfile(userId);
   }
 
   /// WS 帧路径：只有 media_id → 异步补拉 descriptor（tsx 781–804）。
@@ -241,7 +288,9 @@ class _AylaMediaContentState extends State<AylaMediaContent> {
     if (kind == AylaMessageType.mixed) {
       return _MixedMedia(
         msg: widget.msg,
-        onMentionTap: widget.onMentionTap,
+        // ⚠️ 这里传的是 **state 的方法**（回调优先 + 自带导航回退），不是原样透传
+        // `widget.onMentionTap` —— 见 [AylaMediaContent.onMentionTap] 的文档。
+        onMentionTap: _handleMentionTap,
         vodPlayerFactory: widget.vodPlayerFactory,
         currentUserId: widget.currentUserId,
       );
@@ -1082,6 +1131,9 @@ class _MixedMediaState extends State<_MixedMedia> {
                   label: seg.mentionLabel,
                   isMe: widget.currentUserId != null &&
                       seg.userId == widget.currentUserId,
+                  // 空 userId ⇒ onTap 为 null（胶囊不可点，web `goUserProfile`
+                  // 的 `if (!targetUserId) return` 同义）；否则交给上层注入的
+                  // handler —— `AylaMediaContent` 传的是「回调优先 + 自带导航回退」。
                   onTap: seg.userId == null
                       ? null
                       : () => widget.onMentionTap?.call(seg.userId!),

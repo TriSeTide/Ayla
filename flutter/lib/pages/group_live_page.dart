@@ -550,7 +550,24 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
                 retry: history.retry,
               ),
         // 权威名单（web 弹层打开时自拉；Flutter 侧由页面持有、经本投影注入）
-        viewerSheet: viewerSheet.value,
+        viewerSheet: viewerSheet.value.copyWith(
+          // 名单行点击 → 个人主页（web `LiveViewerSheet.tsx:121–124` 的
+          // `goUserProfile(me, viewer.user_id)` + `onClose()`）。
+          // ⚠️ 同 `live_room_page.dart` 的说明：该字段此前三页都没赋值 ⇒ 点行只关弹层。
+          // 本页 `selfId` 是「取不到时给空串」口径（见上），这里按 goUserProfile 的
+          // `me` 语义归一成 null（自己 → /profile，他人 → /user/:id）。
+          onOpenProfile: (AylaLiveViewerItem viewer) =>
+              AylaLiveViewerSheetController.openProfile(
+            context,
+            currentUserId: selfId.isEmpty ? null : selfId,
+            targetUserId: viewer.userId,
+          ),
+          // 失败态「重试」键（web `LiveViewerSheet.tsx:94–100` 的 reloadToken 自增）。
+          // ⚠️ 同 `live_room_page.dart` 的说明：`onRetry` 此前三页都不赋值 ⇒ 点了没反应。
+          // `retry` 返回闭包 ⇒ 必须**调用**它；本页 channelId 是 int ⇒ 用 `'$channelId'`
+          // （与既有 `onOpenViewerSheet: () => viewerSheet.onOpen('$channelId')` 一致）。
+          onRetry: viewerSheet.retry('$channelId'),
+        ),
       ),
       // 弹层打开 → 页面发起同一次拉取（`LiveViewerSheet.tsx:44–65`）
       onOpenViewerSheet: () => viewerSheet.onOpen('$channelId'),

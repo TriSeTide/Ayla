@@ -355,7 +355,32 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
                 retry: history.retry,
               ),
         // 权威名单（web 弹层打开时自拉；Flutter 侧由页面持有、经本投影注入）
-        viewerSheet: viewerSheet.value,
+        viewerSheet: viewerSheet.value.copyWith(
+          // 名单行点击 → 个人主页（web `LiveViewerSheet.tsx:121–124` 的
+          // `goUserProfile(me, viewer.user_id)` + `onClose()`）。
+          //
+          // ⚠️ 2026-11-04 用户实报「观看直播的人的头像点击无法跳转」的**唯一根因**：
+          // `AylaLiveViewerSheetData.onOpenProfile` 此前在三个直播页**都没有赋值**
+          // ⇒ `live_viewers.dart:496` 的 `data.onOpenProfile?.call(viewer)` 恒 null，
+          // 点行只关弹层、不跳转。页面层必须在这里填，弹层自己拿不到 `me`/路由。
+          onOpenProfile: (AylaLiveViewerItem viewer) =>
+              AylaLiveViewerSheetController.openProfile(
+            context,
+            currentUserId: selfId,
+            targetUserId: viewer.userId,
+          ),
+          // 失败态的「重试」键（web `LiveViewerSheet.tsx:94–100` 的
+          // `setReloadToken(v => v + 1)` → `useEffect([channelId, reloadToken])` 重拉）。
+          //
+          // ⚠️ 同一形态的第二个缺口（2026-11-04 同轮收口）：`onRetry` 此前三页都不赋值
+          // ⇒ `live_viewers.dart:452` 的 `onPressed: data.onRetry` 恒 null，
+          // 弹层进 503/读取失败态后**「重试」点了完全没反应** —— 而那是 presence
+          // 存储不可用时唯一的恢复出路。
+          //
+          // `retry` 是 `VoidCallback retry(String channelId)`（**返回闭包**）⇒ 必须
+          // **调用**它拿回调，不能传方法引用。
+          onRetry: viewerSheet.retry(widget.channelId),
+        ),
       ),
       onSelect: _goTo,
       // 返回：能回退就 pop（进房是 push），栈底回大厅。
@@ -392,8 +417,9 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       )),
       videoView: session.videoView,
       videoAspectRatio: session.videoAspectRatio,
-      onOpenProfile: (AylaLiveViewerItem item) =>
-          context.push('/user/${Uri.encodeComponent(item.userId)}'),
+      // ⚠️ 这里曾有 `onOpenProfile: …` —— 它喂的是 `AylaLiveRoomBody.onOpenProfile`，
+      // 而那个参数**全文件零处读取**（已删除，见 live_room_body.dart 的字段注释）。
+      // 在看名单的跳转走上面 `data.viewerSheet.copyWith(onOpenProfile: …)`。
       // 头像导航（web `DanmakuList.tsx:52–58` 弹幕发送者 + `LiveHostAvatar.tsx:44–49` 主播）：
       // 语义 = `utils/navigation.ts:24–35` 的 goUserProfile（自己 → /profile，
       // 他人 → /user/:id，空 id 不跳）—— 直接复用名单弹层已实现的同一静态方法。
