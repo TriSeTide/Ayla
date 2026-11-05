@@ -49,6 +49,11 @@ class _RecordingPlayer implements HlsPlatformPlayer {
   void Function()? onResume;
   @override
   void Function(String detail)? onFatal;
+
+  /// P1-4 新增接口成员（非 fatal 的分片级故障上报）。替身不模拟它，留空即可。
+  @override
+  void Function(String detail)? onFragmentError;
+
   @override
   void Function(Duration position)? onPosition;
 
