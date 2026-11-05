@@ -188,8 +188,41 @@ typedef AylaLiveFullscreenBackHandler = bool Function();
 /// （进全屏登记、退全屏与 dispose 注销）—— 同一时刻最多一个全屏宿主。
 AylaLiveFullscreenBackHandler? aylaLiveFullscreenBackHandler;
 
+/// 客户端更新弹窗开着时的返回键处理器（由 [AylaUpdateHost] 登记/注销）。
+///
+/// ## 为什么必须有这一档（2026-11-05 用户需求：电脑端 + 手机端都要能更新）
+/// 更新弹窗**不是路由**，它是 `AppShell` 的 `Stack` 里的一层模态浮层 ⇒ 页面级
+/// `PopScope` 到不了（见文件头第 3 条机制链），返回键会一路落到 [AylaBackAction.homeExit]
+/// —— 在强制更新弹窗上「再按一次退出应用」，等于**绕过更新**。
+///
+/// 语义与 [AylaLiveFullscreenBackHandler] 同族：**当前活着的那一个宿主**登记，
+/// 返回键宿主在最前面问它；返回 `true` = 本次已处理（关掉弹窗，或强制更新时什么都不做）。
+typedef AylaUpdateDialogBackHandler = bool Function();
+
+/// 当前是否有更新弹窗开着（null = 没有）。
+AylaUpdateDialogBackHandler? aylaUpdateDialogBackHandler;
+
+/// 当前是否有**不可关闭**的更新弹窗开着（强制更新 / 正在下载）。
+///
+/// ## 为什么需要它（2026-11-05 审计发现的真实逃逸口）
+/// `AylaRootOverlay` 挂在 root Overlay 上，而 root Overlay 的宿主 Navigator 在
+/// `main.dart` 的 `Column[标题栏, Expanded(Stack[Navigator])]` 的 **Expanded 里面**
+/// ⇒ **Windows 自绘标题栏是它的兄弟且在上方**，弹窗遮罩永远铺不到那 32px
+/// （`widgets/shell/create_sheet.dart:60–66` 早就记着同一条实测结论）。
+///
+/// 后果不是视觉问题而是**功能逃逸**：强制更新弹窗开着时，右上角的最小化/关闭键
+/// 仍然可点 ⇒ 用户点 X 直接关掉 App，等于绕过强制更新。
+///
+/// ⇒ 由 `state/update_providers.dart` 的 [AylaUpdateHost] 在「mandatory 或 busy」时置真，
+/// `main.dart` 把它传给 [AylaTitleBar.windowKeysLocked] 禁用窗口键
+///（拖拽/边缘缩放不受影响 —— 那些不构成逃逸）。
+final ValueNotifier<bool> aylaWindowChromeLock = ValueNotifier<bool>(false);
+
 /// 逐级返回的档位（自上而下，先命中者胜）。
 enum AylaBackAction {
+  /// 客户端更新弹窗开着 ⇒ 返回键只关弹窗，**不** pop 路由、更不退出 App。
+  updateDialog,
+
   /// 直播全屏中 ⇒ 先退出全屏（不离开直播间）。
   liveFullscreen,
 
@@ -230,8 +263,16 @@ AylaBackAction aylaBackActionFor({
   required String pathname,
   bool hasEntryOrigin = false,
   bool hasLiveFullscreen = false,
+  bool hasUpdateDialog = false,
 }) {
-  // 直播全屏**排在最前面**：全屏是浮层、不是路由，此时按返回的语义是「退出全屏」，
+  // 更新弹窗**排在所有档之前**：它是**模态**（web 上就是盖住整页的 fixed 浮层），
+  // 此时按返回的语义只有两种 —— 可关的弹窗就关掉它，强制更新就什么都不做。
+  // 绝不能落到 popRoute / goHome / homeExit：
+  // · `popRoute`/`goHome` 会把用户正在看的更新说明连同页面一起换掉；
+  // · `homeExit` 会「再按一次退出应用」——**在强制更新弹窗上退出 App 等于绕过更新**，
+  //   正是必须禁止的那条（用户口径：强制更新不可关闭）。
+  if (hasUpdateDialog) return AylaBackAction.updateDialog;
+  // 直播全屏其次：全屏是浮层、不是路由，此时按返回的语义是「退出全屏」，
   // 与「当前在哪个路由 / 能不能 pop」都无关（群内直播同样适用）。
   if (hasLiveFullscreen) return AylaBackAction.liveFullscreen;
   // 群场景：5 条群路由都由 `GroupPage` 承担（见 `group_page.dart` 的 `_handleSystemBack`）。
@@ -345,7 +386,20 @@ class _AylaBackButtonHostState extends State<AylaBackButtonHost> {
       pathname: widget.pathname,
       hasEntryOrigin: hasOrigin,
       hasLiveFullscreen: aylaLiveFullscreenBackHandler != null,
+      hasUpdateDialog: aylaUpdateDialogBackHandler != null,
     )) {
+      case AylaBackAction.updateDialog:
+        // 更新弹窗是模态：只让**它自己**决定（可关的关掉，强制更新时忽略）。
+        // 这里绝不 `return false`（会落到 go_router pop ⇒ 连页面一起换掉）。
+        _confirm.reset();
+        final AylaUpdateDialogBackHandler? onUpdateBack =
+            aylaUpdateDialogBackHandler;
+        if (onUpdateBack == null) {
+          // 竞态兜底（登记刚被注销）：什么都不做，别让返回键穿到 App 退出。
+          return true;
+        }
+        onUpdateBack();
+        return true;
       case AylaBackAction.liveFullscreen:
         // 只退出全屏，**不** pop 路由（用户要的是「回到没全屏的直播间」）。
         _confirm.reset();

@@ -200,6 +200,7 @@ class AylaTitleBar extends StatefulWidget {
     this.controller = const _AylaWindowManagerChrome(),
     this.events = const AylaWindowManagerEvents(),
     this.fullscreenActive = false,
+    this.windowKeysLocked = false,
   });
 
   /// 品牌文案（默认品牌名）。
@@ -221,6 +222,18 @@ class AylaTitleBar extends StatefulWidget {
   /// 而本 app 进全屏走 `SetWindowPos` 铺满显示器 ⇒ 事件永不发出。
   /// （回归锁：`test/title_bar_test.dart` 的「全屏信号契约」一例。）
   final bool fullscreenActive;
+
+  /// 是否禁用三个窗口键（最小化 / 最大化 / 关闭）。
+  ///
+  /// ## 为什么需要（2026-11-05）
+  /// 标题栏在 `main.dart` 里是 `Column[标题栏, Expanded(Stack[Navigator])]` 的**第一个**
+  /// 子级，而所有根 Overlay（含强制更新弹窗）都在 Navigator 里 ⇒ **任何弹窗都盖不住
+  /// 这 32px**。强制更新期间若窗口键仍可点，用户点 X 就能关掉 App，等于绕过更新。
+  ///
+  /// 拖拽与边缘缩放**不**受此限制（它们不构成逃逸）。
+  ///
+  /// 生产由 `main.dart` 传 `aylaUpdateBlocksWindowChrome`（模块级标志，更新宿主维护）。
+  final bool windowKeysLocked;
 
   @override
   State<AylaTitleBar> createState() => _AylaTitleBarState();
@@ -369,21 +382,28 @@ class _AylaTitleBarState extends State<AylaTitleBar> {
             height: AylaTitleBarMetrics.brandRowHeight,
             child: Row(
               children: <Widget>[
+                // ⚠️ 强制更新期间（`windowKeysLocked`）三键全部置灰：
+                // 弹窗盖不住标题栏（见 [AylaTitleBar.windowKeysLocked] 的推导），
+                // 放行「关闭」= 用户可绕过强制更新。
                 _WindowButton(
                   kind: AylaWindowButtonKind.minimize,
                   label: '最小化',
-                  onPressed: () => _run(widget.controller.minimize),
+                  onPressed: widget.windowKeysLocked
+                      ? null
+                      : () => _run(widget.controller.minimize),
                 ),
                 _WindowButton(
                   kind: AylaWindowButtonKind.restore,
                   label: _maximized ? '还原' : '最大化',
                   maximized: _maximized,
-                  onPressed: _toggleMaximize,
+                  onPressed: widget.windowKeysLocked ? null : _toggleMaximize,
                 ),
                 _WindowButton(
                   kind: AylaWindowButtonKind.close,
                   label: '关闭',
-                  onPressed: () => _run(widget.controller.close),
+                  onPressed: widget.windowKeysLocked
+                      ? null
+                      : () => _run(widget.controller.close),
                 ),
               ],
             ),
@@ -514,7 +534,9 @@ class _WindowButton extends StatefulWidget {
 
   final AylaWindowButtonKind kind;
   final String label;
-  final VoidCallback onPressed;
+
+  /// null = 禁用（强制更新期间锁窗口键，见 [AylaTitleBar.windowKeysLocked]）。
+  final VoidCallback? onPressed;
 
   /// 仅窗口化键使用：最大化时画「还原」双框，否则画单框。
   final bool maximized;
@@ -528,25 +550,34 @@ class _WindowButtonState extends State<_WindowButton> {
 
   bool get _danger => widget.kind == AylaWindowButtonKind.close;
 
+  /// 禁用态（`base.css:343 button:disabled { cursor: not-allowed; opacity: 0.55 }`）。
+  bool get _enabled => widget.onPressed != null;
+
   @override
   Widget build(BuildContext context) {
     // 关闭键悬停：危险底 + 白图标（白 = `--surface`，对 #D64D6E 对比度足够）；
     // 其余两键悬停：全站唯一 hover 底 `--ice-500` `.18`。
-    final Color iconColor = _danger && _hovered
+    final bool hovered = _enabled && _hovered;
+    final Color iconColor = _danger && hovered
         ? AylaColors.surface
         : AylaColors.textSecondary;
-    final Color? background = _hovered
+    final Color? background = hovered
         ? (_danger
             ? AylaColors.destructive
             : AylaColors.ice500.withValues(alpha: 0.18))
         : null;
 
     return MouseRegion(
-      cursor: SystemMouseCursors.basic,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
+      // 禁用时与全站 `button:disabled` 同口径：不可点的控件不给手型/默认箭头差异，
+      // 用 `forbidden` 明确表达「现在不能关」。
+      cursor: _enabled
+          ? SystemMouseCursors.basic
+          : SystemMouseCursors.forbidden,
+      onEnter: _enabled ? (_) => setState(() => _hovered = true) : null,
+      onExit: _enabled ? (_) => setState(() => _hovered = false) : null,
       child: Semantics(
         button: true,
+        enabled: _enabled,
         label: widget.label,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -564,11 +595,15 @@ class _WindowButtonState extends State<_WindowButton> {
                   color: background,
                   borderRadius: AylaRadii.pill,
                 ),
-                child: _WindowGlyph(
-                  kind: widget.kind,
-                  maximized: widget.maximized,
-                  size: AylaTitleBarMetrics.glyphSize,
-                  color: iconColor,
+                child: Opacity(
+                  // `base.css:343 button:disabled { opacity: 0.55 }`
+                  opacity: _enabled ? 1 : 0.55,
+                  child: _WindowGlyph(
+                    kind: widget.kind,
+                    maximized: widget.maximized,
+                    size: AylaTitleBarMetrics.glyphSize,
+                    color: iconColor,
+                  ),
                 ),
               ),
             ),

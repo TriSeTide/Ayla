@@ -92,6 +92,14 @@ abstract class AylaUpdateDialogController extends ChangeNotifier {
 
   /// 用户点「稍后」（强制更新时 UI 不提供该入口，本方法仍幂等）。
   void postpone();
+
+  /// 是否需要「去设置」引导（Android 缺「安装未知应用」权限时置真）。
+  ///
+  /// 默认 false：既有测试替身与其余平台实现不必关心这条。
+  bool get permissionRequired => false;
+
+  /// 跳系统「安装未知应用」授权页（默认 no-op，供替身省略）。
+  Future<void> openInstallPermissionSettings() async {}
 }
 
 /// 更新弹窗本体。
@@ -189,6 +197,18 @@ class _AylaUpdateDialogState extends State<AylaUpdateDialog> {
                   state.error!,
                   style: t.caption.copyWith(
                     color: AylaColors.destructive,
+                    fontSize: 13,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+              // 强制更新 + 失败：说明「为什么关不掉」，避免用户以为界面卡死。
+              if (state.mandatory && state.phase == AylaUpdatePhase.failed) ...<Widget>[
+                const SizedBox(height: AylaSpacing.sp2),
+                Text(
+                  '这次更新必须完成才能继续使用，请检查网络后重试。',
+                  style: t.caption.copyWith(
+                    color: AylaColors.textSecondary,
                     fontSize: 13,
                     height: 1.45,
                   ),
@@ -346,11 +366,24 @@ class _AylaUpdateDialogState extends State<AylaUpdateDialog> {
         ),
       ],
       AylaUpdatePhase.failed => <Widget>[
+        // ⚠️ 强制更新时**不给可用的关闭键**（2026-11-05 审计发现）：
+        // `onClose` 最终走 `session.requestClose()`，而它对 mandatory 直接 return
+        // ⇒ 旧实现在这里渲染一个**点了毫无反应**的按钮，看起来像卡死。
+        // 现在按 mandatory 置灰，并在上方文案里说清「必须更新才能继续」。
         AylaGlassButton(
           label: '关闭',
           variant: AylaGlassButtonVariant.ghost,
-          onPressed: busy ? null : widget.onClose,
+          onPressed: busy || state.mandatory ? null : widget.onClose,
         ),
+        // Android 缺「安装未知应用」权限：给一个能真正解决问题的入口
+        // （同仓 SYSTEM_ALERT_WINDOW 的「去设置」引导同款；没有它用户只会看到
+        //  「点了没反应」，然后卡死在重试循环里）。
+        if (widget.controller.permissionRequired)
+          AylaGlassButton(
+            label: '去设置',
+            variant: AylaGlassButtonVariant.ghost,
+            onPressed: widget.controller.openInstallPermissionSettings,
+          ),
         AylaGlassButton(
           label: '重试',
           variant: AylaGlassButtonVariant.primary,

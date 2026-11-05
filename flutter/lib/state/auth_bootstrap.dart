@@ -150,14 +150,31 @@ Future<void> aylaApplyLoginSession(
   // 幂等：三条 `attach` / `start` 内部都先拆后挂（`_off?.call()` / `stop()`），
   // 重复登录不会叠加监听。
   _restartRealtimeBridges(container);
+  _finishSignIn(
+    container,
+    userId: container.read(authNotifierProvider).user?.id,
+  );
+}
+
+/// 登录成功（含**会话恢复**）后的共同收尾：未读聚合 + 预加载门 + 客户端更新检查。
+///
+/// ## 为什么必须是唯一实现处（2026-11-05 用户实报「登录后不检查更新」的根因）
+/// 这三步原本在 [aylaApplyLoginSession] 里内联一份、在 `_restoreSessionWithToken`
+/// 里**手写另一份**。2026-10-18 加「登录后检查更新」时只改了前者 ⇒
+/// 冷启动走 **refresh 静默续期**的人（= 绝大多数真实启动：手机端切后台被回收、
+/// 电脑端每次开 App）**永远收不到更新提示** —— 而那条路径的注释里还写着
+/// 「与手动登录**完全相同**的副作用链（WS / 预加载门 / 未读 / 更新检查）」，
+/// 属于注释与实现不符的静默缺口（本文件开头「复制一份必然漂移」那句话说的就是它）。
+///
+/// ⇒ 抽成一份，两条路径都只调它；将来再加登录后副作用也只改这里。
+void _finishSignIn(ProviderContainer container, {required String? userId}) {
   unawaited(container.read(badgesProvider).fetch());
   // userId 进目录 record 的 key 段（web `directoryKey` 读 currentUser.id）。
-  unawaited(
-    AppInit.instance.run(userId: container.read(authNotifierProvider).user?.id),
-  );
+  unawaited(AppInit.instance.run(userId: userId));
   // 客户端更新检查（2026-10-18 用户需求）：登录成功即检查一次，发现新版本弹窗。
-  // ⚠️ 刻意不 await（更新检查不能拖慢登录/预加载门）；每个进程只自动弹一次
-  //（controller 内部单飞），失败只 debugPrint，不打断登录。
+  // ⚠️ 刻意不 await（更新检查不能拖慢登录/预加载门）；每个**登录会话**只自动弹一次
+  //（controller 内部单飞，登出时复位 —— 见 [AylaUpdateController.resetForNewSession]），
+  // 失败只 debugPrint，不打断登录。
   unawaited(container.read(updateControllerProvider).checkOnLogin());
 }
 
@@ -219,6 +236,9 @@ Future<void> aylaLogoutForContainer(
   bool clearCredentials = false,
 }) async {
   AppInit.instance.reset();
+  // 更新检查的「本会话已检查」位：登出即复位，否则换号登录后再也不弹更新
+  // （见 `core/update/update_controller.dart:resetForNewSession`）。
+  container.read(updateControllerProvider).resetForNewSession();
   // 帖子页 tab 缓存（web `postTabSession` 机制）：账号切换 / 登出清空，
   // 避免下一位用户读到上一位的分页快照。
   aylaPostTabCache.clear();
@@ -250,6 +270,8 @@ Future<void> aylaLogoutForContainer(
 /// 登出收尾（`WidgetRef` 版；UI 触发用，`layout/app_shell.dart` 消费）。
 void aylaLogout(WidgetRef ref, {bool clearCredentials = false}) {
   AppInit.instance.reset();
+  // 同上（容器版）：换登录会话即复位更新检查位。
+  ref.read(updateControllerProvider).resetForNewSession();
   aylaPostTabCache.clear();
   AylaScrollMemory.clear(); // 同上（容器版）：用户级投影，登出清空。
   aylaSocialStore.reset();
@@ -444,15 +466,21 @@ Future<AylaSessionRestoreOutcome> _restoreSessionWithToken(
     // 拉当前用户（与登录链同一步：`?next=` 回跳与路由守卫都依赖 user 落地）。
     final AuthUser me = await AuthApi.me(accessToken: access);
     auth.setUser(me);
-    // 与手动登录**完全相同**的副作用链（WS / 预加载门 / 未读 / 更新检查）。
+    // 与手动登录**完全相同**的副作用链（WS / 帧桥重装 / 未读 / 预加载门 / **更新检查**）。
+    //
     // ⚠️ attach 必须先于 connectAll（同 [aylaApplyLoginSession] 的说明）：
     // 建连帧（`presence.self` / `presence.update(online)`）在 accept 后立刻下发，
     // 若 `onEvent` 还没接上就会被静默丢弃 ⇒ 自己的 presence 记录永远缺失。
+    //
+    // ⚠️ 2026-11-05：本函数此前**手写**了一份收尾（未读 / 预加载门），
+    // 漏掉「更新检查」与「帧桥重装」两件 —— 前者导致「登录后不弹更新」，
+    // 后者导致「切后台被回收后再回来，WS 帧无人消费」。现在两条登录路径
+    // 共用 [aylaApplyLoginSession] 的那套：WS → 帧桥 → [_finishSignIn]。
     _startChatWs(container);
     _startPresenceWs(container);
     wsManager?.connectAll();
-    unawaited(container.read(badgesProvider).fetch());
-    unawaited(AppInit.instance.run(userId: me.id));
+    _restartRealtimeBridges(container);
+    _finishSignIn(container, userId: me.id);
     return AylaSessionRestoreOutcome.success;
   } catch (err) {
     debugPrint('[AylaAuth] 会话恢复失败：$err');

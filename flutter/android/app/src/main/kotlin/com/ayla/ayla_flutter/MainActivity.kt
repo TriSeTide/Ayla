@@ -136,10 +136,23 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         try {
+                            // 返回结构：{launched: Boolean, reason: String?}
+                            // 2026-11-05：旧实现只回 Boolean ⇒ 一切失败都被 Dart 侧
+                            // 归一成「可能是安装权限被关闭或包已损坏」，用户**拿不到
+                            // 跳设置的入口**（同仓 SYSTEM_ALERT_WINDOW 是有引导的）。
+                            // 现在把「缺安装未知应用权限」单独报出来，Dart 侧据此弹
+                            // 「去设置」引导。
                             result.success(installApk(path))
                         } catch (error: Exception) {
                             result.error("install_failed", error.message, null)
                         }
+                    }
+                    "canInstallPackages" -> {
+                        // 供 Dart 侧在「拉起安装器之前」预判并直接给引导。
+                        result.success(canInstallPackages())
+                    }
+                    "openInstallPermissionSettings" -> {
+                        result.success(openInstallPermissionSettings())
                     }
                     else -> result.notImplemented()
                 }
@@ -816,22 +829,43 @@ class MainActivity : FlutterActivity() {
      *
      * 仍然**拒绝任意路径**：只允许这两个应用私有目录下的普通文件。
      */
-    private fun installApk(path: String): Boolean {
+    private fun installApk(path: String): Map<String, Any?> {
         val file = File(path).canonicalFile
-        if (!file.exists() || !file.isFile) return false
+        if (!file.exists() || !file.isFile) {
+            return mapOf(
+                "launched" to false,
+                "reason" to "安装包文件已不存在（可能被系统清理），请重新下载",
+            )
+        }
         val allowedRoots = listOf(filesDir.canonicalFile, cacheDir.canonicalFile)
         val underAllowed = allowedRoots.any { root ->
             file.path.startsWith(root.path + File.separator)
         }
-        if (!underAllowed) return false
+        if (!underAllowed) {
+            return mapOf(
+                "launched" to false,
+                "reason" to "安装包不在允许的目录内",
+            )
+        }
+        // ⚠️ **先判权限**：没有「安装未知应用」权限时，拉起安装器会被系统静默拒绝
+        // （用户看到的就是「点了没反应」）。这里提前判，好让 Dart 侧弹「去设置」引导。
+        if (!canInstallPackages()) {
+            return mapOf(
+                "launched" to false,
+                "reason" to "需要「安装未知应用」权限",
+                "permissionRequired" to true,
+            )
+        }
         val authority = "$packageName.fileprovider"
         val uri: Uri = try {
             FileProvider.getUriForFile(this, authority, file)
         } catch (_: IllegalArgumentException) {
-            // provider 未声明或路径不在 <paths> 授权范围内：明确返回 false，
-            // 让 Dart 侧走下载页兜底（同时会打日志便于排查）。
+            // provider 未声明或路径不在 <paths> 授权范围内。
             Log.w(TAG, "FileProvider 拒绝了该路径（检查 file_paths.xml）：$path")
-            return false
+            return mapOf(
+                "launched" to false,
+                "reason" to "系统拒绝了安装包路径（FileProvider）",
+            )
         }
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
@@ -841,8 +875,39 @@ class MainActivity : FlutterActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             intent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
         }
-        startActivity(intent)
-        return true
+        return try {
+            startActivity(intent)
+            mapOf("launched" to true)
+        } catch (error: Exception) {
+            Log.w(TAG, "startActivity(install) 失败：${error.message}", error)
+            mapOf(
+                "launched" to false,
+                "reason" to "无法启动系统安装器：${error.message}",
+            )
+        }
+    }
+
+    /** 是否已授予「安装未知应用」（Android 8+；更低版本恒 true）。 */
+    private fun canInstallPackages(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
+        return packageManager.canRequestPackageInstalls()
+    }
+
+    /** 跳「安装未知应用」授权页（本应用）。 */
+    private fun openInstallPermissionSettings(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        return try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:$packageName"),
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            true
+        } catch (error: Exception) {
+            Log.w(TAG, "打开安装权限设置失败：${error.message}", error)
+            false
+        }
     }
 
     companion object {

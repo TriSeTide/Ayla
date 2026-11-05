@@ -62,6 +62,7 @@ class AylaUpdateApplyResult {
     this.scriptPath,
     this.fallbackUrl,
     this.detail = '',
+    this.permissionRequired = false,
   });
 
   /// `windows_zip` / `android_apk` / `platform_store` / `open_download`。
@@ -75,6 +76,9 @@ class AylaUpdateApplyResult {
 
   /// 无法原生安装时打开的页面（Android 下载页 / iOS itms-services）。
   final String? fallbackUrl;
+
+  /// Android：失败原因是缺「安装未知应用」权限（调用方弹「去设置」引导）。
+  final bool permissionRequired;
 
   /// 附加说明（例如「已打开下载页」）。
   final String detail;
@@ -227,8 +231,18 @@ class AylaUpdateApplier {
     }
 
     final String? reason = outcome.reason;
+    // 缺「安装未知应用」权限：**不抛异常、不退化成下载页**，而是返回一个带
+    // `permissionRequired` 的结果 —— 调用方据此弹「去设置」引导（同仓
+    // SYSTEM_ALERT_WINDOW 的引导同款）。已校验的 APK 保留，用户授权后点重试即可。
+    if (outcome.permissionRequired) {
+      return const AylaUpdateApplyResult(
+        mode: 'android_apk_permission',
+        detail: '需要先允许 Ayla 安装未知应用，然后回来重试',
+        permissionRequired: true,
+      );
+    }
     // 只有「当前构建没有安装器」这一种情况才值得退化为下载页；
-    // 其余失败（权限被关 / 路径被拒 / 包损坏）都必须如实告知，不能重复下载。
+    // 其余失败（路径被拒 / 包损坏）都必须如实告知，不能重复下载。
     if (reason != null && reason.contains('旧版本')) {
       final bool fallback = await _openUrl(Uri.parse(prepared.download.url));
       if (!fallback) {

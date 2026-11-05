@@ -62,6 +62,7 @@ import 'widgets/live/android_live_mini_window.dart'
     show AylaAndroidLiveMiniWindowApp;
 import 'widgets/shell/overlay_window_app.dart'
     show AylaOverlayBallWindowApp, AylaOverlayPayload;
+import 'layout/app_back.dart' show aylaWindowChromeLock;
 import 'widgets/shell/overlay_scrollbar.dart';
 import 'widgets/shell/title_bar.dart'
     show
@@ -793,7 +794,20 @@ class _AppRootState extends ConsumerState<_AppRoot>
                 if (aylaUsesCustomTitleBar())
                   // `fullscreenActive` 由播放器广播驱动：直播窗口级全屏时标题条整条让位，
                   // 否则它压在整屏画面上（2026-11-04 用户实报）。
-                  AylaTitleBar(fullscreenActive: _windowFullscreen),
+                  //
+                  // ⚠️ `windowKeysLocked`：标题栏是 Navigator 的**兄弟且在上方**
+                  //（本 Column 的第一个子级），root Overlay 里的任何弹窗都盖不住它
+                  // ⇒ 强制更新期间必须**禁用窗口键**，否则用户点 X 就能关掉 App、
+                  // 绕过强制更新（2026-11-05 审计发现的真实逃逸口）。
+                  // 由 `state/update_providers.dart` 的更新宿主维护这个模块级标志，
+                  // 本件用 `ListenableBuilder` 订阅同一份通知（见 `_windowChromeLock`）。
+                  ListenableBuilder(
+                    listenable: aylaWindowChromeLock,
+                    builder: (BuildContext context, Widget? _) => AylaTitleBar(
+                      fullscreenActive: _windowFullscreen,
+                      windowKeysLocked: aylaWindowChromeLock.value,
+                    ),
+                  ),
                 Expanded(
                   child: Stack(
               children: <Widget>[

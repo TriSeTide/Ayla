@@ -183,11 +183,21 @@ class _AppShellState extends ConsumerState<AppShell> {
       final AylaUpdateCheckResult result = await controller.checkManually();
       if (!mounted) return;
       if (result.hasUpdate) return; // 弹窗由 AylaUpdateHost 渲染
+      // ⚠️ 按 `reason` 分档（2026-11-05 审计）：`reason` 此前全仓零消费 ⇒
+      // 后端返回 `no_release_for_platform`（该平台没有产物，例如 iOS 没有 IPA）时
+      // 会被说成「当前已是最新版本」—— 把「没发」误报成「已最新」是认知错误。
       final String message = result.failed
           ? '检查更新失败：${result.error ?? '未知错误'}'
           : result.degraded
           ? '更新服务暂不可用，请稍后再试'
-          : '当前已是最新版本';
+          : switch (result.check?.reason) {
+              'up_to_date' => '当前已是最新版本',
+              'no_release_for_platform' => '当前平台暂时没有可用的更新包',
+              null => '当前已是最新版本',
+              '' => '当前已是最新版本',
+              // 未知 reason：如实转述，不擅自解释成「已是最新」。
+              final String reason => '暂无可用的更新（$reason）',
+            };
       messenger.showSnackBar(SnackBar(content: Text(message)));
     } catch (error) {
       if (!mounted) return;
