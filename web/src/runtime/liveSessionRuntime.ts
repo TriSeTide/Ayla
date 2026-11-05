@@ -26,21 +26,48 @@ const SRS_RETRY_MAX = 3;
 /** 进房快照写入 store 的预览上限（与后端 WS 帧上限一致；完整名单走弹层 REST） */
 const LIVE_VIEWER_PREVIEW = 12;
 
-/** 事件驱动黑屏/卡死检测：卡顿（waiting/stalled/error）持续多久未恢复则重建 */
-const STALL_TIMEOUT_MS = 2_000;
-/** 自动重建冷却（防 fatal 错误死循环） */
-const REBUILD_COOLDOWN_MS = 4_000;
+/**
+ * 事件驱动黑屏/卡死检测：卡顿（waiting/stalled/error）持续多久未恢复则重建。
+ *
+ * 2026-11-05 由 2000 提到 6000，与 Flutter 端 kStallTimeoutMs 对齐。
+ *
+ * 这是**缺陷修复**而非调优：SRS 分片 1s，一次正常的分片迟到（实测 p95=1.48s、
+ * max=6.69s）在 2s 判死阈值下会被当成"卡死"而触发重建 —— 重建要重新握手 +
+ * 拉 playlist + 拉分片（实测 ≥1s），把"1s 抖动"升级成"1s 卡 + 重建黑屏 +
+ * 冷却真空"。阈值必须高于正常分片下载耗时的上界，否则正常抖动被当成故障。
+ *
+ * 与 Flutter 的 kStallTimeoutMs=6000 保持一致（此前双端不一致，Web 是错的那端）。
+ */
+export const STALL_TIMEOUT_MS = 6_000;
+/**
+ * 自动重建冷却（防 fatal 错误死循环）。
+ * 2026-11-05 由 4000 提到 8000，与 Flutter 端 kRebuildCooldownMs 对齐：
+ * 冷却期内 watchdog 完全失效，4s 太短会导致"重建 → 还在抖 → 立刻再重建"的循环。
+ */
+export const REBUILD_COOLDOWN_MS = 8_000;
 /**
  * 自愈连续失败计数的时间窗（B2，与 Flutter 端 kRebuildCountResetWindow 同语义）：
  * 距上次自愈失败超过该时长 ⇒ 视为新一轮，连续失败计数归零。**没有它就会永久放弃**：
  * 计数只涨不落，一旦封顶，之后任何一次失败都进不了重建分支，直播停在"播放失败"。
  */
-const REBUILD_COUNT_RESET_WINDOW_MS = 60_000;
+export const REBUILD_COUNT_RESET_WINDOW_MS = 60_000;
 /**
  * 自动重建连续失败上限（B2）：达到上限 = 本次自愈封顶，此时不再无限重建，
  * 但**不放弃**——安排 REBUILD_COUNT_RESET_WINDOW_MS 后的有界重试。
  */
-const MAX_CONSECUTIVE_REBUILDS = 3;
+export const MAX_CONSECUTIVE_REBUILDS = 3;
+/**
+ * 「上游停摆」判定窗口：HLS playlist 连续这么久没有推进 ⇒ 判定推流端/SRS 已停止产片。
+ *
+ * 与"卡一下"不同：上游停摆时 HTTP 仍返回 200、playlist 内容不变，hls.js 认为这是
+ * 正常直播状态（liveMaxUnchangedPlaylistRefresh = Infinity），**不报错、不触发 fatal**，
+ * 播放位置也因无新数据而静默。实测 2026-11-04 21:12:16→21:14:47 上游停摆 151 秒，
+ * 客户端重建 0 次、fatal 0 次、UI 仍显示"正在播放"，用户看到的是无提示的静默定格。
+ *
+ * 该判据只负责"让用户知道"，不替代自愈（停摆期间重建也拉不到数据）；
+ * 恢复产片后自行清除提示。
+ */
+export const UPSTREAM_STALL_WINDOW_MS = 12_000;
 
 export interface LiveSessionOptions {
   activityRoute?: string;
@@ -93,6 +120,10 @@ class LiveSessionRuntime {
   private mutedOwner = false;
   private stallTimer: ReturnType<typeof setTimeout> | null = null;
   private watchdogCleanup: (() => void) | null = null;
+  /** 上游停摆判定：最近一次观察到的 playlist MEDIA-SEQUENCE */
+  private lastMediaSequence: number | null = null;
+  private upstreamStallTimer: ReturnType<typeof setTimeout> | null = null;
+  private upstreamStallReported = false;
   /** video 的暂存容器（z-index:-1 视口内，不暂停）：容器切换间隙的临时落脚点 */
   private stagingEl: HTMLElement | null = null;
   /** 当前已挂载的 hls_url（attachPlayer 幂等判定：相同流不重建，切换场景零黑屏） */
@@ -384,6 +415,8 @@ class LiveSessionRuntime {
     this.offStatusFrame = null;
     this.clearSrsRetry();
     this.clearStallTimer();
+    this.detachWatchdog();
+    this.resetUpstreamStallWatch();
     this.clearHealRetry();
     this.consecutiveRebuilds = 0;
     this.lastFailureAt = 0;
@@ -637,7 +670,13 @@ class LiveSessionRuntime {
         // 不再"冷却期内直接报错、此后永不重建"（那就是封顶后永久放弃）。
         this.scheduleHealRebuild(detail);
       },
+      onPlaylistLevelUpdated: (mediaSequence) => {
+        if (!this.alive) return;
+        this.noteMediaSequence(mediaSequence);
+      },
     });
+    // 新实例从新的 playlist 起算，重置停摆观测
+    this.resetUpstreamStallWatch();
     this.armWatchdog(video);
     return true;
   }
@@ -647,6 +686,48 @@ class LiveSessionRuntime {
     const hlsUrl = useLiveStore.getState().current.channel?.hls_url ?? null;
     if (!hlsUrl) return false;
     return this.rebuildPlayer(this.ensureVideo(), hlsUrl);
+  }
+
+  // ---------- 上游停摆判定（P2-1） ----------
+  // 上游停止产片时 playlist 内容不变但 HTTP 仍 200，hls.js 不报错、位置信号静默。
+  // 这里用 MEDIA-SEQUENCE 是否前进作判据：停滞超过 UPSTREAM_STALL_WINDOW_MS
+  // 就上报"直播流已中断"，恢复前进后自动清除。只做提示，不做重建。
+
+  /** 记录 playlist 序号；序号前进 ⇒ 清除停摆提示并重置计时 */
+  private noteMediaSequence(seq: number): void {
+    if (this.lastMediaSequence === seq) return;
+    this.lastMediaSequence = seq;
+    this.clearUpstreamStallTimer();
+    if (this.upstreamStallReported) {
+      this.upstreamStallReported = false;
+      useLiveStore.getState().setCurrentPlayerError(null);
+    }
+    this.upstreamStallTimer = setTimeout(() => {
+      this.upstreamStallTimer = null;
+      this.reportUpstreamStall();
+    }, UPSTREAM_STALL_WINDOW_MS);
+  }
+
+  /** 判定：窗口内序号从未前进 ⇒ 上游停摆（幂等，不重复写 store） */
+  private reportUpstreamStall(): void {
+    if (!this.alive || this.miniPlayerActive) return;
+    if (this.upstreamStallReported) return;
+    this.upstreamStallReported = true;
+    useLiveStore.getState().setCurrentPlayerError("直播流已中断（上游停止推送），恢复后自动继续");
+  }
+
+  private clearUpstreamStallTimer(): void {
+    if (this.upstreamStallTimer !== null) {
+      clearTimeout(this.upstreamStallTimer);
+      this.upstreamStallTimer = null;
+    }
+  }
+
+  /** 切换到新实例时重置停摆观测（新 playlist 序号与本会话无关） */
+  private resetUpstreamStallWatch(): void {
+    this.clearUpstreamStallTimer();
+    this.lastMediaSequence = null;
+    this.upstreamStallReported = false;
   }
 
   /** 自动重建冷却是否已过（自愈入口的防抖：同一冷却期内不重复重建） */
@@ -722,6 +803,8 @@ class LiveSessionRuntime {
     this.player?.destroy();
     this.player = null;
     this.clearStallTimer();
+    this.detachWatchdog();
+    this.resetUpstreamStallWatch();
     this.clearHealRetry();
     this.consecutiveRebuilds = 0;
     this.lastFailureAt = 0;
@@ -800,11 +883,27 @@ class LiveSessionRuntime {
     };
   }
 
+  /**
+   * 只清"卡顿判死"定时器，**不动事件监听器**。
+   *
+   * 2026-11-05 修复（缺陷：watchdog 出帧一次后永久失效）：
+   * 旧实现把 watchdogCleanup() 也放在这里，而 armWatchdog 的 onResume（出帧）
+   * 会调用本方法 ⇒ 第一次出帧就把 waiting/stalled/error/playing/canplay 五个
+   * 监听器全部拆掉。armWatchdog 全仓只在 rebuildPlayer() 里调用，而重建正是
+   * 由 watchdog 触发 ⇒ 死锁：出过一次画面后永久失去卡死检测能力。
+   * 服务端日志印证：上游停摆 151s 期间客户端重建 0 次、fatal 0 次。
+   *
+   * 现在监听器的拆除只在真正销毁/脱离时由 detachWatchdog() 负责。
+   */
   private clearStallTimer(): void {
     if (this.stallTimer !== null) {
       clearTimeout(this.stallTimer);
       this.stallTimer = null;
     }
+  }
+
+  /** 拆除 watchdog 的 5 个 video 事件监听器（仅在销毁/脱离视图时调用） */
+  private detachWatchdog(): void {
     this.watchdogCleanup?.();
     this.watchdogCleanup = null;
   }

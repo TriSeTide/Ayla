@@ -22,6 +22,7 @@ const h = vi.hoisted(() => ({
     video: HTMLVideoElement | null;
     url: string | null;
     fatal: ((detail: string) => void) | null;
+    playlist: ((mediaSequence: number) => void) | null;
     destroyed: number;
   }>,
 }));
@@ -32,6 +33,7 @@ vi.mock("../player/hls", () => ({
       video: null as HTMLVideoElement | null,
       url: null as string | null,
       fatal: null as ((detail: string) => void) | null,
+      playlist: null as ((mediaSequence: number) => void) | null,
       destroyed: 0,
     };
     constructor() {
@@ -40,11 +42,15 @@ vi.mock("../player/hls", () => ({
     attach(
       video: HTMLVideoElement,
       url: string,
-      callbacks: { onFatalError?: (detail: string) => void } = {},
+      callbacks: {
+        onFatalError?: (detail: string) => void;
+        onPlaylistLevelUpdated?: (mediaSequence: number) => void;
+      } = {},
     ) {
       this.inst.video = video;
       this.inst.url = url;
       this.inst.fatal = callbacks.onFatalError ?? null;
+      this.inst.playlist = callbacks.onPlaylistLevelUpdated ?? null;
       return "hls.js";
     }
     destroy() {
@@ -81,7 +87,15 @@ vi.mock("../ws/chat", () => ({
   chatWS: { onFrame: vi.fn(() => () => {}) },
 }));
 
-import { liveSessionRuntime } from "../runtime/liveSessionRuntime";
+import {
+  liveSessionRuntime,
+  REBUILD_COOLDOWN_MS,
+  STALL_TIMEOUT_MS,
+  UPSTREAM_STALL_WINDOW_MS,
+} from "../runtime/liveSessionRuntime";
+
+/** 越过重建冷却所需的推进量（+1s 余量，避免边界相等） */
+const PAST_COOLDOWN = REBUILD_COOLDOWN_MS + 1_000;
 
 const channel = {
   id: 7,
@@ -142,6 +156,13 @@ function fireFatal(detail = "fatal"): void {
   inst.fatal(detail);
 }
 
+/** 模拟 hls.js 上报 playlist 序号（LEVEL_UPDATED） */
+function firePlaylist(mediaSequence: number): void {
+  const inst = h.instances[h.instances.length - 1];
+  if (!inst?.playlist) throw new Error("当前实例没有 playlist 回调");
+  inst.playlist(mediaSequence);
+}
+
 beforeEach(() => {
   h.instances.length = 0;
   vi.useFakeTimers();
@@ -191,7 +212,7 @@ describe("B3 幂等判定：URL + 实例健康", () => {
     expect(liveSessionRuntime.attachPlayer()).toBe(true);
     expect(h.instances).toHaveLength(1);
     // 过了宽限仍是死的 ⇒ 真正判死并重建
-    vi.advanceTimersByTime(4_000);
+    vi.advanceTimersByTime(PAST_COOLDOWN);
     expect(liveSessionRuntime.attachPlayer()).toBe(true);
     expect(h.instances).toHaveLength(2);
   });
@@ -210,7 +231,7 @@ describe("B3 幂等判定：URL + 实例健康", () => {
     liveSessionRuntime.attachPlayer();
     expect(h.instances).toHaveLength(1);
     probe.readyState = HTMLMediaElement.HAVE_NOTHING; // 实例已死但 URL 相同
-    vi.advanceTimersByTime(4_000); // 越过出帧宽限（新实例本来就没有帧）
+    vi.advanceTimersByTime(PAST_COOLDOWN); // 越过出帧宽限
     expect(liveSessionRuntime.attachPlayer()).toBe(true);
     expect(h.instances).toHaveLength(2);
     expect(h.instances[0].destroyed).toBe(1);
@@ -222,7 +243,7 @@ describe("B3 幂等判定：URL + 实例健康", () => {
     liveSessionRuntime.attachPlayer();
     probe.readyState = HTMLMediaElement.HAVE_ENOUGH_DATA;
     probe.error = { code: 3, message: "decode" } as MediaError;
-    vi.advanceTimersByTime(4_000); // 越过出帧宽限
+    vi.advanceTimersByTime(PAST_COOLDOWN); // 越过出帧宽限
     liveSessionRuntime.attachPlayer();
     expect(h.instances).toHaveLength(2);
     expect(h.instances[0].destroyed).toBe(1);
@@ -233,7 +254,7 @@ describe("B3 幂等判定：URL + 实例健康", () => {
     liveSessionRuntime.attachPlayer();
     probe.readyState = HTMLMediaElement.HAVE_ENOUGH_DATA;
     probe.ended = true;
-    vi.advanceTimersByTime(4_000); // 越过出帧宽限
+    vi.advanceTimersByTime(PAST_COOLDOWN); // 越过出帧宽限
     liveSessionRuntime.attachPlayer();
     expect(h.instances).toHaveLength(2);
   });
@@ -247,14 +268,14 @@ describe("B2 自愈：时间窗重置与封顶后的有界重试", () => {
 
     // 每次 fatal 间隔 5s（> 重建冷却 4s）⇒ 逐次重建：build 2/3/4
     for (let i = 0; i < 3; i += 1) {
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(PAST_COOLDOWN);
       fireFatal("boom");
     }
     expect(h.instances).toHaveLength(4);
     expect(useLiveStore.getState().currentPlayerError).toBeNull();
 
     // 第 4 次失败：计数已封顶（3）⇒ 报错 + 安排 60s 后重试
-    vi.advanceTimersByTime(5_000);
+    vi.advanceTimersByTime(PAST_COOLDOWN);
     fireFatal("boom");
     expect(h.instances).toHaveLength(4);
     expect(useLiveStore.getState().currentPlayerError).toBe("boom");
@@ -272,7 +293,7 @@ describe("B2 自愈：时间窗重置与封顶后的有界重试", () => {
 
     // 三次失败把连续计数推到上限（3），但每次都真实重建（未触发封顶报错）
     for (let i = 0; i < 3; i += 1) {
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(PAST_COOLDOWN);
       fireFatal("boom");
     }
     expect(h.instances).toHaveLength(4);
@@ -301,7 +322,7 @@ describe("B2 自愈：时间窗重置与封顶后的有界重试", () => {
     const { probe } = await enterAndProbe();
     liveSessionRuntime.attachPlayer();
     for (let i = 0; i < 4; i += 1) {
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(PAST_COOLDOWN);
       fireFatal("boom");
     }
     expect(h.instances).toHaveLength(4);
@@ -314,7 +335,7 @@ describe("B2 自愈：时间窗重置与封顶后的有界重试", () => {
     await enterAndProbe();
     liveSessionRuntime.attachPlayer();
     for (let i = 0; i < 4; i += 1) {
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(PAST_COOLDOWN);
       fireFatal("boom");
     }
     expect(useLiveStore.getState().currentPlayerError).toBe("boom");
@@ -327,7 +348,7 @@ describe("B2 自愈：时间窗重置与封顶后的有界重试", () => {
   it("出帧（playing）视为自愈成功：连续失败计数归零", async () => {
     const { video, probe } = await enterAndProbe();
     liveSessionRuntime.attachPlayer();
-    vi.advanceTimersByTime(5_000);
+    vi.advanceTimersByTime(PAST_COOLDOWN);
     fireFatal("boom"); // 计数 1
 
     probe.readyState = HTMLMediaElement.HAVE_ENOUGH_DATA;
@@ -336,7 +357,7 @@ describe("B2 自愈：时间窗重置与封顶后的有界重试", () => {
 
     // 再失败三次仍可重建（若计数未归零，第 3 次就会封顶）
     for (let i = 0; i < 3; i += 1) {
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(PAST_COOLDOWN);
       fireFatal("boom");
       expect(useLiveStore.getState().currentPlayerError).toBeNull();
     }
@@ -376,15 +397,71 @@ describe("B6 画面槽位守卫：小窗态不抢流", () => {
     expect(h.instances).toHaveLength(1);
   });
 
+  it("出帧一次后 watchdog 仍然有效：后续卡死仍会自愈重建", async () => {
+    // 回归锁（2026-11-05）：旧实现 clearStallTimer() 顺带拆掉 5 个监听器，
+    // 而 onResume（playing/canplay 出帧）会调用它 ⇒ 播放器出过一次画面后
+    // 永久失去卡死检测，之后的定格再也不会被自愈。服务端日志曾印证：
+    // 上游停摆 151s 期间客户端重建 0 次、fatal 0 次。
+    const { video, probe } = await enterAndProbe();
+    liveSessionRuntime.attachPlayer();
+    expect(h.instances).toHaveLength(1);
+
+    // 1) 先出帧（模拟正常播放起来）—— 这一步旧实现会把 watchdog 拆掉
+    probe.readyState = HTMLMediaElement.HAVE_ENOUGH_DATA;
+    video.dispatchEvent(new Event("playing"));
+    await flush();
+
+    // 2) 越过重建冷却后制造一次真正的卡死
+    vi.advanceTimersByTime(PAST_COOLDOWN);
+    probe.readyState = HTMLMediaElement.HAVE_NOTHING;
+    video.dispatchEvent(new Event("waiting"));
+    vi.advanceTimersByTime(STALL_TIMEOUT_MS);
+
+    // 3) 仍然必须被检出并重建
+    expect(h.instances).toHaveLength(2);
+    expect(h.instances[0].destroyed).toBe(1);
+  });
+
+  it("上游停摆：playlist 序号停滞超过窗口 → 上报中断提示", async () => {
+    await enterAndProbe();
+    liveSessionRuntime.attachPlayer();
+    expect(useLiveStore.getState().currentPlayerError).toBeNull();
+
+    // 序号推进：不报错
+    firePlaylist(100);
+    vi.advanceTimersByTime(UPSTREAM_STALL_WINDOW_MS - 1_000);
+    firePlaylist(101);
+    vi.advanceTimersByTime(UPSTREAM_STALL_WINDOW_MS - 1_000);
+    expect(useLiveStore.getState().currentPlayerError).toBeNull();
+
+    // 序号不再前进 ⇒ 越过窗口后必须报错
+    vi.advanceTimersByTime(UPSTREAM_STALL_WINDOW_MS + 1_000);
+    expect(useLiveStore.getState().currentPlayerError).toContain("直播流已中断");
+
+    // 恢复产片 ⇒ 提示自动清除
+    firePlaylist(102);
+    expect(useLiveStore.getState().currentPlayerError).toBeNull();
+  });
+
+  it("上游停摆不触发重建（重建也拉不到数据）", async () => {
+    await enterAndProbe();
+    liveSessionRuntime.attachPlayer();
+    expect(h.instances).toHaveLength(1);
+    firePlaylist(200);
+    vi.advanceTimersByTime(UPSTREAM_STALL_WINDOW_MS * 3);
+    expect(h.instances).toHaveLength(1);
+    expect(h.instances[0].destroyed).toBe(0);
+  });
+
   it("小窗态 watchdog 卡死不自愈重建（避免与大窗抢流）", async () => {
     const { video, probe } = await enterAndProbe();
     probe.readyState = HTMLMediaElement.HAVE_ENOUGH_DATA;
     liveSessionRuntime.attachPlayer();
     liveSessionRuntime.detachView({ isNarrow: true, isOwnerConsole: false });
-    vi.advanceTimersByTime(5_000); // 越过重建冷却
+    vi.advanceTimersByTime(PAST_COOLDOWN); // 越过重建冷却
     probe.readyState = HTMLMediaElement.HAVE_NOTHING;
     video.dispatchEvent(new Event("waiting"));
-    vi.advanceTimersByTime(2_000); // STALL_TIMEOUT_MS
+    vi.advanceTimersByTime(STALL_TIMEOUT_MS);
     expect(h.instances).toHaveLength(1);
   });
 
@@ -406,7 +483,7 @@ describe("B6 画面槽位守卫：小窗态不抢流", () => {
     expect(video.parentElement).toBe(bigHost);
     // 大窗接管后实例已死才重建（幂等仍生效）
     probe.readyState = HTMLMediaElement.HAVE_NOTHING;
-    vi.advanceTimersByTime(4_000); // 越过出帧宽限
+    vi.advanceTimersByTime(PAST_COOLDOWN); // 越过出帧宽限
     expect(liveSessionRuntime.attachPlayer()).toBe(true);
     expect(h.instances).toHaveLength(2);
     miniContainer.remove();

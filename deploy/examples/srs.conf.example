@@ -44,6 +44,9 @@ vhost __defaultVhost__ {
         enabled         on;
         hls_fragment    1;
         hls_window      10;
+        # 2026-11-05：推流中断后不删除 HLS 产物（默认 120s 会在断流 2 分钟后
+        # 删掉 m3u8+全部分片，推流端重连常超过 2 分钟 => 播放器吃 28 次 404 / 29.7s 黑洞）。
+        hls_dispose     0;
     }
     # 2026-11-01 直播性能优化：GOP=1s 前提下分片 1s/窗口 10s/gop_cache off
     # gop_cache off：新观众不吃历史 GOP 积压，直接等下一个 I 帧（GOP=1s 时最多 ~1s）

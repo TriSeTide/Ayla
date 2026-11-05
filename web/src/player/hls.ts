@@ -19,6 +19,22 @@ export type HlsPlayerMode = "hls.js" | "native";
 export interface HlsPlayerCallbacks {
   /** fatal 且不可恢复的错误（UI 显示重试按钮） */
   onFatalError?: (detail: string) => void;
+  /**
+   * 非 fatal 的分片级故障（404 / 超时 / 解析失败）。
+   *
+   * hls.js 把分片失败标记为 fatal=false 并自行重试；此前本封装
+   * `if (!data.fatal) return` 把这类事件全部丢弃，导致分片持续失败时
+   * 画面卡住但 UI 无任何信号。这里只做"观测上报"，不改变 hls.js 的恢复流程。
+   */
+  onFragmentError?: (detail: string) => void;
+  /**
+   * HLS playlist 推进回调：每次成功解析 playlist 时上报 MEDIA-SEQUENCE。
+   *
+   * 用途：上游停止产片时 playlist 内容不变但 HTTP 仍 200，hls.js 不报错、
+   * 播放位置也静默 —— 编排层靠"sequence 多久没前进"来判定上游停摆。
+   * 首次加载与每次刷新都会回调（同一 sequence 会重复上报，由调用方判定停滞）。
+   */
+  onPlaylistLevelUpdated?: (mediaSequence: number) => void;
 }
 
 export class HlsPlayer {
@@ -48,10 +64,18 @@ export class HlsPlayer {
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (this.destroyed) return;
-        if (!data.fatal) return;
+        if (!data.fatal) {
+          // 非 fatal：hls.js 自行重试。分片级故障上报给编排层做观测，
+          // 其余（如 bufferStalledError 由 hls.js 内部 nudge 恢复）不打扰调用方。
+          if (data.frag) callbacks.onFragmentError?.(data.details || "fragment error");
+          return;
+        }
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          // 网络错误（含直播未开始时的 404）：尝试重试加载
-          hls.startLoad();
+          // 网络错误（含直播未开始时的 404）：从当前播放位置重试。
+          // 不能无参 startLoad()：那等价于 startLoad(-1)，而 hls.js 在
+          // lastCurrentTime > 0 时会把 -1 覆盖成 lastCurrentTime，语义不稳定；
+          // 显式传当前时间可保证"原地重试"，不额外跳变。
+          hls.startLoad(video.currentTime > 0 ? video.currentTime : -1);
           return;
         }
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
@@ -60,6 +84,14 @@ export class HlsPlayer {
         }
         // 其他 fatal 错误不可恢复
         callbacks.onFatalError?.(data.details || "playback error");
+      });
+
+      hls.on(Hls.Events.LEVEL_UPDATED, (_event, data) => {
+        if (this.destroyed) return;
+        const seq = data?.details?.startSN;
+        if (typeof seq === "number" && Number.isFinite(seq)) {
+          callbacks.onPlaylistLevelUpdated?.(seq);
+        }
       });
 
       hls.loadSource(hlsUrl);
