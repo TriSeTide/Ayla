@@ -221,7 +221,11 @@ void main() {
       });
     });
 
-    testWidgets('房内页 /voice/54 ⇒ 语音球隐藏（tsx 71–74 正例，防回归）', (WidgetTester tester) async {
+    // ★ 2026-11-05 用户定稿：显示判定**只看状态、不看当前页面**。
+    // 旧版此处按 web tsx 71–74 断言「房内页隐藏语音球」，该隐藏判定已按用户要求删除
+    // （原话：「不需要判断当前页面，只要满足当前有在语音房、或当前在开播，就显示……」）。
+    testWidgets('房内页 /voice/54 ⇒ 语音球**仍然显示**（只看状态，防回归）',
+        (WidgetTester tester) async {
       await _onInAppPlatform(() async {
       await pumpShell(
         tester,
@@ -230,8 +234,12 @@ void main() {
         voiceSourceRoute: '/voice/54',
       );
 
-      expect(indicator(tester).voice, isNull);
-      expect(iconCount(tester), 0);
+      expect(
+        indicator(tester).voice,
+        isNotNull,
+        reason: '★ 只要人在语音房里就有球，与停在哪个页面无关',
+      );
+      expect(iconCount(tester), 1);
       });
     });
 

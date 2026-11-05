@@ -29,9 +29,19 @@
 /// **页面层接线项**（本件不做，与 A4 同口径）：
 /// - roomId → 会话匹配（`stored.sessionId === String(roomId)`；不匹配时回落
 ///   `title` = 语音房/直播间 + `sourceRoute` = `/voice/:id`、`/live/start/:id`，tsx 41–68）；
-/// - `onVoiceRoom` / `onLiveConsole` 的 pathname 判定（tsx 71–82）；
+/// - 直播球的 `sourceRoute` **恒为** `/live/start/:id`（开播控制台），**不沿用**
+///   活动态索引里的入口路由（见 `layout/app_shell.dart` 的同名注释）；
 /// - 层序 `z-index: 55`（页面内容之上、直播小窗 60 / 弹层 70–80 之下）；
-/// - `design.md:485` 的「小窗激活时隐藏直播球」在 tsx **未实现** → 同样留待页面层。
+/// - `design.md:498` 的「小窗激活时隐藏直播球」在 tsx **未实现** → 同样留待页面层。
+///
+/// ## ⚠️ 显示判定 = **只看状态，不看当前页面**（2026-11-05 用户定稿）
+/// 用户原话：「不需要判断当前页面，只要满足当前有在语音房、或当前在开播，就显示语音、
+/// 回到开播的悬浮球，只判断状态。」
+///
+/// ⇒ web `tsx 71–82` 的两条 pathname 隐藏判定（`onVoiceRoom` / `onLiveConsole`）
+/// **不再接线**。组件本身一直是「`voice` / `live` 非 null 就渲染」，所以本件无改动；
+/// 判定落在壳层 `_SessionActivityHost`（那里已删掉 pathname 分支，连 `useLocation`
+/// 的等价订阅都不再需要）。
 ///
 /// 本组件返回 [Positioned]（web 是 `position: fixed`，与 A4 的 `bottomLeft` / `narrow` 档同约定）
 /// ⇒ 调用方必须把它放在页面最外层 `Stack` 的**直接子级**。

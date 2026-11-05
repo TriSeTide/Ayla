@@ -771,9 +771,10 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
 
   @override
   Widget build(BuildContext context) {
-    final String pathname = GoRouterState.of(context).uri.path;
-    // 三个订阅面逐条对齐 tsx：`useAuthStore` 的四个字段（它只读这四个）、
-    // `useSessionActivityStore` 的两条记录、`useLocation()` 的 pathname。
+    // 订阅面 = `useAuthStore` 的四个媒体字段 + `useSessionActivityStore` 的两条记录。
+    //
+    // ⚠️ **不再订阅 pathname**（2026-11-05 用户定稿）：显示判定只看状态、不看当前页面
+    // ⇒ 本件不需要 `useLocation()`。少订阅一样也少一类无谓重建。
     final AuthUser? user = ref.watch(authNotifierProvider.select(
       (AuthState s) => s.user,
     ));
@@ -793,6 +794,9 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
             user != null && user.isLive && user.liveRoomId != null
                 ? user.liveRoomId
                 : null;
+        // 语音球的回房目标 = 索引里的 `sourceRoute`（用户从哪个入口进的就回哪个：
+        // 一级语音房 `/voice/:id` / 群内语音 `/group/:id/voice`），索引缺该 id 时
+        // 兜底 `/voice/:id`。
         final AylaActivitySession? voice = voiceId == null
             ? null
             : _activitySession(
@@ -801,29 +805,36 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
                 fallbackRoute: '/voice/${Uri.encodeComponent(voiceId)}',
                 fallbackTitle: '语音房',
               );
+        // 直播球的回房目标 = **永远** 该频道的开播控制台 `/live/start/:id`。
+        //
+        // ⚠️ **不能沿用索引里的 `sourceRoute`**（2026-11-05 用户实报修）：
+        // 索引的 `sourceRoute` 是「用户从哪个入口进的直播间」——
+        // 冷启动先落进自己开播的**观看页** `/live/:id` 时，会话层
+        // （`live_support.dart` 的 `_enterAsync`）会把 `sourceRoute` 写成 `/live/:id`
+        // ⇒ 点悬浮球回到的仍是观看页，而用户要的是**自己的开播页**。
+        // 「在开播」这件事（`is_live` + 自己的频道）对应的唯一去处就是开播控制台，
+        // 与入口无关 ⇒ 这里按 id 硬拼，不看索引记录。
         final AylaActivitySession? live = liveId == null
             ? null
-            : _activitySession(
-                record: activity.liveSession,
+            : AylaActivitySession(
                 sessionId: liveId,
-                fallbackRoute: '/live/start/${Uri.encodeComponent(liveId)}',
-                fallbackTitle: '直播间',
+                sourceRoute: '/live/start/${Uri.encodeComponent(liveId)}',
+                // 索引里有同 id 的记录 ⇒ 用它的真实频道名；否则字面量「直播间」。
+                title: activity.liveSession != null &&
+                        activity.liveSession!.sessionId == liveId
+                    ? activity.liveSession!.title
+                    : '直播间',
               );
-        // tsx 71–82 的两条隐藏判定：
-        // · 语音球在**语音房自己的路由**上隐藏（群内语音是 `sourceRoute` 那条）；
-        // · 直播球在**对应开播控制台**上隐藏 —— 注意它用 `/live/start/:id` 硬拼，
-        //   而不是 `sourceRoute`（web 原话），所以群内直播进控制台后直播球仍在。
-        final bool onVoiceRoom = voice != null &&
-            (pathname == '/voice/${Uri.encodeComponent(voice.sessionId)}' ||
-                pathname == voice.sourceRoute);
-        final bool onLiveConsole = live != null &&
-            pathname ==
-                '/live/start/${Uri.encodeComponent(live.sessionId)}';
-        // tsx 81–82：`showVoice` / `showLive`（`null` ⇒ 组件少渲染那个球）。
-        final AylaActivitySession? shownVoice =
-            voice != null && !onVoiceRoom ? voice : null;
-        final AylaActivitySession? shownLive =
-            live != null && !onLiveConsole ? live : null;
+        // ---- 显示判定：**只看状态，不看当前页面**（2026-11-05 用户定稿）----
+        //
+        // 用户原话：「不需要判断当前页面，只要满足当前有在语音房、或当前在开播，
+        // 就显示语音、回到开播的悬浮球，只判断状态。」
+        //
+        // ⇒ 此前照抄 web tsx 71–82 的两条 pathname 隐藏判定（在语音房自己的路由上藏
+        // 语音球 / 在开播控制台上藏直播球）**整体删除**：它们让「人在房里」时球消失，
+        // 与「有会话就该有入口」的状态语义冲突（用户实报「开播界面看不到球」、
+        // 「从悬浮球能进开播页，但从列表进开播页后球没了」）。
+        // 现在 `voice` / `live` 只要非 null（= 状态成立）就渲染，与路由无关。
 
         // ---- 窗口外悬浮球（Windows + Android）----
         //
@@ -845,9 +856,7 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
                 defaultTargetPlatform == TargetPlatform.android) &&
             aylaDetachedBallPlatformSupported;
         if (detachedBall) {
-          // 推的**不是** `shownVoice` / `shownLive`，而是完整的 `voice` / `live`：
-          // 窗口外悬浮球是常驻浮层，不该跟着「本页是否隐藏该球」闪烁
-          // （用户进语音房时应用内那一份按 tsx 隐藏，但系统层上的球不该消失）。
+          // 推的就是完整的 `voice` / `live`（两者都只由状态决定，与当前页面无关）。
           final AylaOverlayPayload payload = AylaOverlayPayload(
             kind: AylaOverlayKind.activityBall,
             voiceKind: voice?.kind.name ?? '',
@@ -870,10 +879,11 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
         // 应用内那一份：Windows / Android 上**不渲染**（渲染宿主在窗口外）。
         final AylaSessionActivityIndicator indicator =
             AylaSessionActivityIndicator(
-          voice: shownVoice,
-          live: shownLive,
+          voice: voice,
+          live: live,
           // tsx 148 / 159：`navigate(session.sourceRoute || 兜底路由)` ——
-          // 兜底已在 [_activitySession] 里拼好，这里直接用。
+          // 语音的 sourceRoute 已在 [_activitySession] 里取好（索引缺时兜底 `/voice/:id`），
+          // 直播的恒为开播控制台 `/live/start/:id`（见上方注释）。
           onOpenSession: (AylaActivitySession session) =>
               context.go(session.sourceRoute),
         );

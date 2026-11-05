@@ -372,7 +372,15 @@ void main() {
       expect(live.sourceRoute, '/live/start/9');
     }));
 
-    testWidgets('⑤ 在语音房自己的路由上 ⇒ 语音球隐藏（tsx 71–74）',
+    // ---- ⑤⑥⑦ 显示判定：**只看状态，不看当前页面**（2026-11-05 用户定稿）----
+    //
+    // 用户原话：「不需要判断当前页面，只要满足当前有在语音房、或当前在开播，
+    // 就显示语音、回到开播的悬浮球，只判断状态。」
+    //
+    // ⇒ web tsx 71–82 的两条 pathname 隐藏判定**已被删除**。原先这三条用例断言的
+    // 正是那个被否掉的行为（在语音房路由上藏语音球、在开播控制台上藏直播球），
+    // 现在改为断言「状态成立 ⇒ 任何路由都显示」。
+    testWidgets('⑤ 在语音房自己的路由上 ⇒ 语音球**仍然显示**（只看状态）',
         (WidgetTester tester) async => onIosPlatform(() async {
       await pumpShell(
         tester,
@@ -380,10 +388,15 @@ void main() {
         user: _user(isInVoice: true, voiceRoomId: '5'),
       );
 
-      expect(indicator(tester).voice, isNull);
+      expect(
+        indicator(tester).voice,
+        isNotNull,
+        reason: '★ 用户定稿：只要「在语音房」就显示球，与当前页面无关'
+            '（旧版按 tsx 71–74 在此路由隐藏，已按用户要求删除）',
+      );
     }));
 
-    testWidgets('⑥ 群内语音：pathname == sourceRoute ⇒ 同样隐藏', (WidgetTester tester) async => onIosPlatform(() async {
+    testWidgets('⑥ 群内语音：停在群场景路由也仍然显示', (WidgetTester tester) async => onIosPlatform(() async {
       await pumpShell(
         tester,
         '/group/g1/voice',
@@ -397,28 +410,70 @@ void main() {
             )),
       );
 
-      expect(indicator(tester).voice, isNull);
+      expect(indicator(tester).voice, isNotNull, reason: '★ 只看状态，不看路由');
     }));
 
-    testWidgets('⑦ 直播球只在开播控制台隐藏；普通直播间里仍显示（tsx 76–79）',
+    // ---- ★ 2026-11-05 用户实报修的回归锁 ----
+    //
+    // 现象：冷启动先落进**自己开播的观看页** `/live/:id`，再点开播界面的悬浮球，
+    // 跳的是自己的直播间（观看页）而不是自己的**开播页**。
+    // 根因：直播球沿用了活动态索引里的 sourceRoute，而那是「用户从哪个入口进的」——
+    // 从观看页进时它就是 `/live/:id`。现在直播球的回房目标按 id 硬拼
+    // `/live/start/:id`，**不看**索引里的 sourceRoute。
+    testWidgets('⑦-2 索引 sourceRoute 是观看页 ⇒ 直播球仍回开播页',
+        (WidgetTester tester) async => onIosPlatform(() async {
+      await pumpShell(
+        tester,
+        '/group',
+        user: _user(isLive: true, liveRoomId: '9'),
+        seed: (ProviderContainer c) =>
+            c.read(sessionActivityProvider).upsert(const AylaActivityRecord(
+              kind: AylaActivityKind.live,
+              sessionId: '9',
+              // 冷启动落进观看页时，会话层写的就是这条
+              sourceRoute: '/live/9',
+              title: '我的直播间',
+            )),
+      );
+
+      final AylaActivitySession live = indicator(tester).live!;
+      expect(
+        live.sourceRoute,
+        '/live/start/9',
+        reason: '★ 在开播 ⇒ 球必须回**开播控制台**，不能被索引里的入口路由带偏',
+      );
+      expect(
+        live.title,
+        '我的直播间',
+        reason: '球名仍取索引里的真实频道名（只有路由被覆盖）',
+      );
+
+      // 点球真跳：与壳层的 onOpenSession 走同一条导航。
+      final GoRouter router = GoRouter.of(tester.element(find.byType(AppShell)));
+      indicator(tester).onOpenSession!(live);
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(router.state.uri.path, '/live/start/9');
+    }));
+
+    testWidgets('⑦ 开播控制台上直播球**仍然显示**；普通直播间同样显示',
         (WidgetTester tester) async => onIosPlatform(() async {
       await pumpShell(
         tester,
         '/live/start/9',
         user: _user(isLive: true, liveRoomId: '9'),
       );
-      expect(indicator(tester).live, isNull, reason: 'tsx 76–79：onLiveConsole 判据');
+      expect(
+        indicator(tester).live,
+        isNotNull,
+        reason: '★ 用户实报「进开播界面后悬浮球没了」；新口径 = 只要在开播就显示',
+      );
 
       await pumpShell(
         tester,
         '/live/9',
         user: _user(isLive: true, liveRoomId: '9'),
       );
-      expect(
-        indicator(tester).live,
-        isNotNull,
-        reason: 'web 原话：进入任何普通直播间都必须显示',
-      );
+      expect(indicator(tester).live, isNotNull, reason: '普通直播间同样显示');
     }));
 
     testWidgets('⑧ 点球的回调按 sourceRoute 导航', (WidgetTester tester) async => onIosPlatform(() async {
@@ -442,9 +497,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(router.state.uri.path, '/voice/5');
-      // 导航后已进房 ⇒ 球按 ⑤ 的判据自行隐藏，闭环。
       expect(container.read(authNotifierProvider).user!.voiceRoomId, '5');
-      expect(indicator(tester).voice, isNull);
+      // ★ 2026-11-05：球不再按路由隐藏 ⇒ 进房后依然在（详见 ⑤ 的说明）。
+      expect(indicator(tester).voice, isNotNull, reason: '只看状态：仍在语音房');
     }));
   });
 }
