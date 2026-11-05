@@ -30,6 +30,8 @@ class _FakePlatform implements HlsPlatformPlayer {
   @override
   void Function(String detail)? onFatal;
   @override
+  void Function(String detail)? onFragmentError;
+  @override
   void Function(Duration position)? onPosition;
 
   @override
@@ -96,6 +98,33 @@ void main() {
       created.length,
       greaterThan(1),
       reason: 'playing=true 不得取消卡顿计时器，否则永远不重建（用户实报的转圈）',
+    );
+  });
+
+  test('P1-4：分片级故障只观测，不得触发重建（恢复仍归播放器）', () async {
+    // 与 Web hls.ts 的 onFragmentError 同语义：hls.js / mpv / ExoPlayer 都会自行
+    // 重试分片级失败，这类事件**不得**被当成故障去重建 —— 否则把「播放器本来
+    // 能恢复的抖动」升级成「重建黑屏」。
+    final HlsPlaybackController c = build();
+    await c.attach('https://x/live/a.m3u8');
+    expect(created.length, 1);
+    final _FakePlatform p = created.single;
+
+    // 连续多次分片失败（间隔 > 重建冷却，确保不是被冷却挡住的）
+    for (int i = 0; i < 5; i += 1) {
+      p.onFragmentError?.call('hls segment 404 (retry $i)');
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+    }
+
+    expect(
+      created.length,
+      1,
+      reason: '分片级故障只做观测，不得重建播放器',
+    );
+    expect(
+      errors,
+      isEmpty,
+      reason: '分片级故障不是 fatal，不得上报播放失败',
     );
   });
 

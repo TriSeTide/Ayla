@@ -33,6 +33,9 @@ class MediaKitHls implements HlsPlatformPlayer {
   void Function(String detail)? onFatal;
 
   @override
+  void Function(String detail)? onFragmentError;
+
+  @override
   void Function(Duration position)? onPosition;
 
   Player? _player;
@@ -79,6 +82,24 @@ class MediaKitHls implements HlsPlatformPlayer {
     }));
     _subs.add(p.stream.error.listen((e) {
       onFatal?.call(e);
+    }));
+    // 非 fatal 的分片级故障（P1-4）：mpv 把「分片拉取失败但已自行重试」记在
+    // 日志里而不是 error 流里 —— 只上报 error 会让这类事件完全不可见。
+    // 只观测 mpv/ffmpeg 的 hls 与网络相关行，避免日志噪音；
+    // **不改变任何恢复行为**（重试仍由 mpv 自己做）。
+    _subs.add(p.stream.log.listen((entry) {
+      final text = entry.text;
+      if (text.isEmpty) return;
+      final lower = text.toLowerCase();
+      final looksLikeSegmentFailure =
+          (lower.contains('hls') || lower.contains('segment')) &&
+          (lower.contains('failed') ||
+              lower.contains('error') ||
+              lower.contains('404') ||
+              lower.contains('timeout'));
+      if (looksLikeSegmentFailure) {
+        onFragmentError?.call(text);
+      }
     }));
     // 位置前进 = 真的出画面（mpv 在「连上但没数据」时 playing 也为 true，
     // 不能只靠 playing 判定 —— 见 hls_player.dart 的 kMaxAutoRebuilds 注释）。

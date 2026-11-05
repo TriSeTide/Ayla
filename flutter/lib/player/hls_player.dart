@@ -92,6 +92,19 @@ abstract class HlsPlatformPlayer {
   /// fatal 不可恢复错误
   void Function(String detail)? onFatal;
 
+  /// **非 fatal** 的分片级故障（分片 404 / 超时 / 解析失败）。
+  ///
+  /// 与 [onFatal] 的区别：hls.js 与 mpv/ExoPlayer 都会自行重试分片级失败，
+  /// 这类事件不致命，但**此前 Ayla 完全丢弃它们** —— 分片持续失败时画面卡住，
+  /// UI 却没有任何信号（与 Web 端 hls.ts 的 P1-4 是同一缺陷）。
+  ///
+  /// 语义约束（与 Web 对齐）：**只做观测上报，不改变播放器的恢复流程**。
+  /// 调用方不得因收到本回调而中断播放或触发重建 —— 恢复仍由
+  /// [onStall] / [onFatal] / 位置信号驱动。
+  ///
+  /// 默认 null（平台不实现即为「不观测」），不影响任何现有行为。
+  void Function(String detail)? onFragmentError;
+
   /// 挂载并初始化播放器（不自动播放，由调用方 [play]）。
   Future<void> attach(String url);
 
@@ -303,6 +316,7 @@ class HlsPlaybackController {
     p.onResume = _onResume;
     p.onFatal = _onFatal;
     p.onPosition = _onPlatformPosition;
+    p.onFragmentError = _onFragmentError;
     try {
       await p.attach(url);
       // ⚠️ **每次 attach 之后必须重新下发静音**（2026-11-04 需求的关键点）：
@@ -473,6 +487,19 @@ class HlsPlaybackController {
   void _clearStallTimer() {
     _stallTimer?.cancel();
     _stallTimer = null;
+  }
+
+  /// 非 fatal 的分片级故障（P1-4，与 Web hls.ts 的 onFragmentError 同语义）。
+  ///
+  /// **只记录日志，不做任何状态迁移**：hls.js / mpv / ExoPlayer 都会自行重试
+  /// 分片级失败，这里的作用是让「分片在持续失败」这件事从不可见变成可见
+  /// （此前完全丢弃，画面卡住时 UI 毫无信号）。
+  ///
+  /// 显式约束：**不得**在此触发重建、上报错误或改动 [_stallTimer] ——
+  /// 恢复路径只允许由 [onStall]/[onFatal]/位置信号驱动，否则会把
+  /// 「播放器自己能恢复的抖动」误判成故障。
+  void _onFragmentError(String detail) {
+    _log('分片级故障（已由播放器自行重试）: $detail');
   }
 
   /// 强制重建（绕过幂等：先 dispose 再 attach）。

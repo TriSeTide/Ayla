@@ -26,11 +26,21 @@ class VideoPlayerHls implements HlsPlatformPlayer, HlsVideoMetrics {
   void Function(String detail)? onFatal;
 
   @override
+  void Function(String detail)? onFragmentError;
+
+  @override
   void Function(Duration position)? onPosition;
 
   VideoPlayerController? _controller;
   bool _stalled = false;
   Duration _lastPosition = Duration.zero;
+
+  /// 上一次上报过的 errorDescription（用于去重：同一个错误只报一次）。
+  ///
+  /// video_player 的 Dart 侧没有「非 fatal 分片错误」的独立通道：ExoPlayer 把
+  /// 可恢复的加载错误重试掉，只在 `value.errorDescription` 上短暂留痕。
+  /// 用「描述变化」去重，避免每次 tick 都重复上报同一条。
+  String? _lastFragmentError;
 
   @override
   Future<void> attach(String url) async {
@@ -54,6 +64,14 @@ class VideoPlayerHls implements HlsPlatformPlayer, HlsVideoMetrics {
       onFatal?.call(c.value.errorDescription ?? '播放错误');
       return;
     }
+    // 非 fatal 的分片级故障（P1-4）：hasError 为 false 但 errorDescription
+    // 非空 ⇒ 播放器自己重试掉的加载错误。只观测，不改变恢复流程。
+    final desc = c.value.errorDescription;
+    if (desc != null && desc.isNotEmpty && desc != _lastFragmentError) {
+      _lastFragmentError = desc;
+      onFragmentError?.call(desc);
+    }
+
     final buffering = c.value.isBuffering;
     final pos = c.value.position;
     if (buffering) {
