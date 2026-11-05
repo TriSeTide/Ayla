@@ -575,6 +575,13 @@ class MainActivity : FlutterActivity() {
     private val overlayBall: AylaOverlayFlutterHost by lazy {
         AylaOverlayFlutterHost(
             applicationContext,
+            // 保活服务前台化失败（异步）⇒ 球已被原生收回：把 onBallClosed 回给 Dart，
+            // 让 `_SessionActivityHostState` 复位「窗口已打开」的本地认知，下一次同步能重试。
+            onBallClosed = {
+                mainHandler.post {
+                    livePipChannel?.invokeMethod("onBallClosed", null)
+                }
+            },
             onBallTap = { kind, sourceRoute ->
                 mainHandler.post {
                     // ⚠️ **先把 Ayla 拉到前台**，再把导航意图交给 Dart。

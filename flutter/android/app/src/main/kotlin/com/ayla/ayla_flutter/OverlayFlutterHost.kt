@@ -53,6 +53,13 @@ class AylaOverlayFlutterHost(
     private val context: Context,
     /** 点球回房：原生把 (kind, sourceRoute) 转给**主引擎**。 */
     private val onBallTap: (kind: String, sourceRoute: String) -> Unit,
+    /**
+     * 保活服务前台化失败 => 悬浮球实际已经不可用（窗口被收回）。
+     *
+     * 主引擎据此复位「窗口已打开」的认知（Dart 侧 `onBallClosed` 分支），
+     * 否则本地会一直以为球还开着，下一次同步被去重逻辑挡住、再也不重试。
+     */
+    private val onBallClosed: () -> Unit = {},
 ) {
     private var windowManager: WindowManager? = null
     private var flutterView: FlutterView? = null
@@ -73,6 +80,28 @@ class AylaOverlayFlutterHost(
 
     /** 最近一次要显示的投影（JSON 串），引擎 ready 后补推。 */
     private var pendingPayload: String? = null
+
+    /**
+     * 保活服务**异步**前台化失败的回调（onStartCommand 里才发现的那种）。
+     *
+     * 为什么需要它：`show()` 返回时系统回调还没跑（服务在排队等主线程创建），
+     * 所以那一刻只能乐观回 "shown"。若随后 startForeground 失败，进程会在
+     * 10s 后被系统以 ForegroundServiceDidNotStartInTimeException 杀掉 ——
+     * 那就是用户看到的「球没出来 + 直接闪退」。
+     *
+     * ⇒ 失败一到就把窗口收掉（不留下「假装成功」的球），并把 ballClosed 事件
+     *    回传主引擎，让 Dart 侧复位「已打开」认知、下一次同步可以重试。
+     */
+    private val foregroundFailureHandler: (String) -> Unit = { reason ->
+        Log.w(TAG, "foreground service failed after show(), hiding overlay: $reason")
+        AylaFloatingBallService.removeForegroundFailureListener(foregroundFailureHandler)
+        hide()
+        try {
+            onBallClosed()
+        } catch (error: Exception) {
+            Log.w(TAG, "notify ballClosed to dart failed: ${error.message}")
+        }
+    }
 
 
     /** 拖动状态。 */
@@ -97,8 +126,29 @@ class AylaOverlayFlutterHost(
 
         pendingPayload = payload
         updateBallCount()
-        // 先起保活服务（此刻 App 仍在前台 ⇒ 满足 Android 12+ 的 FGS 启动限制）。
+        // ---- 顺序纪律：先 FGS、再建引擎（2026-11-05 闪退修复）----
+        //
+        // 崩溃**不是**「主线程太慢导致 10s 超时」：实测三次事件只隔 854ms
+        // （54.742 FGS Allowed → 54.930 Bringing down → 55.596 FATAL），
+        // 远小于 AOSP 的 SERVICE_START_FOREGROUND_TIMEOUT(10s)。真正命中的是
+        // ActiveServices.bringDownServiceLocked 里的 serviceForegroundCrash：
+        // **在 startForeground 之前把服务拆掉**会立刻抛
+        // ForegroundServiceDidNotStartInTimeException（同一个异常类型，另一条触发路径）。
+        //
+        // ⇒ 主修在 [AylaFloatingBallService.stop]：未前台化时只置 pendingStop，
+        //    绝不 stopService。这里补两件次要的事：
+        //    ① 失败要**立即**失败返回（不再「球出来了、进程随后被杀」）；
+        //    ② 把 startForeground 之后的异步失败也接回宿主（见前景监听器）。
+        AylaFloatingBallService.addForegroundFailureListener(foregroundFailureHandler)
         AylaFloatingBallService.start(context)
+        val failure = AylaFloatingBallService.foregroundFailure()
+        if (failure != null) {
+            // 保活起不来 ⇒ 不显示窗口（否则就是「球出来了、进程 10s 后被系统杀」）。
+            Log.w(TAG, "show aborted, foreground service failed: $failure")
+            AylaFloatingBallService.removeForegroundFailureListener(foregroundFailureHandler)
+            hide()
+            return AylaFloatingBallController.RESULT_FAILED
+        }
 
         return try {
             ensureView()
@@ -145,6 +195,7 @@ class AylaOverlayFlutterHost(
         engine = null
         engineReady = false
         pendingPayload = null
+        AylaFloatingBallService.removeForegroundFailureListener(foregroundFailureHandler)
         try {
             AylaFloatingBallService.stop(context)
         } catch (error: Exception) {

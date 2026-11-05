@@ -105,6 +105,18 @@ class AylaLiveMiniWindowHost(
     val isShowing: Boolean
         get() = flutterView != null
 
+    /**
+     * 保活服务**异步**前台化失败 => 小窗先收起，再把「窗口没了」回传主引擎。
+     *
+     * 与 [AylaOverlayFlutterHost] 同因：`show()` 返回时系统回调还没跑，只能乐观成功；
+     * 失败必须立刻收窗，否则留下「窗口还在、进程 10s 后被杀」的形态。
+     */
+    private val foregroundFailureHandler: (String) -> Unit = { reason ->
+        Log.w(TAG, "foreground service failed after show(), hiding live mini: $reason")
+        AylaFloatingBallService.removeForegroundFailureListener(foregroundFailureHandler)
+        hide()
+    }
+
     // ------------------------------------------------------------------ 生命周期
 
     /**
@@ -118,7 +130,19 @@ class AylaLiveMiniWindowHost(
         // 保活：小窗 + 第二引擎的音频必须在 App 进后台后继续（Android 会冻结
         // 后台进程的 CPU / 渲染；mediaPlayback 前台服务才能钉住）。必须在 App
         // 仍在前台时启动（Android 12+ 的后台 FGS 限制）。
+        //
+        // ⚠️ 与 [AylaOverlayFlutterHost.show] 同一条纪律（2026-11-05 闪退修复）：
+        // 保活起不来时**不要**继续建第二引擎 —— 否则窗口出来了、进程随后被系统以
+        // ForegroundServiceDidNotStartInTimeException 杀掉。
+        AylaFloatingBallService.addForegroundFailureListener(foregroundFailureHandler)
         AylaFloatingBallService.start(context)
+        val foregroundFailure = AylaFloatingBallService.foregroundFailure()
+        if (foregroundFailure != null) {
+            Log.w(TAG, "show aborted, foreground service failed: $foregroundFailure")
+            AylaFloatingBallService.removeForegroundFailureListener(foregroundFailureHandler)
+            hide(notify = false)
+            return false
+        }
 
         val sameStream = isShowing && this.channelId == channelId
         this.channelId = channelId
@@ -191,6 +215,7 @@ class AylaLiveMiniWindowHost(
             Log.w(TAG, "engine.destroy failed: ${error.message}")
         }
         engine = null
+        AylaFloatingBallService.removeForegroundFailureListener(foregroundFailureHandler)
         try {
             AylaFloatingBallService.stopIfIdle(context)
         } catch (error: Exception) {
