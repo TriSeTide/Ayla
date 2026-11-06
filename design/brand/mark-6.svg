@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="ttl">
+<title id="ttl">Ayla 徽记 — 六芒星</title>
+  <defs><mask id="mA" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512"><rect width="512" height="512" fill="#fff"/><path d="M 383.31 257.50 A 147.00 147.00 0 0 1 128.69 257.50 L 166.60 209.63 A 93.00 93.00 0 0 0 345.40 209.63 Z" fill="#000"/><path d="M 383.31 257.50 A 147.00 147.00 0 0 1 128.69 257.50 L 166.60 209.63 A 93.00 93.00 0 0 0 345.40 209.63 Z" fill="none" stroke="#000" stroke-width="16"/></mask><mask id="mB" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512"><rect width="512" height="512" fill="#fff"/><path d="M 193.65 145.00 A 147.00 147.00 0 0 1 320.95 365.50 L 260.54 356.60 A 93.00 93.00 0 0 0 171.15 201.76 Z" fill="#000"/><path d="M 193.65 145.00 A 147.00 147.00 0 0 1 320.95 365.50 L 260.54 356.60 A 93.00 93.00 0 0 0 171.15 201.76 Z" fill="none" stroke="#000" stroke-width="16"/></mask><mask id="mC" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512"><rect width="512" height="512" fill="#fff"/><path d="M 191.05 365.50 A 147.00 147.00 0 0 1 318.35 145.00 L 340.85 201.76 A 93.00 93.00 0 0 0 251.46 356.60 Z" fill="#000"/><path d="M 191.05 365.50 A 147.00 147.00 0 0 1 318.35 145.00 L 340.85 201.76 A 93.00 93.00 0 0 0 251.46 356.60 Z" fill="none" stroke="#000" stroke-width="16"/></mask>  </defs>
+  <g class="star">
+      <path class="sline" d="M 256.00 55.30 L 429.81 356.35 L 82.19 356.35 Z" fill="none" stroke="#BDD4E9" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path class="sline" d="M 429.81 155.65 L 256.00 456.70 L 82.19 155.65 Z" fill="none" stroke="#BDD4E9" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <g class="ring-spin">
+    <g class="ring-breathe">
+      <g class="ring-blocks">
+    <g transform="rotate(-90.00 256 256)"><path d="M 428.90 209.67 A 179.00 179.00 0 0 1 428.90 302.33" fill="none" stroke="#9DBFE6" stroke-width="18.0" stroke-linecap="round"/></g>
+    <g transform="rotate(-60.00 256 256)"><circle cx="435.00" cy="256.00" r="9.00" fill="#BDD4E9"/></g>
+    <g transform="rotate(-30.00 256 256)"><path d="M 428.90 209.67 A 179.00 179.00 0 0 1 428.90 302.33" fill="none" stroke="#9DBFE6" stroke-width="18.0" stroke-linecap="round"/></g>
+    <g transform="rotate(0.00 256 256)"><circle cx="435.00" cy="256.00" r="9.00" fill="#BDD4E9"/></g>
+    <g transform="rotate(30.00 256 256)"><path d="M 428.90 209.67 A 179.00 179.00 0 0 1 428.90 302.33" fill="none" stroke="#9DBFE6" stroke-width="18.0" stroke-linecap="round"/></g>
+    <g transform="rotate(60.00 256 256)"><circle cx="435.00" cy="256.00" r="9.00" fill="#BDD4E9"/></g>
+    <g transform="rotate(90.00 256 256)"><path d="M 428.90 209.67 A 179.00 179.00 0 0 1 428.90 302.33" fill="none" stroke="#9DBFE6" stroke-width="18.0" stroke-linecap="round"/></g>
+    <g transform="rotate(120.00 256 256)"><circle cx="435.00" cy="256.00" r="9.00" fill="#BDD4E9"/></g>
+    <g transform="rotate(150.00 256 256)"><path d="M 428.90 209.67 A 179.00 179.00 0 0 1 428.90 302.33" fill="none" stroke="#9DBFE6" stroke-width="18.0" stroke-linecap="round"/></g>
+    <g transform="rotate(180.00 256 256)"><circle cx="435.00" cy="256.00" r="9.00" fill="#BDD4E9"/></g>
+    <g transform="rotate(210.00 256 256)"><path d="M 428.90 209.67 A 179.00 179.00 0 0 1 428.90 302.33" fill="none" stroke="#9DBFE6" stroke-width="18.0" stroke-linecap="round"/></g>
+    <g transform="rotate(240.00 256 256)"><circle cx="435.00" cy="256.00" r="9.00" fill="#BDD4E9"/></g>
+      </g>
+    </g>
+  </g>
+  <g class="arcs">
+      <g mask="url(#mA)"><path d="M 193.65 145.00 A 147.00 147.00 0 0 1 320.95 365.50 L 260.54 356.60 A 93.00 93.00 0 0 0 171.15 201.76 Z" fill="none" stroke="#FFFAFB" stroke-width="16"/><path d="M 193.65 145.00 A 147.00 147.00 0 0 1 320.95 365.50 L 260.54 356.60 A 93.00 93.00 0 0 0 171.15 201.76 Z" fill="#FCD8FF"/></g>
+      <g mask="url(#mB)"><path d="M 191.05 365.50 A 147.00 147.00 0 0 1 318.35 145.00 L 340.85 201.76 A 93.00 93.00 0 0 0 251.46 356.60 Z" fill="none" stroke="#FFFAFB" stroke-width="16"/><path d="M 191.05 365.50 A 147.00 147.00 0 0 1 318.35 145.00 L 340.85 201.76 A 93.00 93.00 0 0 0 251.46 356.60 Z" fill="#F9B0FF"/></g>
+      <g mask="url(#mC)"><path d="M 383.31 257.50 A 147.00 147.00 0 0 1 128.69 257.50 L 166.60 209.63 A 93.00 93.00 0 0 0 345.40 209.63 Z" fill="none" stroke="#FFFAFB" stroke-width="16"/><path d="M 383.31 257.50 A 147.00 147.00 0 0 1 128.69 257.50 L 166.60 209.63 A 93.00 93.00 0 0 0 345.40 209.63 Z" fill="#F17EB3"/></g>
+  </g>
+  <g class="petals">
+    <path d="M 256.00 294.00 A 37.44 37.44 0 0 1 256.00 358.00 A 37.44 37.44 0 0 1 256.00 294.00 Z" fill="#F5C2FB"/>
+    <path d="M 223.09 237.00 A 37.44 37.44 0 0 1 167.67 205.00 A 37.44 37.44 0 0 1 223.09 237.00 Z" fill="#F09AF7"/>
+    <path d="M 288.91 237.00 A 37.44 37.44 0 0 1 344.33 205.00 A 37.44 37.44 0 0 1 288.91 237.00 Z" fill="#EE7EF9"/>
+  </g>
+  <g class="core"><path d="M 256.00 278.00 L 226.00 256.00 L 256.00 234.00 L 286.00 256.00 Z" fill="#9DBFE6"/></g>
+  <g class="dot"><path d="M 256 246.00 A 10.00 10.00 0 1 0 256 266.00 A 10.00 10.00 0 1 0 256 246.00 Z" fill="#F796FF"/></g>
+</svg>
