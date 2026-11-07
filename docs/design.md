@@ -259,15 +259,16 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 > **不要把 PWA maskable 的 80% 当成通用要求**。那条 80% 是因为 maskable PWA 图标可能被套上任意形状蒙版才要求深边距；普通启动器图标只需不被切。若将来确实要做 maskable PWA 图标，另出深边距变体（≥1770），不要缩小现有文件。
 
-**已生成的平台位图**（均由 `logo-on-pink.svg` 栅格化，全部直角方图）
+**平台位图**（2026-11-07 用户裁决：**桌面端用透明 1550，手机端用粉底 1550**，全部直角方图）
 
-| 位置 | 尺寸 |
-|---|---|
-| `flutter/ios/.../AppIcon.appiconset/` | 20–1024，共 15 张 |
-| `flutter/android/.../mipmap-*dpi/ic_launcher.png` | 48 / 72 / 96 / 144 / 192 |
-| `flutter/web/icons/` | Icon-192、Icon-512、Icon-maskable-192、Icon-maskable-512 |
-| `flutter/web/favicon.png` | 32 |
-| `flutter/windows/runner/resources/app_icon.ico` | 16–256 多尺寸 |
+| 平台 | 底 | 理由 |
+|---|---|---|
+| `flutter/windows/runner/resources/app_icon.ico` | **透明**（`logo.svg` 栅格化，16-256 多尺寸） | Windows 任务栏有浅色/深色两套主题，粉底方块在深色任务栏上是一块突兀的粉斑；透明版让图形自身适应两种主题（已实测） |
+| `flutter/android/.../mipmap-*dpi/ic_launcher.png`（48-192） | `#FFB4E1`（`logo-on-pink.svg`） | Android 蒙版会裁圆角，方图带底色才能在圆形蒙版下不露馅；不能透出壁纸 |
+| `flutter/ios/.../AppIcon.appiconset/`（20-1024，共 15 张） | `#FFB4E1`，**无 alpha** | iOS 明确拒绝 alpha 通道；蒙版由系统裁 |
+| `flutter/web/icons/`（Icon-192/512、maskable-192/512）、`favicon.png` | `#FFB4E1` | PWA 安装图标的底与移动端保持一致；maskable 需要不透明底 |
+
+> 若某台设备/主题需要不同底色，重新栅格化对应文件即可，SVG 源不变。
 
 **用法约束**
 
