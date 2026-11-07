@@ -221,6 +221,63 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 | 沉浸查看器 | 图片查看器等 lightbox：压暗加深至 0.45（`--overlay-dim-strong`）+ blur(8px)，z 在弹窗层之上（**遮罩模糊的唯一合法场景**，因为它是内容级查看器而非模态） |
 | 辉光 | 原有光环、主 CTA、focus；导航选中态增加同色柔光，保持状态颜色语义 |
 
+### 6.1 图形标识 Logo（已固定）
+
+> 2026-11-07 用户裁决：**标识固定为 mark-5 body**（中心三角 + 三段互锁环形，image-3 透视）。当前界面仍用 §12.2 的 `Ayla` 渐变字标；**图形标识尚未应用到任何界面**，接入需单独授权。
+
+**三种产物，只有三种**
+
+| 文件 | 尺寸 | 底 | 用途 |
+|---|---|---|---|
+| `design/brand/logo-max.svg` | 1390.6（能装下全部墨迹的最大方图） | 透明 | 需要图形占满画布时用 |
+| `design/brand/logo.svg` | 1550 | 透明 | **默认**，任何页面内的标识都用它 |
+| `design/brand/logo-on-pink.svg` | 1550 | #FFB4E1 | **仅当明确要求粉底时**；或平台不允许透明（iOS 图标拒绝 alpha） |
+
+对应 `web/public/brand/` 下三份同名副本，逐字节相同，构建后即 `/brand/<name>.svg`。
+
+**没有圆角。** 三个文件都是直角方图（`rx`/`ry` 一次都不出现）。方形是刻意的：iOS squircle、各厂商 launcher 蒙版、Windows 圆角各不相同，由系统裁切才能与相邻图标一致；文件里画死圆角会出现「圆角套圆角」的双层边缘。
+
+**默认透明底**
+
+除以下情况外一律用 `logo.svg`：
+
+- 平台图标要求不透明（**iOS App Icon 明确拒绝 alpha 通道**）→ 用 `logo-on-pink.svg`；
+- 底色本身偏深或杂乱，浅粉/暖白层会糊掉 → 用粉底版，不要给透明版加 `filter`。
+
+**裁剪取值**
+
+原始画布 2048×2048，墨迹只占 68% × 58%，直接用会留一大圈空白。墨迹包围盒 1390.6 × 1198.0，宽高比 **1.16 : 1**（宽 > 高），所以左右留白必然小于上下留白——几何决定的。
+
+| 边长 | 宽度占比 | 左右留白 | 说明 |
+|---|---|---|---|
+| 1390.6（logo-max） | 100% | 0% | 极限紧裁剪，再小就切图 |
+| 1550（logo / logo-on-pink） | 89.7% | 5.1% | 采用 |
+| 1450 | 95.9% | 2.0% | 偏满，四角发挤 |
+| 1880 | 74.0% | 13.0% | 视觉偏小 |
+
+1550 是在真实 56px 启动器尺寸下目视选定的。硬约束只有一条：最远墨迹顶点距中心 707.9，圆形蒙版半径 = 边长/2，所以边长 ≥ 1416 就不会被圆蒙版切到（1550 下余量 4.4%）。
+
+> **不要把 PWA maskable 的 80% 当成通用要求**。那条 80% 是因为 maskable PWA 图标可能被套上任意形状蒙版才要求深边距；普通启动器图标只需不被切。若将来确实要做 maskable PWA 图标，另出深边距变体（≥1770），不要缩小现有文件。
+
+**已生成的平台位图**（均由 `logo-on-pink.svg` 栅格化，全部直角方图）
+
+| 位置 | 尺寸 |
+|---|---|
+| `flutter/ios/.../AppIcon.appiconset/` | 20–1024，共 15 张 |
+| `flutter/android/.../mipmap-*dpi/ic_launcher.png` | 48 / 72 / 96 / 144 / 192 |
+| `flutter/web/icons/` | Icon-192、Icon-512、Icon-maskable-192、Icon-maskable-512 |
+| `flutter/web/favicon.png` | 32 |
+| `flutter/windows/runner/resources/app_icon.ico` | 16–256 多尺寸 |
+
+**用法约束**
+
+- **颜色已定，组件里不得改色或叠滤镜**：`#BDD4E9` 中心三角、`#FFFAFB` 暖白分隔、`#F9B0FF` 与 `#FCD8FF` 樱粉两段、`#F17EB3` 深粉。对应 token `--ice-300` / `--surface` / `--sakura-300` / `--sakura-100` / `--pink-500`（§2 Core）。
+- **尺寸**：直接给 `width/height`，不要自行加 padding 或 `border-radius`。
+- **可访问性**：根元素已带 `role="img"` + `aria-labelledby="ttl"` + `<title>Ayla</title>`。`<img>` 引用给 `alt="Ayla"`；纯装饰时 `alt=""` + `aria-hidden`。
+- **不要内联进 JSX/HTML**：5 条 `path` 共 7KB，内联会重复进包且不可缓存；统一文件引用。
+
+**当前状态**：仅资产与文档；`TopNav` / `FullScreenLoader` / `LoginPage` / `RegisterPage` 品牌位仍是文字。
+
 ## 7. Motion
 
 - 时长：按钮200ms ease；卡片hover 300ms ease；方向路由300ms easeInOut；普通页面显现与未分区侧栏500ms easeOut；宽窄屏分区、导航胶囊与折叠300ms easeOut。参数来自§0源码，独立放在Auroraqua命名变量中，不改既有手势/消息/背景动画token。
@@ -371,6 +428,8 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 当前模块：原文字颜色 + 12px 圆角的 `--nav-active-bg` 胶囊、高光与柔光；`AuroraquaNavHighlight` 300ms 移动，不再显示独立底部线
 - hover：模块文字底 `rgba(157,191,230,0.18)` 胶囊（200ms 过渡）
 - 模块文字必须单行、不收缩成竖排；769–900px 将模块间距收为4px、两端内边距8px，导航外壳内边距/间隙12px，搜索框收为160–200px，消息/更多图标按钮仍为40px。更宽视口保持原24px外壳内边距、240px搜索框。
+
+> **图形标识已定为 mark-5 body（2026-11-07 用户裁决）**，见 §6.1。本节现有实现仍是 `Ayla` 渐变字标；换成图形标识属于界面改动，需单独授权，本文件只登记资产位置与用法约束。
 
 ### 12.3 服务器栏 ServerRail（宽屏，主页/群场景最左）
 

@@ -50,6 +50,30 @@ DROP_COLOURS = ("#F5C2FB", "#F09AF7", "#EE7EF9", "#F796FF")
 # identify that ring of shapes and nothing else.
 CORE_COLOURS = ("#FFFAFB", "#FCD8FF", "#F9B0FF", "#F17EB3")
 
+# Ink of the source's small centre diamond.  Its traced outline used to be
+# emitted as its own shape; it is not any more (see DROP_CORE_DIAMOND).  The
+# ink still names the source colour, and still paints the outer ring.
+CORE_INK = "#9DBFE6"
+
+# Drop the centre diamond from the colour pass.  build_triangle_overlay() paints
+# a triangle that already fills the pocket, so the diamond underneath only ever
+# showed as a darker sliver along two of the triangle's edges - it read as a
+# stray extra shape, not as part of the mark.  The filter is by radius so it
+# cannot touch the ring arcs, which share the ink but sit far outside.
+DROP_CORE_DIAMOND = True
+CORE_DIAMOND_R = 300.0      # canvas px from the emblem centre: diamond ~110, ring ~570+
+
+# Ink of the centre triangle.  Was CORE_INK; lightened one step on the ice ramp
+# so the figure reads as a pale backing plate behind the pink interlace instead
+# of a dark mass in the middle of it.
+TRIANGLE_INK = "#BDD4E9"
+
+# The two pinks of the interlace trade places on output: the colour that used
+# to paint the large body / lower-left band (#FCD8FF) now paints the upper wing
+# and the lower-right shard, and vice versa.  Applied by swapping the fill of
+# the two layers after they are emitted.
+SWAP_PINKS = ("#FCD8FF", "#F9B0FF")
+
 # The outer ring (arcs + dots) is traced from its own group and painted on top,
 # so it is excluded from the normal colour layers.
 # #9DBFE6 paints the outer ring arcs AND the centre diamond core, so it cannot
@@ -412,15 +436,12 @@ def build_star_overlay(mark_svg):
     return warp_layer(png)
 
 
-def build_core_overlay(mark_svg, grow=1.55):
-    """Draw the centre core as a triangle that fills the middle pocket.
+def core_diamond(mark_svg, grow=1.55):
+    """Centre + half-extents of the source diamond, in canvas space.
 
-    The source core is a small diamond.  Once the interlaced tapes are
-    enlarged (CORE_SCALE) the pocket around it widens, so the diamond no
-    longer reaches the walls and reads as a triangle with two corners cut
-    off.  The core is therefore re-emitted as one explicit triangle, centred
-    where the diamond sat and big enough to meet the tape edges, painted on
-    top of the tapes exactly as in the source z-order.
+    This is pure geometry: it locates the middle pocket of the interlaced body
+    after projection.  Nothing is painted with it any more - a diamond drawn
+    there would sit under the triangle and only show as a stray sliver.
     """
     K, CX, CY = K_GLOBAL, CX_GLOBAL, CY_GLOBAL
 
@@ -435,12 +456,24 @@ def build_core_overlay(mark_svg, grow=1.55):
     cy = sum(p[1] for p in corners) / 4.0
     rx = (max(p[0] for p in corners) - min(p[0] for p in corners)) / 2.0 * grow
     ry = (max(p[1] for p in corners) - min(p[1] for p in corners)) / 2.0 * grow
+    return cx, cy, rx, ry
 
+
+def build_triangle_overlay(mark_svg, grow=2.2):
+    """The centre triangle that fills the middle pocket.
+
+    The source core is a small diamond.  Once the interlaced tapes are
+    enlarged (CORE_SCALE) the pocket around it widens, so the diamond no
+    longer reaches the walls and reads as a triangle with two corners cut
+    off.  The core is therefore emitted as one explicit triangle, centred
+    where the diamond sat and big enough to meet the tape edges, painted under
+    the tapes so they clip it to the pocket.
+    """
+    cx, cy, rx, ry = core_diamond(mark_svg, grow)
     # upward-pointing triangle inscribed in that ellipse
-    tri = [(cx, cy - ry),
-           (cx - rx * 0.93, cy + ry * 0.80),
-           (cx + rx * 0.93, cy + ry * 0.80)]
-    return [tri]
+    return [[(cx, cy - ry),
+             (cx - rx * 0.93, cy + ry * 0.80),
+             (cx + rx * 0.93, cy + ry * 0.80)]]
 
 
 def build_ring_overlay(mark_svg):
@@ -456,6 +489,39 @@ def build_ring_overlay(mark_svg):
     return warp_layer(png)
 
 
+def _is_core_diamond(poly):
+    """True for the small centre diamond, judged by distance from the centre.
+
+    The star lines and the outer ring arcs share CORE_INK but live at r ~570+
+    on the canvas; the diamond sits at r ~110.  A radius test therefore
+    separates it without pinning the generator to one traced outline.
+    """
+    if not poly:
+        return False
+    cx = sum(p[0] for p in poly) / len(poly)
+    cy = sum(p[1] for p in poly) / len(poly)
+    r = math.hypot(cx - CANVAS / 2.0, cy - CANVAS / 2.0)
+    return r < CORE_DIAMOND_R
+
+
+def swap_pinks(layers):
+    """Exchange the fills of SWAP_PINKS, keeping the geometry untouched.
+
+    The two pinks are single flat layers, so swapping which one paints which
+    shape is just a rename - no re-tracing, no z-order change.
+    """
+    a, b = SWAP_PINKS
+    out = []
+    for colour, polys in layers:
+        if colour == a:
+            out.append((b, polys))
+        elif colour == b:
+            out.append((a, polys))
+        else:
+            out.append((colour, polys))
+    return out
+
+
 def build(mark_svg, out_svg, name, body_only=False):
     os.makedirs(WORK, exist_ok=True)
     cols = [c for c in palette_order(mark_svg)
@@ -466,20 +532,25 @@ def build(mark_svg, out_svg, name, body_only=False):
         png = os.path.join(WORK, "%s-%02d.png" % (name, i))
         render_layer(mark_svg, c, png)
         polys = warp_layer(png, CORE_SCALE if c in CORE_COLOURS else 1.0)
+        if DROP_CORE_DIAMOND and c == CORE_INK:
+            polys = [p for p in polys if not _is_core_diamond(p)]
         print("   ", c, "contours:", len(polys))
         if polys:
             layers.append((c, polys))
+    layers = swap_pinks(layers)
 
     parts = [
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 2048" '
         'width="2048" height="2048" role="img" aria-labelledby="ttl">',
         '<title id="ttl">Ayla %s - image-3 perspective</title>' % name,]
-    # The centre core is drawn large and placed UNDER the tape body: the tapes
-    # then clip it, so whatever shows through fills the central pocket exactly.
-    core_polys = build_core_overlay(mark_svg, grow=2.2)
-    if core_polys:
-        d = " ".join("M" + " L".join("%.1f %.1f" % q for q in p) + " Z" for p in core_polys)
-        parts.append('<path fill="%s" fill-rule="evenodd" d="%s"/>' % ("#9DBFE6", d))
+    # The centre triangle is drawn large and placed UNDER the tape body: the
+    # tapes then clip it, so whatever shows through fills the central pocket
+    # exactly.  Only the triangle is emitted - the source diamond it replaces
+    # is not painted any more.
+    tri = build_triangle_overlay(mark_svg, grow=2.2)
+    if tri:
+        d = " ".join("M" + " L".join("%.1f %.1f" % q for q in p) + " Z" for p in tri)
+        parts.append('<path fill="%s" fill-rule="evenodd" d="%s"/>' % (TRIANGLE_INK, d))
 
     STAR_INKS = ("#BDD4E9",)
     RING_R = 540.0          # canvas px: anything beyond this is ring, not body
@@ -509,9 +580,101 @@ def build(mark_svg, out_svg, name, body_only=False):
     parts.append("</svg>")
     svg = chr(10).join(parts)
     os.makedirs(os.path.dirname(out_svg), exist_ok=True)
-    with open(out_svg, "w", encoding="utf-8") as f:
+    # newline="" keeps the emitted LF on every platform: without it Python
+    # rewrites every break to CRLF on Windows and the whole file shows up as a
+    # one-line diff in a repository that stores these SVGs with LF.
+    with open(out_svg, "w", encoding="utf-8", newline="") as f:
         f.write(svg)
     return svg
+
+
+# Three deliverables, and only three:
+#
+#   logo-max.svg        largest square that still holds all the ink, so the
+#                       artwork fills the file - nothing may be trimmed tighter
+#                       without cutting the mark
+#   logo.svg            1550 square, transparent - THE DEFAULT
+#   logo-on-pink.svg    1550 square, opaque #FFB4E1 - only where transparency
+#                       is a problem (iOS icons reject alpha, dark backdrops)
+#
+# No file carries a corner radius: the square is deliberate, the OS or the
+# surrounding CSS applies whatever mask is wanted.
+#
+# 1550 was picked by eye at true 56px launcher scale (1450 read as
+# edge-to-edge, 1880 as too small next to neighbouring icons).
+LOGO_SIDE = 1550.0
+LOGO_BG = "#FFB4E1"
+
+def build_logo(out_svg, bg=None, side=None):
+    """Crop the body mark to its ink and write it as the Ayla logo.
+
+    The pipeline canvas is a 2048 square, but the artwork only covers 68% x
+    58% of it, so using the file as-is leaves a wide empty border and the mark
+    reads small wherever it is placed. Cropping to a square around the ink
+    removes that padding.
+
+    side=None means MAXIMUM CROP: the smallest square that still contains every
+    ink vertex, i.e. max(ink width, ink height) = 1390.6. That is the largest
+    the mark can be drawn without the file's own bounds cutting it, and it is
+    what the max-crop deliverable uses. Anything tighter would clip.
+
+    side=LOGO_SIDE (1550) is the shared size for the transparent and the pink
+    logo. Why 1550 rather than the tight 1391: the mark's aspect is 1.16:1, so
+    left/right air is necessarily smaller than top/bottom air - that is
+    geometry, not tuning. The only hard rule when a mask is applied is that no
+    ink may fall outside it: the farthest ink vertex is 707.9 from the centre
+    and a circular mask has radius side/2, so any side >= 1416 survives a full
+    circle uncut. 1550 clears that with room to spare (ink radius 91.3% of the
+    half-side) while keeping the mark big - longest ink edge fills 89.7% of the
+    tile, 5.1% air left and right. 1450 was rejected as edge-to-edge, 1880 as
+    visibly too small next to real icons; both judged at true 56px scale.
+
+    Do NOT read the PWA "maskable" 80% rule as a general requirement. That 80%
+    figure exists because a maskable PWA icon may be masked into ANY shape by
+    the OS, so it asks for a deep margin; an ordinary launcher icon only needs
+    to not be clipped. If a maskable PWA icon is ever needed, add a separate
+    even-padded variant rather than shrinking the shared one.
+
+    No rounded corners are drawn: the square is intentional, the OS applies
+    whatever corner mask it wants.
+
+    bg paints an opaque background rect; None keeps the file transparent.
+    """
+    svg = open(os.path.join(OUT, "mark-5-body.svg"), encoding="utf-8").read()
+    # whole <path .../> elements, closing slash included - matching only up to
+    # d="..." would emit unclosed elements and the file would not parse
+    polys = re.findall(r'<path [^>]*?/>', svg)
+    if not polys:
+        raise SystemExit("no <path> elements found in %s" % body)
+    pts = [(float(a), float(b)) for a, b in
+           re.findall(r'([-\d.]+) ([-\d.]+)', " ".join(re.findall(r' d="([^"]*)"', svg)))]
+    xs = [q[0] for q in pts]
+    ys = [q[1] for q in pts]
+    cx = (min(xs) + max(xs)) / 2.0
+    cy = (min(ys) + max(ys)) / 2.0
+    if side is None:
+        # maximum crop: the smallest square that still holds every ink vertex,
+        # so the mark fills the file as far as it can without being cut
+        side = max(max(xs) - min(xs), max(ys) - min(ys))
+    x = cx - side / 2.0
+    y = cy - side / 2.0
+
+    parts = [
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="%.2f %.2f %.2f %.2f" '
+        'role="img" aria-labelledby="ttl">' % (x, y, side, side),
+        '<title id="ttl">Ayla</title>',
+        '<desc>Ayla 标识（mark-5 body）：中心三角 + 三段互锁环形。</desc>',
+    ]
+    if bg:
+        parts.append('<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" fill="%s"/>'
+                     % (x, y, side, side, bg))
+    parts.extend(polys)
+    parts.append("</svg>")
+    out = chr(10).join(parts)
+    os.makedirs(os.path.dirname(out_svg), exist_ok=True)
+    with open(out_svg, "w", encoding="utf-8", newline="") as fh:
+        fh.write(out)
+    return out
 
 
 OUT = os.path.abspath(os.path.join(HERE, "..", "svg"))
@@ -533,6 +696,48 @@ def main_body():
     print("done body")
 
 
+
+
+def main_logo():
+    """Emit the cropped Ayla logo files from the body mark.
+
+    mark-5-body.svg stays the full 2048 canvas (it documents the projection
+    frame); the logo files are derived from it and are what anything visual
+    should reference.
+    """
+    body = os.path.join(OUT, "mark-5-body.svg")
+    if not os.path.exists(body):
+        raise SystemExit("run main_body() first: %s is missing" % body)
+    # HERE = Ayla/design/brand/mark-perspective/src -> four levels up is Ayla/
+    repo = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
+    # Exactly three SVGs, each with one job. Transparent is the default; the
+    # pink one exists only for places that cannot take transparency (iOS app
+    # icons reject alpha, and the pale-blue/white layers need a backing colour
+    # on dark surfaces). No corner radius anywhere - the square is deliberate.
+    targets = [
+        # largest square that still contains all the ink (side=None -> max)
+        (os.path.join(repo, "design", "brand", "logo-max.svg"), None, None),
+        (os.path.join(repo, "web", "public", "brand", "logo-max.svg"), None, None),
+        # the default logo
+        (os.path.join(repo, "design", "brand", "logo.svg"), None, LOGO_SIDE),
+        (os.path.join(repo, "web", "public", "brand", "logo.svg"), None, LOGO_SIDE),
+        # opaque variant, only on request
+        (os.path.join(repo, "design", "brand", "logo-on-pink.svg"), LOGO_BG, LOGO_SIDE),
+        (os.path.join(repo, "web", "public", "brand", "logo-on-pink.svg"), LOGO_BG, LOGO_SIDE),
+    ]
+    outs = []
+    for path, bg, side in targets:
+        build_logo(path, bg=bg, side=side)
+        outs.append((path, open(path, "rb").read()))
+        print("   ", os.path.relpath(path, repo), len(outs[-1][1]), "bytes")
+    a = {p: b for p, b in outs}
+    # each repo file must match its web/public twin (outs are in target order)
+    pairs = [(0, 1), (2, 3), (4, 5)]
+    same = all(a[targets[i][0]] == a[targets[j][0]] for i, j in pairs)
+    print("done logo, repo/web copies identical:", same)
+
+
 if __name__ == "__main__":
     main()
     main_body()
+    main_logo()
