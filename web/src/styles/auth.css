@@ -62,11 +62,17 @@
 
 /* 渐变只作用在文字上，避免 background-clip: text 把前面的 <img> 一起裁掉 */
 .auth-brand > span {
-  /* 细白描边：把渐变字从背景上托起来。粗细对齐 logo 自带的白色分隔带
-     （约 0.7%–1.0% 边长 => 40px 字约 0.35px），比 1px 细一档才不显笨重。
-     paint-order 让描边画在字下面，否则会吃掉笔画内侧。 */
-  -webkit-text-stroke: 0.35px var(--brand-stroke);
-  paint-order: stroke fill;
+  /* 细白描边：把渐变字从背景上托起来。
+     ⚠️ 不能用 -webkit-text-stroke：它把描边**居中骑在字形轮廓上**，一半在里，
+     于是 A 的横杠、y 的斜笔画上会露出白色断线（实测）。paint-order 也救不了，
+     因为那是「先描边后填充」的叠放顺序，而 background-clip: text 让填充本身
+     是透明的。
+     改用四向 drop-shadow 叠出**仅在外侧**的描边：0.4px 偏移 ≈ 0.8px 描边粗细，
+     且完全贴合字形轮廓、不侵入笔画内部。 */
+  filter: drop-shadow(0.4px 0 0 var(--brand-stroke))
+          drop-shadow(-0.4px 0 0 var(--brand-stroke))
+          drop-shadow(0 0.4px 0 var(--brand-stroke))
+          drop-shadow(0 -0.4px 0 var(--brand-stroke));
   background: linear-gradient(120deg, var(--brand-blue), var(--brand-mid) 50%, var(--brand-pink));
   -webkit-background-clip: text;
   background-clip: text;
@@ -176,11 +182,17 @@
 
   /* 渐变只作用在文字上，避免 background-clip: text 把前面的 <img> 一起裁掉 */
   .auth-intro-brand > span {
-  /* 细白描边：把渐变字从背景上托起来。粗细对齐 logo 自带的白色分隔带
-     （约 0.7%–1.0% 边长 => 40px 字约 0.35px），比 1px 细一档才不显笨重。
-     paint-order 让描边画在字下面，否则会吃掉笔画内侧。 */
-  -webkit-text-stroke: 0.35px var(--brand-stroke);
-  paint-order: stroke fill;
+  /* 细白描边：把渐变字从背景上托起来。
+     ⚠️ 不能用 -webkit-text-stroke：它把描边**居中骑在字形轮廓上**，一半在里，
+     于是 A 的横杠、y 的斜笔画上会露出白色断线（实测）。paint-order 也救不了，
+     因为那是「先描边后填充」的叠放顺序，而 background-clip: text 让填充本身
+     是透明的。
+     改用四向 drop-shadow 叠出**仅在外侧**的描边：0.4px 偏移 ≈ 0.8px 描边粗细，
+     且完全贴合字形轮廓、不侵入笔画内部。 */
+  filter: drop-shadow(0.4px 0 0 var(--brand-stroke))
+          drop-shadow(-0.4px 0 0 var(--brand-stroke))
+          drop-shadow(0 0.4px 0 var(--brand-stroke))
+          drop-shadow(0 -0.4px 0 var(--brand-stroke));
     background: linear-gradient(120deg, var(--brand-blue), var(--brand-mid) 50%, var(--brand-pink));
     -webkit-background-clip: text;
     background-clip: text;
