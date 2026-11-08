@@ -44,6 +44,17 @@ abstract final class AylaColors {
   /// --surface：暖白，不支持玻璃的降级表面
   static const Color surface = Color(0xFFFFFAFB);
 
+  /// --brand-blue：品牌渐变字的蓝端（2026-11-07 改用标识的粉蓝配色）。
+  ///
+  /// 色相取自标识本身的冰蓝 hsl(209)，但明度压到能过对比度的档位：
+  /// 标识原色 `#BDD4E9` 当文字只有 1.48:1，远低于可读下限。
+  /// 实测本值在暖白底 5.67:1、极光最深处 #ECF0F2 上 5.11:1。
+  static const Color brandBlue = Color(0xFF336899);
+
+  /// --brand-pink：品牌渐变字的粉端。同上，色相取自标识的樱粉 hsl(295)，
+  /// 实测暖白底 5.63:1、极光最深处 5.07:1。
+  static const Color brandPink = Color(0xFFAB1EB8);
+
   /// =================== Functional（d:§2） ===================
 
   /// --text-primary：正文、标题
@@ -150,11 +161,12 @@ abstract final class AylaGradients {
     Color(0x2E9DBFE6),
   ];
 
-  /// 品牌渐变字 linear-gradient(120deg, indigo-700, grape-700)
-  /// （base.css .fullscreen-loader-brand / d:§5 auth-brand 同款）
+  /// 品牌渐变字 linear-gradient(120deg, --brand-blue, --brand-pink)
+  /// （同 web tokens.css 的 --brand-blue / --brand-pink；2026-11-07 由
+  /// indigo-700→grape-700 改为标识的粉蓝配色）
   static const List<Color> brand = <Color>[
-    AylaColors.indigo700,
-    AylaColors.grape700,
+    AylaColors.brandBlue,
+    AylaColors.brandPink,
   ];
 
   /// .btn/自包含按钮扫光 linear-gradient(90deg, transparent, glass-border, transparent)

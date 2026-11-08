@@ -57,8 +57,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../theme/app_theme.dart';
+import '../widgets/base/brand_mark.dart';
 import '../widgets/base/checkbox.dart';
-import '../theme/css_gradient.dart';
 import '../theme/glass.dart';
 import '../theme/tokens.dart';
 
@@ -355,9 +355,12 @@ class AylaAuthIntro extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         // .auth-intro-brand：Fredoka 56/600/lh1.25/ls -.5 + 120deg 渐变字
-        _GradientText(
-          'Ayla',
-          style: TextStyle(
+        // 标识在字标**前面**横向并排（web .auth-intro-brand 的 flex + gap sp4）
+        AylaBrandRow(
+          markSize: 56,
+          gap: AylaSpacing.sp4,
+          text: 'Ayla',
+          textStyle: TextStyle(
             fontFamily: AylaFonts.display,
             fontFamilyFallback: AylaFonts.cjkFallback,
             fontSize: 56,
@@ -436,25 +439,8 @@ class _IntroFeature extends StatelessWidget {
   }
 }
 
-/// 120deg indigo→grape 渐变字（`background-clip: text` 的 Flutter 等价）。
-class _GradientText extends StatelessWidget {
-  const _GradientText(this.text, {required this.style});
-
-  final String text;
-  final TextStyle style;
-
-  @override
-  Widget build(BuildContext context) {
-    return ShaderMask(
-      blendMode: BlendMode.srcIn,
-      shaderCallback: (Rect bounds) => cssLinearGradient(
-        angleDeg: 120, // linear-gradient(120deg, indigo-700, grape-700)
-        colors: AylaGradients.brand,
-      ).createShader(bounds),
-      child: Text(text, style: style),
-    );
-  }
-}
+// （原私有 _GradientText 已并入 widgets/base/brand_mark.dart 的公开件
+//   AylaBrandWordmark —— 标识与渐变字标需要一起复用，故抽到公共层。）
 
 /// 表单卡（.auth-card，唯一材料 owner）。
 class _AuthCard extends StatelessWidget {
@@ -509,9 +495,11 @@ class _AuthCard extends StatelessWidget {
             // .auth-heading：居中 gap sp2
             Column(
               children: <Widget>[
-                _GradientText(
-                  'Ayla',
-                  style: TextStyle(
+                // .auth-brand：标识在字标**前面**横向并排
+                AylaBrandRow(
+                  markSize: wide ? 26 : (compact ? 32 : 40),
+                  text: 'Ayla',
+                  textStyle: TextStyle(
                     fontFamily: AylaFonts.display,
                     fontFamilyFallback: AylaFonts.cjkFallback,
                     // .auth-brand 40px；宽屏卡内降为 26px；窄/短屏 32px

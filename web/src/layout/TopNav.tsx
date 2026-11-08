@@ -12,6 +12,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { search as searchApi } from "../api/search";
 import type { SearchResults } from "../api/types";
 import { Avatar } from "../components/Avatar";
+import { BrandMark } from "../components/BrandMark";
 import { IconClose, IconDots, IconGame, IconHome, IconMessage, IconMic, IconPost, IconSearch, IconVideo } from "../components/icons";
 import { useAuthStore } from "../stores/auth";
 import { usePresenceStore } from "../stores/presence";
@@ -162,7 +163,8 @@ export function TopNav({
       {/* 品牌 logo：导航条水平居中（绝对定位于两端集群之间的空白区），点击回主页；
           屏幕变窄（≤900px）中间空白不足时隐藏 */}
       <Link to="/group" className="top-nav-logo" aria-label="Ayla 首页">
-        Ayla
+        <BrandMark size={22} />
+        <span>Ayla</span>
       </Link>
 
       <div className="top-nav-right">

@@ -550,12 +550,22 @@ a:hover {
 
 .fullscreen-loader-brand {
   margin: 0;
+  display: flex;
+  /* 标识在字标**上方居中**（加载界面专属排布，区别于页内横向并排） */
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
   font-family: var(--font-display);
   font-size: 40px;
   font-weight: 600;
   /* line-height ≥1.25 防 background-clip: text 裁剪字形（同 auth-brand 断言） */
   line-height: 1.25;
-  background: linear-gradient(120deg, var(--indigo-700), var(--grape-700));
+}
+
+/* 渐变必须只作用在文字上：留在 h1 上时 background-clip: text 会把里面的
+   <img> 一起裁成「仅 alpha 区域可见」的渐变图。 */
+.fullscreen-loader-brand > span {
+  background: linear-gradient(120deg, var(--brand-blue), var(--brand-pink));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;

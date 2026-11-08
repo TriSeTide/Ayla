@@ -45,6 +45,11 @@
 }
 
 .auth-brand {
+  /* 标识在字标**前面**横向并排（2026-11-07） */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
   font-family: var(--font-display);
   font-size: 40px;
   font-weight: 600;
@@ -53,7 +58,11 @@
      background-clip: text 只裁剪盒内渐变，超出的字形（如 y 的底部）会变成透明而像被截断 */
   line-height: 1.25;
   text-align: center;
-  background: linear-gradient(120deg, var(--indigo-700), var(--grape-700));
+}
+
+/* 渐变只作用在文字上，避免 background-clip: text 把前面的 <img> 一起裁掉 */
+.auth-brand > span {
+  background: linear-gradient(120deg, var(--brand-blue), var(--brand-pink));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -149,12 +158,20 @@
 
   .auth-intro-brand {
     margin: 0;
+    /* 标识在字标前面横向并排（2026-11-07） */
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
     font-family: var(--font-display);
     font-size: 56px;
     font-weight: 600;
     line-height: 1.25;
     letter-spacing: -0.5px;
-    background: linear-gradient(120deg, var(--indigo-700), var(--grape-700));
+  }
+
+  /* 渐变只作用在文字上，避免 background-clip: text 把前面的 <img> 一起裁掉 */
+  .auth-intro-brand > span {
+    background: linear-gradient(120deg, var(--brand-blue), var(--brand-pink));
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;

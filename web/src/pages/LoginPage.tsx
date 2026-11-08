@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
+import { BrandMark } from "../components/BrandMark";
 import { useAuth } from "../hooks/useAuth";
 
 export function LoginPage() {
@@ -36,7 +37,10 @@ export function LoginPage() {
   return (
     <div className="auth-page">
       <aside className="auth-intro" aria-label="关于 Ayla">
-        <h1 className="auth-intro-brand">Ayla</h1>
+        <h1 className="auth-intro-brand">
+          <BrandMark size={56} />
+          <span>Ayla</span>
+        </h1>
         <p className="auth-intro-slogan">{/*爱莉的家*/}~ ~ ~ ~</p>
         <p className="auth-intro-desc">
           {/* 承载记忆、学习与成长的数字生命家园。聊天、语音、直播、桌游——每个场景都是她生活的一部分，
@@ -51,7 +55,10 @@ export function LoginPage() {
       </aside>
       <section className="auth-card" aria-labelledby="login-title">
         <header className="auth-heading">
-          <h2 className="auth-brand" id="login-title">Ayla</h2>
+          <h2 className="auth-brand" id="login-title">
+            <BrandMark size={40} />
+            <span>Ayla</span>
+          </h2>
           <p className="auth-subtitle">登录，回到Ayla</p>
         </header>
         <form className="auth-form" onSubmit={onSubmit} aria-busy={submitting}>

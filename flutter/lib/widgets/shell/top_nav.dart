@@ -17,7 +17,7 @@
 ///   `content: none`**（auroraqua:213–214）⇒ 本件模块项配共享胶囊 ⇒ **不画底条**；
 /// - `.top-nav-module-icon`：16px、`margin-right: 6px`、`translate: 0 -2px`（字形视觉重心）；
 /// - `.top-nav-logo`（shell.css:239–272）：**绝对居中**、display 22/600、`ls -0.3px`、
-///   渐变字 `linear-gradient(120deg, --indigo-700, --grape-700)` + `background-clip: text`、
+///   渐变字 `linear-gradient(120deg, --brand-blue, --brand-pink)` + `background-clip: text`、
 ///   hover `brightness(1.12)`、**≤1240px 隐藏**（shell.css:268–272）；
 /// - `.top-nav-right`：`margin-left: auto`、`gap: sp3`；
 /// - `.top-nav-icon-btn`（shell.css:281–314 + auroraqua:120/125–133）：40×40、玻璃小卡
@@ -69,6 +69,7 @@ import '../../theme/buttons.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
 import '../base/avatar_halo.dart';
+import '../base/brand_mark.dart';
 import '../base/overlays.dart';
 import '../base/reveal.dart';
 import 'bottom_tabs.dart' show AylaPrimaryModule, aylaBottomTabOrder;
@@ -448,7 +449,7 @@ class _AylaTopNavState extends State<AylaTopNav> {
     );
   }
 
-  /// logo：渐变字（`linear-gradient(120deg, --indigo-700, --grape-700)` + `background-clip: text`）、
+  /// logo：渐变字（`linear-gradient(120deg, --brand-blue, --brand-pink)` + `background-clip: text`）、
   /// display 22/600/ls -0.3（shell.css:239–260）。复用 `pageTitle`（Fredoka 600 + ls -0.3）改字号。
   Widget _wideLogo(BuildContext context) {
     final AylaTextStyles t = AylaTextStyles.of(context);
@@ -456,14 +457,12 @@ class _AylaTopNavState extends State<AylaTopNav> {
       onTap: widget.onLogoTap,
       semanticLabel: 'Ayla 首页',
       hoverScale: false,
-      child: ShaderMask(
-        shaderCallback: (Rect bounds) => const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight, // 120deg ≈ 左上→右下
-          colors: <Color>[AylaColors.indigo700, AylaColors.grape700],
-        ).createShader(bounds),
-        blendMode: BlendMode.srcIn,
-        child: Text('Ayla', style: t.pageTitle.copyWith(fontSize: 22)),
+      // 标识在字标**前面**横向并排（web .top-nav-logo 的 inline-flex + gap sp1）
+      child: AylaBrandRow(
+        markSize: 22,
+        gap: AylaSpacing.sp1,
+        text: 'Ayla',
+        textStyle: t.pageTitle.copyWith(fontSize: 22),
       ),
     );
   }

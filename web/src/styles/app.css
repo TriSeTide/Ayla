@@ -419,7 +419,7 @@
   font-size: 28px;
   font-weight: 600;
   letter-spacing: -0.3px;
-  background: linear-gradient(120deg, var(--indigo-700), var(--grape-700));
+  background: linear-gradient(120deg, var(--brand-blue), var(--brand-pink));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;

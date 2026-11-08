@@ -242,6 +242,8 @@
   translate: -50% 0;
   display: inline-flex;
   align-items: center;
+  /* 标识在字标**前面**横向并排（2026-11-07） */
+  gap: var(--sp-1);
   padding: 0 var(--sp-3);
   font-family: var(--font-display);
   font-size: 22px;
@@ -250,12 +252,17 @@
   line-height: 1.25;
   letter-spacing: -0.3px;
   text-decoration: none;
-  background: linear-gradient(120deg, var(--indigo-700), var(--grape-700));
+  border-radius: var(--radius-input);
+  transition: filter var(--dur-fast) var(--ease-out);
+}
+
+/* 渐变只作用在文字上：留在 a 上时 background-clip: text 会把 <img> 一起裁成
+   透明，且 a 的 color: transparent 会让标识整体消失。 */
+.top-nav-logo > span {
+  background: linear-gradient(120deg, var(--brand-blue), var(--brand-pink));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  border-radius: var(--radius-input);
-  transition: filter var(--dur-fast) var(--ease-out);
 }
 
 .top-nav-logo:hover {

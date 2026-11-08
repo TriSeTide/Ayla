@@ -47,6 +47,7 @@ import '../core/net/dio_client.dart';
 import '../core/models/chat_message.dart'
     show AylaChatMessage, AylaMessageStatus, AylaMessageType;
 import '../pages/login_page.dart' show aylaAuthOptionsSamples;
+import '../widgets/base/brand_mark.dart';
 import '../widgets/base/resource_image.dart';
 import '../widgets/base/loading.dart';
 import '../widgets/shell/channel_sidebar.dart';
@@ -171,6 +172,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaAvatarHalo',
     'AylaTabBadge',
     'AylaRevealItem',
+    'AylaBrandMark',
     'Skeleton + Spinner',
     'Icon 图标库',
     'Batch 2 基元',
@@ -1129,7 +1131,7 @@ class _ComponentGalleryState extends State<ComponentGallery> {
               title:
                   'AylaTitleBar（Windows 自绘标题栏 · 对应系统 caption，web 无此件）',
               source:
-                  '原生 caption 由 runner 去掉（windows/runner/win32_window.* 的 WM_NCCALCSIZE 恒返回 0）⇒ 标题条改由 Flutter 画：**透明条不画底**，直接压在 AylaAuroraBackground 的极光上（顶部已有 .top-nav 浮动玻璃卡 shell.css:162–178 + auroraqua:262–270，再加一条通栏玻璃就成两根并列横条 = 用户要否掉的系统栏感）· 条高 32（Windows 11 同为 32；键的 40×40 命中区可溢出条高）· 品牌＝渐变字 linear-gradient(120deg, --indigo-700, --grape-700)（shell.css:239–260 的 .top-nav-logo）+ Fredoka 13/600/ls.2 + --pink-500 4×4 圆点（不带辉光，不占 ≤3 处额度）· 窗口键命中 40×40（design.md §10）+ 悬停 32×32 胶囊（--radius-pill，同 .top-nav-icon-btn 族）底色 --ice-500 .18（shell.css:207–210 全站唯一 hover 底）· 关闭键悬停 --destructive + --surface 图标（只有它用危险色）· 图标 14px 自绘（OS chrome 不进 kAylaIcons，那套由 icons.tsx 生成）· 拖拽走 windowManager.startDragging（SC_MOVE）、双击＝最大化/还原 · **最大化状态以 WindowListener 事件为准**（系统也能改），首帧 isMaximized() 同步 · 直播窗口级全屏时整条让位 · 零 BackdropFilter',
+                  '原生 caption 由 runner 去掉（windows/runner/win32_window.* 的 WM_NCCALCSIZE 恒返回 0）⇒ 标题条改由 Flutter 画：**透明条不画底**，直接压在 AylaAuroraBackground 的极光上（顶部已有 .top-nav 浮动玻璃卡 shell.css:162–178 + auroraqua:262–270，再加一条通栏玻璃就成两根并列横条 = 用户要否掉的系统栏感）· 条高 32（Windows 11 同为 32；键的 40×40 命中区可溢出条高）· 品牌＝渐变字 linear-gradient(120deg, --brand-blue, --brand-pink)（shell.css:239–260 的 .top-nav-logo）+ Fredoka 13/600/ls.2 + --pink-500 4×4 圆点（不带辉光，不占 ≤3 处额度）· 窗口键命中 40×40（design.md §10）+ 悬停 32×32 胶囊（--radius-pill，同 .top-nav-icon-btn 族）底色 --ice-500 .18（shell.css:207–210 全站唯一 hover 底）· 关闭键悬停 --destructive + --surface 图标（只有它用危险色）· 图标 14px 自绘（OS chrome 不进 kAylaIcons，那套由 icons.tsx 生成）· 拖拽走 windowManager.startDragging（SC_MOVE）、双击＝最大化/还原 · **最大化状态以 WindowListener 事件为准**（系统也能改），首帧 isMaximized() 同步 · 直播窗口级全屏时整条让位 · 零 BackdropFilter',
               child: aylaTitleBarSamples(), // 可交互：点三键看回调、点「切换最大化」看键图标翻面
             ),
             const SizedBox(height: AylaSpacing.sp6),
@@ -1368,6 +1370,77 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                   ' · **样张可交互**：点「重播入场」= `AylaRevealScope(replayKey: nonce)` 让四档同时重播（库内既有能力，见 reveal.dart:63；'
                   '否则只能看静止终态，方向/时长/错峰/降级都无法验收）',
               child: const _RevealShowcaseDemo(),
+            ),
+            const SizedBox(height: AylaSpacing.sp6),
+
+            // ---------- 品牌标识族 ----------
+            _Section(
+              title: 'AylaBrandMark / AylaBrandRow / AylaBrandWordmark（design/brand/logo-max.svg + design.md §6.1）',
+              source:
+                  '标识＝mark-5 body，最大裁剪 1390.6、透明底、直角方图；5 条 path 全是 M/L/Z '
+                  '直线多边形，按归一化坐标逐层 even-odd 填充（同 SVG fill-rule）。'
+                  '品牌渐变字由 indigo→grape 改为 --brand-blue #336899 → --brand-pink #AB1EB8'
+                  '（取标识的粉蓝配色；实测暖白底 5.67/5.63:1、极光最深处 5.11/5.07:1）。'
+                  '两档排布：页内＝标识在字标前面并排；加载界面＝标识居中在字标上方',
+              child: _Row(
+                children: <Widget>[
+                  _Slot(
+                    label: '各档尺寸 16/22/28/40/56/64',
+                    child: const Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        AylaBrandMark(size: 16),
+                        SizedBox(width: AylaSpacing.sp2),
+                        AylaBrandMark(size: 22),
+                        SizedBox(width: AylaSpacing.sp2),
+                        AylaBrandMark(size: 28),
+                        SizedBox(width: AylaSpacing.sp3),
+                        AylaBrandMark(size: 40),
+                        SizedBox(width: AylaSpacing.sp3),
+                        AylaBrandMark(size: 56),
+                        SizedBox(width: AylaSpacing.sp3),
+                        AylaBrandMark(size: 64),
+                      ],
+                    ),
+                  ),
+                  _Slot(
+                    label: '页内：标识在字标前面（AylaBrandRow）',
+                    child: AylaBrandRow(
+                      markSize: 40,
+                      text: 'Ayla',
+                      textStyle: TextStyle(
+                        fontFamily: AylaFonts.display,
+                        fontFamilyFallback: AylaFonts.cjkFallback,
+                        fontSize: 40,
+                        fontWeight: FontWeight.w600,
+                        height: 1.25,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                  ),
+                  _Slot(
+                    label: '加载界面：标识居中在字标上方',
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        const AylaBrandMark(size: 64),
+                        const SizedBox(height: AylaSpacing.sp3),
+                        AylaBrandWordmark(
+                          'Ayla',
+                          style: TextStyle(
+                            fontFamily: AylaFonts.display,
+                            fontFamilyFallback: AylaFonts.cjkFallback,
+                            fontSize: 40,
+                            fontWeight: FontWeight.w600,
+                            height: 1.25,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: AylaSpacing.sp6),
 

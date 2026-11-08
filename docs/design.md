@@ -223,63 +223,57 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 ### 6.1 图形标识 Logo（已固定）
 
-> 2026-11-07 用户裁决：**标识固定为 mark-5 body**（中心三角 + 三段互锁环形，image-3 透视）。当前界面仍用 §12.2 的 `Ayla` 渐变字标；**图形标识尚未应用到任何界面**，接入需单独授权。
+> 2026-11-07 用户裁决：**标识固定为 mark-5 body**（中心三角 + 三段互锁环形，image-3 透视）。
 
 **三种产物，只有三种**
 
 | 文件 | 尺寸 | 底 | 用途 |
 |---|---|---|---|
-| `design/brand/logo-max.svg` | 1390.6（能装下全部墨迹的最大方图） | 透明 | 需要图形占满画布时用 |
-| `design/brand/logo.svg` | 1550 | 透明 | **默认**，任何页面内的标识都用它 |
-| `design/brand/logo-on-pink.svg` | 1550 | #FFB4E1 | **仅当明确要求粉底时**；或平台不允许透明（iOS 图标拒绝 alpha） |
+| `design/brand/logo-max.svg` | 1390.6（装下全部墨迹的最大方图） | 透明 | **界面标识统一取用点** |
+| `design/brand/logo.svg` | 1550 | 透明 | 需要自带留白的场景 |
+| `design/brand/logo-on-pink.svg` | 1550 | `#FFB4E1` | 仅明确要求粉底；平台不接受透明时 |
 
 对应 `web/public/brand/` 下三份同名副本，逐字节相同，构建后即 `/brand/<name>.svg`。
 
-**没有圆角。** 三个文件都是直角方图（`rx`/`ry` 一次都不出现）。方形是刻意的：iOS squircle、各厂商 launcher 蒙版、Windows 圆角各不相同，由系统裁切才能与相邻图标一致；文件里画死圆角会出现「圆角套圆角」的双层边缘。
+**没有圆角。** 三个文件都是直角方图（`rx`/`ry` 不出现）。方形是刻意的：iOS squircle、各厂商 launcher 蒙版、Windows 圆角各不相同，由系统裁切才能与相邻图标一致；文件里画死圆角会出现「圆角套圆角」的双层边缘。
 
-**默认透明底**
+**按端配底**（2026-11-07 裁决）
 
-除以下情况外一律用 `logo.svg`：
-
-- 平台图标要求不透明（**iOS App Icon 明确拒绝 alpha 通道**）→ 用 `logo-on-pink.svg`；
-- 底色本身偏深或杂乱，浅粉/暖白层会糊掉 → 用粉底版，不要给透明版加 `filter`。
-
-**裁剪取值**
-
-原始画布 2048×2048，墨迹只占 68% × 58%，直接用会留一大圈空白。墨迹包围盒 1390.6 × 1198.0，宽高比 **1.16 : 1**（宽 > 高），所以左右留白必然小于上下留白——几何决定的。
-
-| 边长 | 宽度占比 | 左右留白 | 说明 |
+| 平台 | 底 | 来源 | 理由 |
 |---|---|---|---|
-| 1390.6（logo-max） | 100% | 0% | 极限紧裁剪，再小就切图 |
-| 1550（logo / logo-on-pink） | 89.7% | 5.1% | 采用 |
-| 1450 | 95.9% | 2.0% | 偏满，四角发挤 |
-| 1880 | 74.0% | 13.0% | 视觉偏小 |
+| Flutter Windows `app_icon.ico` | **透明**，最大裁剪 | `logo-max.svg`（16/20/24/32/40/48/64/96/128/256 十档） | 任务栏 24px 墨迹 21.5px→24.0px；浅色/深色主题都适应 |
+| Flutter Android `mipmap-*dpi`（48–192） | `#FFB4E1`，1550 | `logo-on-pink.svg` | 蒙版裁圆角，带底色才不露馅、不透壁纸 |
+| Flutter iOS `AppIcon.appiconset`（20–1024，15 张） | `#FFB4E1`，**无 alpha** | `logo-on-pink.svg` | iOS 拒绝 alpha 通道 |
+| Flutter web `Icon-*` / `favicon` | `#FFB4E1` | `logo-on-pink.svg` | 与移动端一致；maskable 需不透明底 |
 
-1550 是在真实 56px 启动器尺寸下目视选定的。硬约束只有一条：最远墨迹顶点距中心 707.9，圆形蒙版半径 = 边长/2，所以边长 ≥ 1416 就不会被圆蒙版切到（1550 下余量 4.4%）。
+### 6.1.1 界面接入（2026-11-07）
 
-> **不要把 PWA maskable 的 80% 当成通用要求**。那条 80% 是因为 maskable PWA 图标可能被套上任意形状蒙版才要求深边距；普通启动器图标只需不被切。若将来确实要做 maskable PWA 图标，另出深边距变体（≥1770），不要缩小现有文件。
+**两种排布，刻意不同**
 
-**平台位图**（2026-11-07 用户裁决：**桌面端用最大透明底，手机端用粉底**，全部直角方图）
+| 场景 | 排布 | 实现 |
+|---|---|---|
+| 页内品牌位（登录页左栏 / 登录卡片 / 注册页 / 宽屏顶栏） | 标识在 `Ayla` 字标**前面**横向并排 | web `BrandMark` + flex row；Flutter `AylaBrandRow` |
+| **登录后全屏加载界面** | 标识**居中在字标上方**纵向堆叠 | web `.fullscreen-loader-brand` 的 flex-column；Flutter `AylaFullScreenLoader` 的 Column |
 
-| 平台 | 底 | 来源文件 | 理由 |
-|---|---|---|---|
-| `flutter/windows/runner/resources/app_icon.ico` | **透明**，最大裁剪 | `logo-max.svg`（1390.6，16/20/24/32/40/48/64/96/128/256 十档） | 任务栏 24px 里墨迹从 21.5px 提到 24.0px；任务栏有浅色/深色两套主题，透明版图形自身适应 |
-| `flutter/android/.../mipmap-*dpi/ic_launcher.png`（48-192） | `#FFB4E1`，1550 | `logo-on-pink.svg` | Android 蒙版裁圆角，方图带底色才能在圆形蒙版下不露馅；不能透出壁纸 |
-| `flutter/ios/.../AppIcon.appiconset/`（20-1024，共 15 张） | `#FFB4E1`，**无 alpha**，1550 | `logo-on-pink.svg` | iOS 明确拒绝 alpha 通道；蒙版由系统裁 |
-| `flutter/web/icons/`（Icon-192/512、maskable-192/512）、`favicon.png` | `#FFB4E1`，1550 | `logo-on-pink.svg` | PWA 安装图标与移动端保持一致；maskable 需不透明底 |
+**品牌渐变字改色**（2026-11-07 裁决：改用标识的粉蓝配色）
 
-> 桌面端 24px 任务栏实测：1550 裁剪下墨迹 21.5px、1390.6 裁剪下 24.0px，+11.6%。ico 里加了 20/24/40/96 四档中间尺寸，缩放时不再跳档。
+| | 旧 | 新 |
+|---|---|---|
+| 蓝端 | `--indigo-700` `#465B92` | `--brand-blue` `#336899` |
+| 粉端 | `--grape-700` `#722E88` | `--brand-pink` `#AB1EB8` |
 
-> 若某台设备/主题需要不同底色，重新栅格化对应文件即可，SVG 源不变。
+色相取自标识本身（冰蓝 hsl 209 / 樱粉 hsl 295），但**明度压到能过对比度**：标识原色当文字只有 1.2–2.4:1（`#BDD4E9` 1.48、`#F17EB3` 2.43），远低于可读下限。新值实测：暖白底 **5.67 / 5.63 : 1**，极光最深处 `#ECF0F2` 上 **5.11 / 5.07 : 1**。
 
-**用法约束**
+**只用于「品牌字标」一个语义**：`.auth-brand` / `.auth-intro-brand` / `.fullscreen-loader-brand` / `.top-nav-logo` / `.chat-brand`，以及 Flutter 的 `AylaGradients.brand`。**不要扩散到正文或按钮**——正文仍用 `--text-primary`。
 
-- **颜色已定，组件里不得改色或叠滤镜**：`#BDD4E9` 中心三角、`#FFFAFB` 暖白分隔、`#F9B0FF` 与 `#FCD8FF` 樱粉两段、`#F17EB3` 深粉。对应 token `--ice-300` / `--surface` / `--sakura-300` / `--sakura-100` / `--pink-500`（§2 Core）。
-- **尺寸**：直接给 `width/height`，不要自行加 padding 或 `border-radius`。
-- **可访问性**：根元素已带 `role="img"` + `aria-labelledby="ttl"` + `<title>Ayla</title>`。`<img>` 引用给 `alt="Ayla"`；纯装饰时 `alt=""` + `aria-hidden`。
-- **不要内联进 JSX/HTML**：5 条 `path` 共 7KB，内联会重复进包且不可缓存；统一文件引用。
+**实现要点**
 
-**当前状态**：仅资产与文档；`TopNav` / `FullScreenLoader` / `LoginPage` / `RegisterPage` 品牌位仍是文字。
+- web：`web/src/components/BrandMark.tsx` 引用 `/brand/logo-max.svg`，给定 `width/height` 防拉伸，`alt="" aria-hidden` 避免与紧邻字标重复朗读。
+- **渐变必须挂在内层 `<span>` 上**：`background-clip: text` 会连带裁掉同级 `<img>`，标识只剩「alpha 内的渐变」而几乎不可见。四个品牌类都已拆成「父级布局 + `> span` 承载渐变」。
+- Flutter：`lib/widgets/base/brand_mark.dart`，5 条 path 全是 M/L/Z 直线多边形，按归一化坐标逐层 `PathFillType.evenOdd` 填充（对应 SVG `fill-rule="evenodd"`，互锁镂空全靠这条）。**未新增 `flutter_svg` 依赖、未引入图片资源**——与既有图标体系（`app_icons.dart` 把 web path 移植成 Dart）同路径。
+- 最小可视尺寸 32px（16/24px 时互锁缝隙糊成一团）；不做正文旁的小图标。
+
+**当前状态**：web 与 Flutter 的登录页、注册页、宽屏顶栏、全屏加载界面均已接入；样张见 `component_gallery.dart` 的「品牌标识族」。
 
 ## 7. Motion
 

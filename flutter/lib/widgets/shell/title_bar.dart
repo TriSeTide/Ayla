@@ -23,7 +23,7 @@
 /// 附带收益：**零 `BackdropFilter`**（不占 `test/perf_audit_test.dart` 的玻璃预算）。
 ///
 /// 各元素的推导（全部来自 design.md / 现有样式，无自创数值）：
-/// - **品牌**：渐变字 `linear-gradient(120deg, --indigo-700, --grape-700)`
+/// - **品牌**：渐变字 `linear-gradient(120deg, --brand-blue, --brand-pink)`
 ///   （`shell.css:239–260` 的 `.top-nav-logo`）+ Fredoka（`--font-display`）。
 ///   字号 13 = 九级排版阶梯里 display 一族的**最小档**（在 microTag 11 之上、
 ///   body 15 之下，见 `AylaTextStyles`）；本条是 chrome，必须比它下面的一级导航

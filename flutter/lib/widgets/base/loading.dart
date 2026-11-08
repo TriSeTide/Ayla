@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/css_gradient.dart';
 import '../../theme/tokens.dart';
+import 'brand_mark.dart';
 
 /// 加载转圈（base.css .loading-spinner / --sm）。
 class AylaLoadingSpinner extends StatelessWidget {
@@ -279,6 +280,10 @@ class AylaFullScreenLoader extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
+              // 标识**居中在字标上方**（加载界面专属排布，2026-11-07）。
+              // 页内各处品牌位则是「标识在字标前面横向并排」，两者刻意不同。
+              const AylaBrandMark(size: 64),
+              const SizedBox(height: AylaSpacing.sp3), // gap: --sp-3
               Text(
                 brand,
                 style: TextStyle(

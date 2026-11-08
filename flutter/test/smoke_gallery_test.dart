@@ -29,6 +29,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'AylaAvatarHalo（app.css .avatar-halo 312–380 / base.css halo-breathe）',
     'AylaTabBadge（shell.css .tab-badge 579–593 · home.css .group-badge 302–317 · messages.css .messages-tab-badge 43–55）',
     'AylaRevealItem / AylaRevealScope（base.css .reveal-item · auroraqua.css 8–26 · useListEntryMotion）',
+    'AylaBrandMark / AylaBrandRow / AylaBrandWordmark（design/brand/logo-max.svg + design.md §6.1）',
     'Skeleton + Spinner + AylaFullScreenLoader（base.css 515–574）',
     'Icon 图标库（web components/icons.tsx 全量 47 个）',
     'Batch 2 基元（LayoutSwitch / SegmentedTab / CapsuleTag / ScrollingText）',
