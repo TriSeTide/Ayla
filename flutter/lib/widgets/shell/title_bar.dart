@@ -64,6 +64,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/aurora_background.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
+import '../base/brand_mark.dart' show AylaBrandMark, AylaBrandWordmark;
 
 /// 窗口动作的可注入面。
 ///
@@ -176,7 +177,13 @@ abstract final class AylaTitleBarMetrics {
   /// 用户实报「窗口化图标甚至缺线」。16 让 2px 描边渲染成约 1.33px，与全站图标同厚度。
   static const double glyphSize = 16;
 
-  /// 品牌圆点直径（`AylaSpacing.sp1` = 4）。
+  /// 品牌标识边长（2026-11-07：原先这里是一个 4px 粉色圆点，现改为图形标识）。
+  ///
+  /// 条高只有 32；logo-max 的墨迹在方图里占满（无留白），16 已是条内视觉上限，
+  /// 再大会顶到上下沿。
+  static const double brandMark = 16;
+
+  /// 品牌圆点直径（旧值，已由 [brandMark] 取代）。
   static const double brandDot = AylaSpacing.sp1;
 
   /// 品牌圆点与字之间（`AylaSpacing.sp2`）。
@@ -456,25 +463,16 @@ class _AylaTitleBarState extends State<AylaTitleBar> {
             ),
             child: Row(
               children: <Widget>[
-                const _BrandDot(),
+                // 标识在字标前面（与其它品牌位同一排布）
+                const AylaBrandMark(size: AylaTitleBarMetrics.brandMark),
                 const SizedBox(width: AylaTitleBarMetrics.brandGap),
                 Flexible(
-                  child: ShaderMask(
-                    shaderCallback: (Rect bounds) => const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: AylaGradients.brand,
-                    ).createShader(bounds),
-                    blendMode: BlendMode.srcIn,
-                    child: Text(
-                      widget.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.microTag.copyWith(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.2,
-                      ),
+                  child: AylaBrandWordmark(
+                    widget.title,
+                    style: t.microTag.copyWith(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2,
                     ),
                   ),
                 ),
@@ -502,25 +500,6 @@ class _ChromeListener with WindowListener {
   void onWindowUnmaximize() => _state._onWindowMaximized(false);
 
 
-}
-
-/// 品牌圆点（`--pink-500` 实心点；不带辉光阴影 ⇒ 不产生离屏层）。
-class _BrandDot extends StatelessWidget {
-  const _BrandDot();
-
-  @override
-  Widget build(BuildContext context) {
-    return const SizedBox(
-      width: AylaTitleBarMetrics.brandDot,
-      height: AylaTitleBarMetrics.brandDot,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: AylaColors.pink500,
-          shape: BoxShape.circle,
-        ),
-      ),
-    );
-  }
 }
 
 /// 单个窗口键：40×40 命中区 + 32×32 悬停胶囊 + 14px 图标。

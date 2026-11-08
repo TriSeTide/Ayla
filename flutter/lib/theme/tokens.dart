@@ -44,16 +44,16 @@ abstract final class AylaColors {
   /// --surface：暖白，不支持玻璃的降级表面
   static const Color surface = Color(0xFFFFFAFB);
 
-  /// --brand-blue：品牌渐变字的蓝端（2026-11-07 改用标识的粉蓝配色）。
+  /// --brand-blue：品牌渐变字的蓝端（2026-11-07 用户裁决：直接用标识原色）。
   ///
-  /// 色相取自标识本身的冰蓝 hsl(209)，但明度压到能过对比度的档位：
-  /// 标识原色 `#BDD4E9` 当文字只有 1.48:1，远低于可读下限。
-  /// 实测本值在暖白底 5.67:1、极光最深处 #ECF0F2 上 5.11:1。
-  static const Color brandBlue = Color(0xFF336899);
+  /// = 标识的冰蓝（同 [ice300]）。字标与图标同色系。
+  /// ⚠️ 对比度低（暖白底 1.48:1），13px 小字处会发虚——这是用户明确选择的
+  /// 「观感优先」取舍，**勿擅自加深**。
+  static const Color brandBlue = ice300;
 
-  /// --brand-pink：品牌渐变字的粉端。同上，色相取自标识的樱粉 hsl(295)，
-  /// 实测暖白底 5.63:1、极光最深处 5.07:1。
-  static const Color brandPink = Color(0xFFAB1EB8);
+  /// --brand-pink：品牌渐变字的粉端。= 标识的深粉（同 [pink500]）。
+  /// 对比度暖白底 2.43:1；同上，属既定取舍。
+  static const Color brandPink = pink500;
 
   /// =================== Functional（d:§2） ===================
 
