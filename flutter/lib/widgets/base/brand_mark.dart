@@ -604,17 +604,43 @@ class AylaBrandWordmark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ShaderMask(
-      blendMode: BlendMode.srcIn,
-      shaderCallback: (Rect bounds) => cssLinearGradient(
-        angleDeg: 120, // linear-gradient(120deg, indigo-700, grape-700)
-        colors: AylaGradients.brand,
-        aspectRatio: bounds.width / (bounds.height == 0 ? 1 : bounds.height),
-      ).createShader(bounds),
-      child: Text(text, style: style),
+    // 白描边：对齐 web 的 `-webkit-text-stroke: 0.35px` + `paint-order: stroke fill`。
+    //
+    // Flutter 没有 text-stroke，等价做法是「先画一遍只有描边的文字，再叠渐变字」：
+    // 描边用 `Paint..style = stroke` 当 foreground，宽度取 2×（描边居中跨在字形轮廓上，
+    // 一半在里一半在外；先画的这一层被后画的填充字盖住内侧，视觉上只剩外侧 0.35px）。
+    final double strokeWidth = 2 * _kBrandStrokePx;
+    return Stack(
+      children: <Widget>[
+        // ① 描边层（tofu 关：只影响宽高估算，不影响字形）
+        Text(
+          text,
+          style: style.copyWith(
+            foreground: Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = strokeWidth
+              ..strokeJoin = StrokeJoin.round
+              ..color = AylaColors.brandStroke,
+          ),
+        ),
+        // ② 渐变填充层（盖住描边内侧，只留外侧细边）
+        ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (Rect bounds) => cssLinearGradient(
+            angleDeg: 120, // linear-gradient(120deg, --brand-blue, --brand-mid, --brand-pink)
+            colors: AylaGradients.brand,
+            stops: AylaGradients.brandStops,
+            aspectRatio: bounds.width / (bounds.height == 0 ? 1 : bounds.height),
+          ).createShader(bounds),
+          child: Text(text, style: style),
+        ),
+      ],
     );
   }
 }
+
+/// 白描边粗细（px）：对齐 logo 自带白色分隔带的比例，同 web 的 0.35px。
+const double _kBrandStrokePx = 0.35;
 
 /// 页内标识：**标识在字标前面**横向并排。
 ///

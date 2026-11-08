@@ -51,9 +51,21 @@ abstract final class AylaColors {
   /// 「观感优先」取舍，**勿擅自加深**。
   static const Color brandBlue = ice300;
 
+  /// --brand-mid：品牌渐变字的高饱和中点。
+  ///
+  /// **为什么需要它**：冰蓝 H=209 到深粉 H=332 相距 123°，sRGB 直接两段插值时
+  /// 中点要穿过低饱和区 —— 实测 t=0.5 处饱和度从 50%/80% 塌到 36.5%，
+  /// 颜色发灰、观感「脏」。加这个高饱和中点（H=322 S=68%）把插值路径顶住。
+  static const Color brandMid = Color(0xFFEFAAD6);
+
   /// --brand-pink：品牌渐变字的粉端。= 标识的深粉（同 [pink500]）。
   /// 对比度暖白底 2.43:1；同上，属既定取舍。
   static const Color brandPink = pink500;
+
+  /// --brand-stroke：品牌字标的 1px 白色描边色（paint-order: stroke fill）。
+  ///
+  /// 把渐变字从背景上托起来，小字与浅色背景处尤其明显。
+  static const Color brandStroke = Color(0xF2FFFFFF);
 
   /// =================== Functional（d:§2） ===================
 
@@ -164,10 +176,15 @@ abstract final class AylaGradients {
   /// 品牌渐变字 linear-gradient(120deg, --brand-blue, --brand-pink)
   /// （同 web tokens.css 的 --brand-blue / --brand-pink；2026-11-07 由
   /// indigo-700→grape-700 改为标识的粉蓝配色）
+  /// 三段色（start / mid / end），中点见 [AylaColors.brandMid] 的说明。
   static const List<Color> brand = <Color>[
     AylaColors.brandBlue,
+    AylaColors.brandMid,
     AylaColors.brandPink,
   ];
+
+  /// 与 [brand] 对应的 stops：中点固定在 50%（同 web 的 `... 50%, ...`）。
+  static const List<double> brandStops = <double>[0.0, 0.5, 1.0];
 
   /// .btn/自包含按钮扫光 linear-gradient(90deg, transparent, glass-border, transparent)
   /// （auroraqua.css ::after，opacity .5）

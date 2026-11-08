@@ -29,10 +29,10 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api/auth_api.dart';
 import '../widgets/base/auth_code_row.dart';
+import '../widgets/base/brand_mark.dart' show AylaBrandWordmark;
 import '../core/net/dio_client.dart';
 import '../state/auth_bootstrap.dart' show aylaApplyLoginSession;
 import '../theme/app_theme.dart';
-import '../theme/css_gradient.dart';
 import '../theme/glass.dart';
 import '../theme/tokens.dart';
 import 'login_page.dart' show AylaAuthIntro;
@@ -293,22 +293,16 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
             // `.auth-heading`：居中 gap sp2
             Column(
               children: <Widget>[
-                ShaderMask(
-                  blendMode: BlendMode.srcIn,
-                  shaderCallback: (Rect bounds) => cssLinearGradient(
-                    angleDeg: 120,
-                    colors: AylaGradients.brand,
-                  ).createShader(bounds),
-                  child: Text(
-                    '创建账号', // tsx 108（**不是** Ayla 二字）
-                    style: TextStyle(
-                      fontFamily: AylaFonts.display,
-                      fontFamilyFallback: AylaFonts.cjkFallback,
-                      fontSize: wide ? 26 : (compact ? 32 : 40),
-                      fontWeight: FontWeight.w600,
-                      height: 1.25,
-                      letterSpacing: -0.5,
-                    ),
+                // 走公共件以获得统一的渐变 + 白描边（原先内联 ShaderMask，无描边）
+                AylaBrandWordmark(
+                  '创建账号', // tsx 108（**不是** Ayla 二字）
+                  style: TextStyle(
+                    fontFamily: AylaFonts.display,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
+                    fontSize: wide ? 26 : (compact ? 32 : 40),
+                    fontWeight: FontWeight.w600,
+                    height: 1.25,
+                    letterSpacing: -0.5,
                   ),
                 ),
                 const SizedBox(height: AylaSpacing.sp2),

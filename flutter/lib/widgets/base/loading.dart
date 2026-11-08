@@ -20,7 +20,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../theme/css_gradient.dart';
 import '../../theme/tokens.dart';
 import 'brand_mark.dart';
 
@@ -284,7 +283,9 @@ class AylaFullScreenLoader extends StatelessWidget {
               // 页内各处品牌位则是「标识在字标前面横向并排」，两者刻意不同。
               const AylaBrandMark(size: 64),
               const SizedBox(height: AylaSpacing.sp3), // gap: --sp-3
-              Text(
+              // 走公共件以获得统一的渐变 + 白描边（原先在此内联 Paint shader，
+              // 没有描边，改色后与其它品牌位不一致）
+              AylaBrandWordmark(
                 brand,
                 style: TextStyle(
                   fontFamily: AylaFonts.display,
@@ -292,11 +293,6 @@ class AylaFullScreenLoader extends StatelessWidget {
                   fontSize: 40,
                   fontWeight: FontWeight.w600,
                   height: 1.25, // ≥1.25：防渐变字裁剪字形（同 auth-brand 断言）
-                  foreground: Paint()
-                    ..shader = cssLinearGradient(
-                      angleDeg: 120, // linear-gradient(120deg, indigo, grape)
-                      colors: AylaGradients.brand,
-                    ).createShader(const Rect.fromLTWH(0, 0, 200, 60)),
                 ),
               ),
               const SizedBox(height: AylaSpacing.sp4), // gap: var(--sp-4)
