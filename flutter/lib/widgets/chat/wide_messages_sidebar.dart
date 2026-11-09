@@ -43,8 +43,6 @@ class AylaWideMessagesSidebar extends StatefulWidget {
     required this.onSelect,
     this.conversations = const <AylaConversationSummary>[],
     this.conversationsPage,
-    this.elysiaEntry,
-    this.elysiaUserId,
     this.friendList = const <AylaUserPublic>[],
     this.friendsPage,
     this.friendsLoading = false,
@@ -75,12 +73,6 @@ class AylaWideMessagesSidebar extends StatefulWidget {
 
   /// 私信分页投影（`DirectoryLoadMore`）。
   final AylaSocialPage<AylaConversationSummary>? conversationsPage;
-
-  /// 爱莉入口（私信 tab 顶部；调用方构造 `AylaElysiaEntry`）。
-  final Widget? elysiaEntry;
-
-  /// 爱莉 user id（会话列表头像形态用）。
-  final String? elysiaUserId;
 
   /// 好友列表（好友 tab）。
   final List<AylaUserPublic> friendList;
@@ -202,15 +194,10 @@ class _AylaWideMessagesSidebarState extends State<AylaWideMessagesSidebar> {
         AylaSpacing.sp4,
       ),
       children: <Widget>[
-        if (widget.elysiaEntry != null) ...<Widget>[
-          widget.elysiaEntry!,
-          const SizedBox(height: AylaSpacing.sp2),
-        ],
         AylaConversationList(
           conversations: widget.conversations,
           activeId: widget.activeId,
           onSelect: widget.onSelect,
-          elysiaUserId: widget.elysiaUserId,
           revealItems: true,
           isOnline: widget.isOnline,
           statusLabel: widget.statusLabel,

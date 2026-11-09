@@ -5,7 +5,8 @@
 ///   —— 游标分页目录（api/voice.ts:38–54），响应带 total_member_count
 ///   （侧栏「X 房间在线 · Y 人在聊」的第二个数字，directory.ts:7）；
 ///
-/// join / leave / heartbeat / members / messages / 爱莉 voice-calls 等随房内页批次带出。
+/// join / leave / heartbeat / members / messages 等随房内页批次带出
+/// （爱莉 voice-calls 编排已随功能对接层撤下，不再带出）。
 library;
 
 import '../../audio/voice_media_config.dart' show AylaVoiceMediaConfig;

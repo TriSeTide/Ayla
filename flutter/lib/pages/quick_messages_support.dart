@@ -4,8 +4,8 @@
 /// ## 为什么需要它
 /// Flutter 的 [AylaQuickMessagesSheet] 是**展示型**（两个 tab 的内容与内联私聊面板全部由
 /// 调用方注入，见 `widgets/chat/quick_messages_sheet.dart` 的「公开面」）；而 web 的
-/// `QuickMessagesSheet` **自己取数**（`useSocialPage` 五路 + WS 帧刷新 + badges +
-/// 爱莉档案）。本文件承担那部分并把结果灌进展示件 —— 与
+/// `QuickMessagesSheet` **自己取数**（`useSocialPage` 五路 + WS 帧刷新 + badges）。
+/// 本文件承担那部分并把结果灌进展示件 —— 与
 /// `pages/chat_support.dart` 的 [AylaWideMessagesSidebarHost] 同一形制（网络层不进
 /// `lib/widgets`）。
 ///
@@ -14,8 +14,7 @@
 /// |---|---|
 /// | 私信会话分页（`type=private`，limit 30） | 42（`useSocialPage("conversations", {type:"private"})`） |
 /// | 认证四路分页（好友申请/群邀请/入群申请/退群通知） | 44–51 |
-/// | 爱莉入口（`elysiaProfileProvider`，`enabled` 才展示） | 62 + 74–80（失败/未启用静默降级） |
-/// | 私信 tab：爱莉入口 + 会话列表 + 页脚 | 219–231 |
+/// | 私信 tab：会话列表 + 页脚（爱莉入口已撤下） | 219–231 |
 /// | 认证 tab：`AylaRequestsPanel` 四分组 + 空态 | 233–323 |
 /// | 认证相关 WS 帧 → 认证四路重取 | 92–105（`friend.request.*` / `group.invite.new` / `group.request.*`） |
 /// | 认证徽标 = `requestBadge()` | 108–109 |
@@ -23,9 +22,8 @@
 /// | 头像一律不可点（`disableAvatarNav`） | 227（`ConversationList ... disableAvatarNav`） |
 ///
 /// ## 与 web 的机制差异（登记）
-/// 1. **没有 `onEnter` 内联爱莉会话**：web 的 `ElysiaEntry onEnter` 调
-///    `openPrivateConversation` 后 `setActiveChatId`（tsx 114–119 / 221），本件同法
-///    （[AylaQuickMessagesHost] 的 `_openUserChat`）；
+/// 1. **爱莉入口已撤下**（`docs/plans/爱莉前端对接层撤下清单.md` §2.2）：web 的
+///    `ElysiaEntry onEnter` 链（tsx 114–119 / 221）随之失效，私信 tab 直接是会话列表；
 /// 2. **私信面板不做 `PullToRefresh`**：web 的快捷栏私信 tab 只有 `DirectoryLoadMore`
 ///    （tsx 230），下拉刷新在 `.quick-messages-private { overflow-y: auto }` 里没有挂件；
 /// 3. **朋友申请过滤**只看「发给我且 pending」（tsx 160–163），与 `/messages` 同口径；
@@ -46,7 +44,6 @@ import '../core/api/chat_api.dart';
 import '../core/api/directory_page.dart' show AylaDirectoryPage;
 import '../core/api/users_api.dart';
 import '../core/models/conversation.dart' show AylaConversationSummary;
-import '../core/models/elysia_profile.dart' show AylaElysiaProfile;
 import '../core/models/social_requests.dart';
 import '../core/models/user_public.dart' show AylaUserPublic;
 import '../state/auth_state.dart' show authNotifierProvider;
@@ -55,7 +52,6 @@ import '../state/chat_providers.dart'
         badgesProvider,
         chatStateProvider,
         chatWsProvider,
-        elysiaProfileProvider,
         noticesProvider;
 import '../state/chat_state.dart' show AylaChatState, aylaSortPrivateByActivity;
 import '../state/display_status.dart'
@@ -74,7 +70,6 @@ import '../state/social_store.dart'
 import '../widgets/base/directory_controls.dart' show AylaDirectoryLoadMore;
 import '../widgets/chat/conversation_list.dart'
     show AylaConversationList, aylaDisplayStatusOf;
-import '../widgets/chat/elysia_entry.dart' show AylaElysiaEntry;
 import '../widgets/chat/quick_messages_sheet.dart' show AylaQuickMessagesSheet;
 import '../widgets/chat/request_rows.dart' show AylaNoticeRow, AylaRequestsPanel;
 import 'chat_support.dart' show AylaChatPaneHost, aylaIsAuthRefreshFrame;
@@ -249,18 +244,6 @@ class _AylaQuickMessagesHostState extends ConsumerState<AylaQuickMessagesHost> {
         pinnedOf: (AylaConversationSummary c) => c.isPinned ?? false,
       );
 
-  /// 打开与某用户（爱莉/会话）的私聊，**栏内联**（不跳路由；web tsx 114–119 的 `openUserChat`）。
-  Future<void> _openUserChat(String userId) async {
-    if (userId.isEmpty) return;
-    try {
-      final String convId = await AylaUsersApi.openPrivateConversation(userId);
-      if (!mounted || convId.isEmpty) return;
-      setState(() => _activeChatId = convId);
-    } catch (_) {
-      // 打开私聊失败静默（web tsx 118 的 `.catch(() => {})`）
-    }
-  }
-
   Future<void> _act(
     String id,
     Future<void> Function() action,
@@ -281,11 +264,6 @@ class _AylaQuickMessagesHostState extends ConsumerState<AylaQuickMessagesHost> {
 
   @override
   Widget build(BuildContext context) {
-    final AylaElysiaProfile? profile =
-        ref.watch(elysiaProfileProvider).valueOrNull;
-    // web tsx 74–80：`getElysiaProfile().then(p => setElysiaProfile(p.enabled ? p : null))`
-    final AylaElysiaProfile? entryProfile =
-        (profile != null && profile.enabled) ? profile : null;
     final int requestBadge = ref.watch(badgesProvider).requestBadge;
     final List<AylaRealtimeNotice> leaveNotices = ref
         .watch(noticesProvider)
@@ -302,7 +280,7 @@ class _AylaQuickMessagesHostState extends ConsumerState<AylaQuickMessagesHost> {
         // web tsx 44–51 的 `tab === "requests"` 才启用四路取数。
         if (tab == 'requests') _ensureRequests();
       },
-      privatePanel: _privatePanel(entryProfile),
+      privatePanel: _privatePanel(),
       requestsPanel: _requestsPanel(leaveNotices),
       privateChatPane: _privateChatPane(),
     );
@@ -312,19 +290,13 @@ class _AylaQuickMessagesHostState extends ConsumerState<AylaQuickMessagesHost> {
   ///
   /// 快捷栏是**单页**（无 `/chat/:id` 路由），点会话/爱莉**内联**打开；
   /// 头像一律不可点（tsx 227 的 `disableAvatarNav`）。
-  Widget _privatePanel(AylaElysiaProfile? entryProfile) {
+  Widget _privatePanel() {
     final AylaSocialController<AylaConversationSummary>? pager = _conversations;
     // 在线态实时（用户实报私信在线/离线标签不热更新；快捷栏与消息页同一份列表）。
     final AylaPresenceState presence = ref.watch(presenceStateProvider);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        if (entryProfile != null)
-          AylaElysiaEntry(
-            profile: entryProfile,
-            // web tsx 221：`onEnter={() => openUserChat(elysiaProfile.user.id)}`
-            onEnter: () => unawaited(_openUserChat(entryProfile.userId ?? '')),
-          ),
         AylaConversationList(
           conversations: _sortedPrivate(),
           isOnline: (AylaUserPublic? u) => presenceOnline(
@@ -336,7 +308,6 @@ class _AylaQuickMessagesHostState extends ConsumerState<AylaQuickMessagesHost> {
             online,
           ),
           activeId: null, // web tsx 224：`activeId={null}`（进入会话由内联面板表达）
-          elysiaUserId: entryProfile?.userId,
           disableAvatarNav: true, // tsx 227
           onSelect: (String id) => setState(() => _activeChatId = id),
         ),

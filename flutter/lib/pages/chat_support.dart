@@ -34,7 +34,6 @@ import 'package:go_router/go_router.dart';
 import '../core/api/chat_api.dart';
 import '../core/api/users_api.dart';
 import '../core/api/directory_page.dart' show AylaDirectoryPage;
-import '../core/models/elysia_profile.dart';
 import '../core/models/social_requests.dart';
 import '../state/auth_state.dart';
 import '../state/chat_providers.dart';
@@ -51,7 +50,6 @@ import '../state/social_store.dart'
         AylaSocialOptions,
         aylaSocialStore;
 import '../widgets/chat/conversation_list.dart';
-import '../widgets/chat/elysia_entry.dart';
 import '../widgets/chat/private_chat_pane.dart';
 import '../widgets/chat/request_rows.dart';
 import '../widgets/chat/wide_messages_sidebar.dart';
@@ -118,14 +116,12 @@ class AylaConversationRuntime extends ChangeNotifier {
     required AylaBadgesController badges,
     required AylaChatWsClient ws,
     required String? Function() currentUserId,
-    String? Function()? elysiaUserId,
   })  : _chat = chatState,
         _message = messageState,
         _drafts = drafts,
         _badges = badges,
         _ws = ws,
-        _currentUserId = currentUserId,
-        _elysiaUserId = elysiaUserId ?? (() => null);
+        _currentUserId = currentUserId;
 
   final String conversationId;
   final AylaChatState _chat;
@@ -134,7 +130,6 @@ class AylaConversationRuntime extends ChangeNotifier {
   final AylaBadgesController _badges;
   final AylaChatWsClient _ws;
   final String? Function() _currentUserId;
-  final String? Function() _elysiaUserId;
 
   bool _disposed = false;
   void Function()? _frameOff;
@@ -169,13 +164,10 @@ class AylaConversationRuntime extends ChangeNotifier {
   /// 非好友禁发（web `PrivateChatPane.tsx:158–163`）。
   bool get blocked {
     final AylaConversationSummary? conv = conversation;
-    final AylaUserPublic? peer = conv?.peer;
-    final String? elysiaId = _elysiaUserId();
     return conv != null &&
         conv.isPrivate &&
-        peer != null &&
+        conv.peer != null &&
         _friendsLoaded &&
-        !(elysiaId != null && peer.id == elysiaId) &&
         !_peerIsFriend;
   }
 
@@ -942,7 +934,6 @@ class _AylaChatPaneHostState extends ConsumerState<AylaChatPaneHost> {
       badges: ref.read(badgesProvider),
       ws: ref.read(chatWsProvider),
       currentUserId: () => ref.read(authNotifierProvider).user?.id,
-      elysiaUserId: () => ref.read(elysiaProfileProvider).valueOrNull?.userId,
     );
     _runtime.addListener(_onRuntimeChanged);
     unawaited(_runtime.open());
@@ -990,14 +981,11 @@ class _AylaChatPaneHostState extends ConsumerState<AylaChatPaneHost> {
     );
     final AylaChatDraftsController drafts = ref.read(chatDraftsProvider);
     final String? me = ref.watch(authNotifierProvider).user?.id;
-    final String? elysiaId =
-        ref.watch(elysiaProfileProvider).valueOrNull?.userId;
 
     return AylaPrivateChatPane(
       conversation: conv,
       messages: _runtime.messages,
       currentUserId: me,
-      elysiaUserId: elysiaId,
       onBack: widget.onBack,
       narrow: widget.narrow,
       panelMotion: widget.panelMotion,
@@ -1340,10 +1328,6 @@ class _AylaWideMessagesSidebarHostState
 
   @override
   Widget build(BuildContext context) {
-    final AylaElysiaProfile? profile =
-        ref.watch(elysiaProfileProvider).valueOrNull;
-    final AylaElysiaProfile? entryProfile =
-        (profile != null && profile.enabled) ? profile : null;
     final String? me = ref.read(authNotifierProvider).user?.id;
     final List<AylaRealtimeNotice> leaveNotices = ref
         .watch(noticesProvider)
@@ -1399,13 +1383,6 @@ class _AylaWideMessagesSidebarHostState
       onDelete: _deleteConversation,
       menuBusy: _menuBusy,
 
-      elysiaEntry: entryProfile == null
-          ? null
-          : AylaElysiaEntry(
-              profile: entryProfile,
-              onEnter: () => _openUserChat(entryProfile.userId ?? ''),
-            ),
-      elysiaUserId: profile?.userId,
       friendList: _friends?.items ?? const <AylaUserPublic>[],
       friendsPage: _pageOf(_friends),
       friendsLoading: _friends?.loading ?? false,

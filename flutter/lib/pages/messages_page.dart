@@ -36,7 +36,6 @@ import '../core/api/chat_api.dart';
 import '../core/api/directory_page.dart' show AylaDirectoryPage;
 import '../core/api/users_api.dart';
 import '../core/models/conversation.dart';
-import '../core/models/elysia_profile.dart';
 import '../core/models/social_requests.dart';
 import '../core/models/user_public.dart';
 import '../state/auth_state.dart';
@@ -66,7 +65,6 @@ import '../theme/tokens.dart';
 import '../widgets/base/directory_controls.dart' show AylaDirectoryLoadMore;
 import '../widgets/base/media_interaction.dart' show AylaPullToRefresh;
 import '../widgets/chat/conversation_list.dart';
-import '../widgets/chat/elysia_entry.dart';
 import '../widgets/chat/messages_layout.dart';
 import '../widgets/chat/messages_tabs.dart';
 import '../widgets/chat/request_rows.dart';
@@ -478,11 +476,6 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
   @override
   Widget build(BuildContext context) {
     final bool narrow = AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
-    final AylaElysiaProfile? profile =
-        ref.watch(elysiaProfileProvider).valueOrNull;
-    final AylaElysiaProfile? entryProfile =
-        (profile != null && profile.enabled) ? profile : null;
-    final String? elysiaUserId = profile?.userId;
     final int requestBadge = ref.watch(badgesProvider).requestBadge;
     // ⚠️ **在线态必须实时**（2026-10-25 用户实报「私信界面在线离线标签没有
     // 热更新」）。此前列表注入的是 `(u) => u.online` —— 那是 REST 快照
@@ -552,7 +545,7 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
     final Widget panel = switch (_tab) {
       'friends' => _friendsTab(),
       'requests' => _requestsTab(),
-      _ => _chatTab(entryProfile, elysiaUserId),
+      _ => _chatTab(),
     };
 
     // 选项卡面板**进场**（web `MessagesPage.tsx:63` 的 `useTabPanelMotion` +
@@ -594,7 +587,7 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
       !_privateScroll.hasClients || _privateScroll.position.pixels <= 0;
 
   /// 私信 tab（tsx 246–270）。
-  Widget _chatTab(AylaElysiaProfile? entryProfile, String? elysiaUserId) {
+  Widget _chatTab() {
     final AylaSocialController<AylaConversationSummary>? pager = _conversations;
     // presence 在 build 期取一次（回调里不能 ref.watch）。
     final AylaPresenceState presence = ref.watch(presenceStateProvider);
@@ -606,16 +599,10 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            if (entryProfile != null)
-              AylaElysiaEntry(
-                profile: entryProfile,
-                onEnter: () => _openUserChat(entryProfile.userId ?? ''),
-              ),
             AylaConversationList(
               key: ValueKey<int>(_revealNonce),
               conversations: _sortedPrivate(),
               activeId: null,
-              elysiaUserId: elysiaUserId,
               // 在线态实时（用户实报私信在线/离线标签不热更新）。
               // 不传则组件回退 `peer.online`（REST 快照）⇒ 永不更新。
               isOnline: (AylaUserPublic? u) => presenceOnline(

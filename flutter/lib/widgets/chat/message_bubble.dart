@@ -300,6 +300,10 @@ class AylaMessageBubble extends StatefulWidget {
   final bool isSelf;
 
   /// 爱莉消息（**爱莉专属气泡，不可复用于其他用户**，design.md §4）。
+  ///
+  /// ⚠️ 爱莉功能对接层已撤下（`docs/plans/爱莉前端对接层撤下清单.md` §2.2 / §3 方案 A）：
+  /// 判定来源 `elysiaUserId` 已删除 ⇒ [AylaMessageList] 恒传 `false`，本分支当前**不可达**。
+  /// 样式与分支代码按方案 A **保留**，等待新对接接回时重新提供判定来源。
   final bool isElysia;
 
   /// 新到达消息（乐观发送 / WS 实时）挂到达动画；初始历史加载为 false。

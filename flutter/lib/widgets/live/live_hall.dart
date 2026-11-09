@@ -208,6 +208,9 @@ class AylaLiveChannelCard extends StatelessWidget {
   final String? ownerName;
 
   /// owner 是爱莉 → 加「爱莉」角标（tsx 36）。
+  ///
+  /// ⚠️ 功能对接层已撤下（撤下清单 §2.2 / §3 方案 A）：[AylaLiveHall] 不再有
+  /// `elysiaUserId` 来源 ⇒ 恒传 `false`。角标分支按方案 A 保留，等新对接。
   final bool isElysia;
 
   /// 入场延迟（非 null → 挂 `.reveal-item` + `--reveal-delay`，`staggerDelay` 50ms/条 cap 300）。
@@ -638,7 +641,6 @@ class AylaLiveHall extends StatelessWidget {
     super.key,
     required this.channels,
     required this.onEnter,
-    this.elysiaUserId,
     this.ownerNames = const <String, String>{},
     this.revealItems = false,
     this.padding,
@@ -664,9 +666,6 @@ class AylaLiveHall extends StatelessWidget {
 
   /// 进入直播间（传频道 id）。
   final ValueChanged<String> onEnter;
-
-  /// 爱莉 profile 的 user id（用于「爱莉」角标）；null = 不标注。
-  final String? elysiaUserId;
 
   /// `owner_id → 展示昵称`兜底（大厅列表不带主播信息时由页面补齐；
   /// 后端给了 `ownerNickname` 时以后者为准）。
@@ -790,8 +789,8 @@ class AylaLiveHall extends StatelessWidget {
               child: AylaLiveChannelCard(
                 channel: channels[i],
                 ownerName: ownerNames[channels[i].ownerId],
-                isElysia:
-                    elysiaUserId != null && channels[i].ownerId == elysiaUserId,
+                // 爱莉角标分支保留、入口恒假（撤下清单 §3 方案 A）。
+                isElysia: false,
                 revealDelay: revealItems
                     ? AylaRevealMotion.staggerDelay(i)
                     : null,
@@ -927,7 +926,6 @@ class _LiveHallDemoState extends State<_LiveHallDemo> {
         Expanded(
           child: AylaLiveHall(
             channels: _channels,
-            elysiaUserId: 'u-elysia',
             onEnter: (_) => setState(() => _enters += 1),
             padding: const EdgeInsets.symmetric(horizontal: AylaSpacing.sp4),
             revealItems: false,

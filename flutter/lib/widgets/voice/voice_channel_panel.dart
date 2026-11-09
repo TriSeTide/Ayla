@@ -109,7 +109,6 @@ class AylaVoiceChannelPanel extends StatefulWidget {
     this.members = const <AylaVoicePanelMember>[],
     this.selfUserId,
     this.selfMember,
-    this.elysiaUserId,
     this.count,
     this.isOwner = false,
     this.self,
@@ -138,9 +137,6 @@ class AylaVoiceChannelPanel extends StatefulWidget {
 
   /// store 对账里的自己（tsx 69：`members[selfId]`）；列表里没有自己时置顶插入。
   final AylaVoicePanelMember? selfMember;
-
-  /// 爱莉的 user id（判定 `isElysia`，只影响头像光环）。
-  final String? elysiaUserId;
 
   /// head 右侧人数。
   ///
@@ -257,8 +253,6 @@ class _AylaVoiceChannelPanelState extends State<AylaVoiceChannelPanel> {
           AylaVoiceMemberRow(
             member: m.member,
             isSelf: m.member.userId == widget.selfUserId,
-            isElysia: widget.elysiaUserId != null &&
-                m.member.userId == widget.elysiaUserId,
             self: widget.self,
             displayName: m.displayName,
             avatarUrl: m.avatarUrl,
@@ -457,7 +451,6 @@ class _VoicePanelDemoState extends State<_VoicePanelDemo> {
         displayName: '汐汐',
         online: true,
       ),
-      elysiaUserId: 'u2',
       count: _rows.length + 1,
       isOwner: owner,
       self: AylaVoiceSelfState(

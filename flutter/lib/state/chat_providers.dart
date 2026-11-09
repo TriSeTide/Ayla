@@ -14,8 +14,6 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/api/elysia_api.dart';
-import '../core/models/elysia_profile.dart';
 import '../core/ws/chat_ws.dart';
 import '../core/ws/ws_manager.dart';
 import 'auth_state.dart';
@@ -130,10 +128,6 @@ final ChangeNotifierProvider<AylaBadgesController> badgesProvider =
     ChangeNotifierProvider<AylaBadgesController>(
   (Ref ref) => AylaBadgesController(),
 );
-
-/// 爱莉档案（未初始化 404 ⇒ null；多处消费只取一次）。
-final FutureProvider<AylaElysiaProfile?> elysiaProfileProvider =
-    FutureProvider<AylaElysiaProfile?>((Ref ref) => AylaElysiaApi.getProfile());
 
 /// chat 通道客户端（单例）。
 final Provider<AylaChatWsClient> chatWsProvider = Provider<AylaChatWsClient>(

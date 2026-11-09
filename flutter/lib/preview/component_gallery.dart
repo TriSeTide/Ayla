@@ -37,7 +37,6 @@ import '../widgets/shell/bottom_tabs.dart';
 import '../widgets/shell/group_top_tabs.dart';
 import '../widgets/base/dialogs.dart';
 import '../widgets/base/directory_controls.dart';
-import '../widgets/voice/elysia_voice_panel.dart';
 import '../widgets/base/privacy_sheet.dart';
 import '../widgets/base/profile_and_filters.dart';
 import '../widgets/group/group_card.dart';
@@ -76,7 +75,6 @@ import '../widgets/voice/voice_channel_panel.dart';
 import '../widgets/voice/voice_channels.dart';
 import '../widgets/voice/voice_member_row.dart';
 import '../widgets/live/danmaku.dart';
-import '../widgets/chat/elysia_entry.dart';
 import '../widgets/live/live_hall.dart';
 import '../widgets/live/live_rail.dart';
 import '../widgets/live/live_create.dart';
@@ -197,7 +195,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     '聊天消息气泡',
     '媒体消息族',
     '气泡内媒体宽度',
-    '分享卡 / 爱莉入口卡',
+    '分享卡',
     '会话列表',
     '@ 成员选择器',
     '群表情包面板',
@@ -229,7 +227,6 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaVoiceMemberRow',
     'AylaVoiceChannelCreate',
     'AylaVoiceChannelPanel',
-    'AylaElysiaVoicePanel',
     'AylaVoiceRoomBody',
   ]),
   AylaGalleryCategory('posts', 'posts · 帖子 / 评论', <String>[
@@ -1228,16 +1225,6 @@ class _ComponentGalleryState extends State<ComponentGallery> {
             ),
             const SizedBox(height: AylaSpacing.sp6),
 
-            // ---------- voice 域第五批（2026-09-21：B1-5） ----------
-            _Section(
-              title:
-                  'AylaElysiaVoicePanel（components/voice/ElysiaVoicePanel.tsx 108 行 + app.css 3122–3156 / 1324–1333 / 1362）',
-              source:
-                  '⚠️ **web 里该组件没有挂载点**（只有 hook + vitest）⇒ 本画布是唯一视觉验收面 · 收起档 = 单个 .btn-glow「爱莉语音」+ `.collapsed`（padding **sp3** + `align-items: flex-start`）· 展开档 = head（`.elysia-voice-head` **align-items: center**（B1-4 那个面板是 baseline，别抄错）+ 标题 16/700 + `.msg-action-btn`「收起」）+ 未接入态（`.voice-list-empty`：「接入中…」/「等待接入」）+ 输入行（`input.voice-create-input` 同 B1-3 档 + 2000 上限用 formatter + Enter 提交 + primary「发送」）+ 行动区（终态 → primary「重新发起」；否则 `.voice-leave-btn` = outlineDestructive「结束通话」）· busy 时三按钮一起禁用 · 空文本不受理则**不清空**输入 · 材质 = radius 16 + --glass-bg + blur24 sat1.4 + --glass-shadow + max-width 560 · **样张可交互**：点「爱莉语音」展开、输入后点发送/Enter、点结束通话看终态档切换、开关 busy',
-              child: aylaElysiaVoicePanelSamples(),
-            ),
-            const SizedBox(height: AylaSpacing.sp6),
-
             // ---------- voice 域收尾（2026-09-21：B1-6，voice 域 8/8） ----------
             _Section(
               title:
@@ -1678,7 +1665,7 @@ class _ComponentGalleryState extends State<ComponentGallery> {
             ),
             const SizedBox(height: AylaSpacing.sp6),
 
-            // ---------- B3 chat 域第一批（气泡 / 媒体 / 分享卡 / 爱莉入口） ----------
+            // ---------- B3 chat 域第一批（气泡 / 媒体 / 分享卡） ----------
             _Section(
               title: '聊天消息气泡（MessageBubble.tsx）',
               source:
@@ -1722,19 +1709,14 @@ class _ComponentGalleryState extends State<ComponentGallery> {
             ),
             const SizedBox(height: AylaSpacing.sp6),
             _Section(
-              title: '分享卡 / 爱莉入口卡（ShareBubble.tsx + ElysiaEntry.tsx）',
+              // 爱莉入口卡（ElysiaEntry）样张随功能对接层撤下（撤下清单 §2.1）——
+              // 视觉身份仍由 tokens 的 `elysiaBubbleBorder` / `bubbleElysia` 与
+              // `AylaAvatarCore.elysia` 保留（见 base 分类的 AylaAvatarHalo 样张）。
+              title: '分享卡（ShareBubble.tsx）',
               source:
                   'app.css 1138–1223：卡片 min(264,100%) · 封面 72 · 标题 15/700 两行 · hover -1px + '
-                  '0 4px 16px rgba(70,91,146,.2) · :disabled opacity .7（按颜色降透明）· '
-                  'app.css 435–478：入口卡 135deg 樱粉 + 1px rgba(247,150,255,.5) + hover 辉光（窄屏降 30%）',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  SizedBox(width: 640, child: aylaShareBubbleSamples()),
-                  const SizedBox(height: AylaSpacing.sp6),
-                  SizedBox(width: 420, child: aylaElysiaEntrySamples()),
-                ],
-              ),
+                  '0 4px 16px rgba(70,91,146,.2) · :disabled opacity .7（按颜色降透明）',
+              child: SizedBox(width: 640, child: aylaShareBubbleSamples()),
             ),
             const SizedBox(height: AylaSpacing.sp6),
 

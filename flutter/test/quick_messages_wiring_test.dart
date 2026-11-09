@@ -14,7 +14,7 @@
 ///
 /// ⚠️ 本文件**不发真实网络请求**：HttpOverrides.global = null（清掉 flutter_test 的
 /// 「一律 400」mock）后，壳层/宿主发出的请求会连 127.0.0.1:8100 失败 —— 所有消费点
-/// 都是静默降级（badgesProvider.fetch / elysiaProfileProvider / 会话分页各自 catch），
+/// 都是静默降级（badgesProvider.fetch / 会话分页各自 catch），
 /// 因此面板仍会渲染、只是列表为空；断言只看**结构与状态**，不看数据内容。
 library;
 

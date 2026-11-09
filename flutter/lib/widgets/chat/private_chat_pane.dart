@@ -50,7 +50,6 @@ class AylaPrivateChatPane extends StatelessWidget {
     required this.conversation,
     required this.messages,
     required this.currentUserId,
-    this.elysiaUserId,
     this.onBack,
     this.backLabel = '返回消息中心',
     this.disableAvatarNav = false,
@@ -88,9 +87,6 @@ class AylaPrivateChatPane extends StatelessWidget {
 
   final List<AylaChatMessage> messages;
   final String? currentUserId;
-
-  /// 爱莉 profile 的 user.id（决定头像/头部是否走爱莉专属形态与是否可点）。
-  final String? elysiaUserId;
 
   /// 返回键（窄屏私聊窗口用；宽屏两列不传）。
   final VoidCallback? onBack;
@@ -209,7 +205,6 @@ class AylaPrivateChatPane extends StatelessWidget {
               messages: messages,
               currentUserId: currentUserId,
               conversation: conv,
-              elysiaUserId: elysiaUserId,
               hasMore: hasMore,
               loading: loading,
               onLoadMore: onLoadMore,
@@ -275,10 +270,8 @@ class AylaPrivateChatPane extends StatelessWidget {
 
   /// 头部（`.private-chat-head`；窄屏通栏条 / 宽屏卡片）。
   Widget _head(String title, AylaConversationSummary? conv) {
-    final bool isElysia = elysiaUserId != null && conv?.peer?.id == elysiaUserId;
     final bool avatarTappable = !disableAvatarNav &&
         conv?.peer != null &&
-        !isElysia &&
         onAvatarTap != null;
 
     final Widget content = Row(
@@ -317,7 +310,7 @@ class AylaPrivateChatPane extends StatelessWidget {
           online: peerOnline,
           // 传 peer 让头像自订阅 presence（web PrivateChatPane.tsx:154）。
           user: conv?.peer,
-          core: isElysia ? AylaAvatarCore.elysia : AylaAvatarCore.user,
+          core: AylaAvatarCore.user,
           resourceUrl: conv?.peer?.avatar,
           onTap: avatarTappable ? onAvatarTap : null,
           semanticLabel: avatarTappable ? '查看 $title 的个人主页' : null,

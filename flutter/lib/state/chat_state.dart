@@ -171,7 +171,7 @@ class AylaChatState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 更新最新一条消息预览（WS `message.new` / `message.poke` / `elysia.reply`）。
+  /// 更新最新一条消息预览（WS `message.new` / `message.poke`）。
   void setLastMessage(String convId, AylaLastMessagePreview preview) {
     _conversations = <AylaConversationSummary>[
       for (final AylaConversationSummary c in _conversations)

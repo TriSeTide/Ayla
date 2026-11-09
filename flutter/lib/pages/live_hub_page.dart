@@ -6,7 +6,6 @@
 /// - tsx 63–75：前端二次过滤（live → status=="live"；offline → status!="live"；
 ///   public → visibility；friends → 好友集合；mine → is_owner）；
 /// - tsx 85–93：缺 owner_nickname 的频道按 ensureUser(owner_id) 懒拉主播名；
-/// - tsx 108–120：爱莉 profile → elysiaUserId（启用才标注）；
 /// - tsx 135–139：统计行「N 直播间 · M 在播」（M = 已加载数据里 status=="live" 的条数，tsx 123）；
 /// - tsx 143–147：加载态两根 96 高骨架（live.css:607–614 grid gap sp4；
 ///   窄屏 618–622 加 padding sp3 sp4）；
@@ -36,7 +35,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../core/api/elysia_api.dart';
 import '../core/api/live_api.dart';
 import '../core/api/users_api.dart';
 import '../state/auth_state.dart';
@@ -87,7 +85,6 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
   AylaDirectoryController<AylaDirectoryLiveEntry>? _pager;
   Set<String> _friendIds = const <String>{};
-  String? _elysiaUserId;
 
   /// owner_id → 展示名（tsx 55：列表不带主播名时的兜底）。
   Map<String, String> _ownerNames = const <String, String>{};
@@ -123,7 +120,6 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadFriends();
     });
-    _loadElysia();
   }
 
   @override
@@ -231,18 +227,6 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
     final Set<String> ids = await aylaHubFriendIds();
     if (!mounted || ids.isEmpty) return;
     setState(() => _friendIds = ids);
-  }
-
-  Future<void> _loadElysia() async {
-    try {
-      final profile = await AylaElysiaApi.getProfile();
-      final String? userId = profile?.userId;
-      if (!mounted || profile == null || !profile.enabled) return;
-      if (userId == null || userId.isEmpty) return;
-      setState(() => _elysiaUserId = userId);
-    } catch (_) {
-      // 爱莉入口静默降级（tsx 114–116）
-    }
   }
 
   /// tsx 85–93：缺主播名的频道按 owner_id 懒拉（web ensureUser 带缓存；
@@ -394,7 +378,6 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
                     for (final AylaDirectoryLiveEntry entry in visible)
                       entry.card,
                   ],
-                  elysiaUserId: _elysiaUserId,
                   ownerNames: _ownerNames,
                   // web `useListEntryMotion(hubRef, ".live-card-wrap", restoring, replayNonce)`
                   // （`LiveHubPage.tsx:77`）：恢复命中时整批禁入场。

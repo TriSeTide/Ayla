@@ -904,10 +904,6 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
     final AylaMessageBucket? bucket = ref
         .watch(messageStateProvider)
         .bucketOf(groupId);
-    final String? elysiaId = ref
-        .watch(elysiaProfileProvider)
-        .valueOrNull
-        ?.userId;
     final String? me = ref.watch(authNotifierProvider).user?.id;
     final AylaConversationMemberRole? myRole = conv?.myRole;
     final bool isSubgroupMuted =
@@ -1024,7 +1020,6 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
                       messages: visible,
                       currentUserId: me,
                       conversation: conv,
-                      elysiaUserId: elysiaId,
                       hasMore: bucket?.hasMore ?? false,
                       loading: bucket?.loading ?? false,
                       onLoadMore: _loadMore,

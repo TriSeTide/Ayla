@@ -248,9 +248,9 @@ void main() {
       expect(closes, 1);
     });
 
-    testWidgets('截断 → 「仅显示前 N 位」；爱莉标记走 AylaAvatarHalo 的 elysia 档', (
-      WidgetTester tester,
-    ) async {
+    // 爱莉标注入口已随对接层撤下（撤下清单 §2.2）：光环分支保留在
+    // `_ViewerRow.isElysia`（视觉身份），但页面不再有判定来源 ⇒ 这里只验截断文案。
+    testWidgets('截断 → 「仅显示前 N 位」', (WidgetTester tester) async {
       await tester.pumpWidget(
         host(
           tester,
@@ -260,7 +260,6 @@ void main() {
               viewers: _watchers,
               count: 200,
               hasMore: true,
-              elysiaUserId: 'u2',
             ),
             onClose: () {},
           ),
@@ -272,8 +271,9 @@ void main() {
       final List<AylaAvatarHalo> avatars = tester
           .widgetList<AylaAvatarHalo>(find.byType(AylaAvatarHalo))
           .toList();
-      expect(avatars[1].core, AylaAvatarCore.elysia); // u2 = 爱莉
-      expect(avatars[0].core, AylaAvatarCore.user);
+      // 撤下后名单行一律普通头像（爱莉档不再可达）
+      expect(avatars.every((AylaAvatarHalo a) => a.core == AylaAvatarCore.user),
+          isTrue);
     });
 
     testWidgets('503 → role=alert 明示读不到 + 重试；**不**回落空名单', (WidgetTester tester) async {

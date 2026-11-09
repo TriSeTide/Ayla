@@ -280,7 +280,9 @@ void main() {
 
   // ======================= 成员行透传 =======================
 
-  testWidgets('成员行透传：isSelf / isElysia / 展示投影 / 回调', (WidgetTester tester) async {
+  // 爱莉判定入口已撤下（撤下清单 §2.2）：`AylaVoiceMemberRow.isElysia` 分支保留
+  // （视觉身份），但面板不再有 `elysiaUserId` 来源 ⇒ 透传只剩 isSelf。
+  testWidgets('成员行透传：isSelf / 展示投影 / 回调', (WidgetTester tester) async {
     setViewport(tester, const Size(700, 620));
     final List<(String, double)> volumes = <(String, double)>[];
     final List<double> locals = <double>[];
@@ -293,7 +295,6 @@ void main() {
           members: const <AylaVoicePanelMember>[elysia, other],
           selfUserId: 'self',
           selfMember: self,
-          elysiaUserId: 'u2',
           self: const AylaVoiceSelfState(localVolume: 70),
           onVolumeChange: (String id, double v) => volumes.add((id, v)),
           onLocalVolumeChange: locals.add,
@@ -306,7 +307,7 @@ void main() {
     final List<AylaVoiceMemberRow> list = rows(tester);
     final AylaVoiceMemberRow elysiaRow =
         list.firstWhere((AylaVoiceMemberRow r) => r.member.userId == 'u2');
-    expect(elysiaRow.isElysia, isTrue); // tsx 126
+    expect(elysiaRow.isElysia, isFalse); // 撤下后无判定来源（tsx 126 分支恒假）
     expect(elysiaRow.isSelf, isFalse);
     expect(elysiaRow.displayName, '爱莉');
     expect(elysiaRow.online, isTrue);

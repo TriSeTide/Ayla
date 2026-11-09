@@ -10,7 +10,7 @@
 ///
 /// ## 机制差异
 /// - **数据全部由页面注入**（[AylaLiveViewerSheetData]）：web 在弹层内部 `getLiveChannelViewers`
-///   拉取 + `getElysiaProfile` 判爱莉，网络层不进 `lib/widgets`；
+///   拉取（爱莉标注已撤下），网络层不进 `lib/widgets`；
 /// - **弹层宿主改为插 root Overlay**（[aylaOverlayEntry]，等价 web `createPortal(document.body)`；
 ///   官方用例 248–256 明确「侧栏 backdrop-filter 不裁剪弹层」）——库内先例 = 弹幕图片查看器宿主；
 /// - 落位（`margin-top` 与所属分区）由调用方决定，组件自身不带 margin。
@@ -58,7 +58,6 @@ class AylaLiveViewerSheetData {
     this.count,
     this.hasMore = false,
     this.error,
-    this.elysiaUserId,
     this.onRetry,
     this.onOpenProfile,
   });
@@ -75,9 +74,6 @@ class AylaLiveViewerSheetData {
   /// 读取失败文案（tsx 56–60；**不回落空名单冒充没人看**）。
   final String? error;
 
-  /// 爱莉 user id（名单里标注爱莉光环）；null = 不标注。
-  final String? elysiaUserId;
-
   /// 「重试」回调（tsx 97）。
   final VoidCallback? onRetry;
 
@@ -90,7 +86,6 @@ class AylaLiveViewerSheetData {
     int? count,
     bool? hasMore,
     String? error,
-    String? elysiaUserId,
     VoidCallback? onRetry,
     ValueChanged<AylaLiveViewerItem>? onOpenProfile,
   }) =>
@@ -99,7 +94,6 @@ class AylaLiveViewerSheetData {
         count: count ?? this.count,
         hasMore: hasMore ?? this.hasMore,
         error: error ?? this.error,
-        elysiaUserId: elysiaUserId ?? this.elysiaUserId,
         onRetry: onRetry ?? this.onRetry,
         onOpenProfile: onOpenProfile ?? this.onOpenProfile,
       );
@@ -489,9 +483,8 @@ class AylaLiveViewerSheet extends StatelessWidget {
         for (final AylaLiveViewerItem viewer in rows)
           _ViewerRow(
             viewer: viewer,
-            isElysia:
-                data.elysiaUserId != null &&
-                viewer.userId == data.elysiaUserId,
+            // 爱莉光环分支保留、入口恒假（撤下清单 §3 方案 A）。
+            isElysia: false,
             onTap: () {
               data.onOpenProfile?.call(viewer);
               onClose(); // tsx 122–124：跳转后关闭弹层
@@ -752,7 +745,6 @@ class _ViewerSheetDemoState extends State<_ViewerSheetDemo> {
         viewers: _viewers,
         count: 5,
         hasMore: true,
-        elysiaUserId: 'u2',
         onRetry: () {},
         onOpenProfile: (AylaLiveViewerItem v) =>
             setState(() => _picked = v.nickname),

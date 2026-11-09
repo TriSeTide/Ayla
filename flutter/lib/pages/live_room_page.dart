@@ -34,12 +34,10 @@ import '../core/platform/detached_live.dart' show aylaDetachedLivePlatformSuppor
 import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../state/auth_state.dart';
 import '../state/display_status.dart' show presenceOnline;
-import '../core/models/elysia_profile.dart' show AylaElysiaProfile;
 import '../core/models/user_public.dart' show AylaUserPublic;
 import '../state/presence_providers.dart' show presenceStateProvider;
 import '../state/presence_state.dart' show AylaPresenceState;
-import '../state/chat_providers.dart'
-    show chatWsProvider, elysiaProfileProvider;
+import '../state/chat_providers.dart' show chatWsProvider;
 import '../state/cursor_history.dart';
 import '../state/live_state.dart';
 import '../state/paged_list.dart';
@@ -79,7 +77,7 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
   final AylaShareController _share = AylaShareController();
 
   /// 在看名单弹层的**权威数据子链**（web 是弹层内部自己拉 —— `LiveViewerSheet.tsx:44–65`
-  /// 的 `getLiveChannelViewers` + `:67–79` 的 `getElysiaProfile`；Flutter 侧网络层不进
+  /// 的 `getLiveChannelViewers`；Flutter 侧网络层不进
   /// `lib/widgets` ⇒ 由页面持有、经 [AylaLiveRoomBody.data.viewerSheet] 注入）。
   AylaLiveViewerSheetController? _viewerSheet;
 
@@ -261,17 +259,11 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
     context.replace('/live/$id');
   }
 
-  /// 爱莉档案（web `LiveViewerSheet.tsx:67–79` 的 `getElysiaProfile()`；**失败静默**）。
-  AylaElysiaProfile? _readElysiaProfile() =>
-      ref.read(elysiaProfileProvider).valueOrNull;
-
   /// 名单弹层的权威数据（web 由弹层自己拉 —— `LiveViewerSheet.tsx:44–79`）。
   ///
   /// 懒创建一次（`ref` 只在 build / initState 可用 ⇒ 不在字段初始化里取）。
   AylaLiveViewerSheetController _viewerSheetOf(String channelId) =>
-      _viewerSheet ??=
-          AylaLiveViewerSheetController(elysiaReader: _readElysiaProfile)
-            ..addListener(_onChanged);
+      _viewerSheet ??= AylaLiveViewerSheetController()..addListener(_onChanged);
 
   @override
   Widget build(BuildContext context) {

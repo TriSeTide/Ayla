@@ -124,6 +124,10 @@ class AylaVoiceMemberRow extends StatelessWidget {
   final bool isSelf;
 
   /// 爱莉条目（只影响头像光环，tsx 103–104）。
+  /// 爱莉条目 ⇒ 走 [AylaAvatarCore.elysia] 光环。
+  ///
+  /// ⚠️ 功能对接层已撤下（撤下清单 §2.2 / §3 方案 A）：[AylaVoiceChannelPanel] 不再有
+  /// `elysiaUserId` 来源 ⇒ 恒传 `false`。光环分支按方案 A 保留，等新对接。
   final bool isElysia;
 
   /// [isSelf] 为 true 时的本地媒体事实（web 的 `useVoiceStore` 三个读）。

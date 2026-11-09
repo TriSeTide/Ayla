@@ -4,7 +4,7 @@
 /// `vitest/live-rail.test.tsx:314–360`（大厅卡封面/徽章/来源/主播名/进入）与
 /// `vitest/live-viewers.test.tsx:115–150`（人数角标三态与紧凑写法）。
 ///
-/// 覆盖：结构 / 封面 16:9 与占位 / 状态徽章三档 + 色 / 爱莉角标 / 人数角标（含 null 不渲染、
+/// 覆盖：结构 / 封面 16:9 与占位 / 状态徽章三档 + 色 / 爱莉角标（视觉分支，入口已撤下）/ 人数角标（含 null 不渲染、
 /// 0 照常、未在播不显示、1.2k 紧凑）/ 标题与主播名取值优先级 / 来源标签用共享件 /
 /// 收藏键 + 转发键（默认渲染、32×32、宽窄屏偏移、点击不触发进房、showActions:false 移除）/
 /// 入场延迟 / 网格列数三档与窄屏 padding / 空态 / ownerNames 兜底。
@@ -800,7 +800,9 @@ void main() {
       expect(tester.getRect(find.byType(AylaLiveChannelCard).first).left, 0);
     });
 
-    testWidgets('ownerNames 兜底 + elysiaUserId 判角标 + 点击传 id', (WidgetTester tester) async {
+    // 爱莉角标入口已随对接层撤下（撤下清单 §2.2）：`AylaLiveChannelCard.isElysia`
+    // 分支保留（视觉身份），但大厅不再有判定来源 ⇒ 这里只验 ownerNames 兜底与点击。
+    testWidgets('ownerNames 兜底 + 点击传 id', (WidgetTester tester) async {
       final List<String> entered = <String>[];
       await tester.pumpWidget(
         host(
@@ -810,7 +812,6 @@ void main() {
               _channel(id: 'a', title: 'A', ownerId: 'u-elysia', ownerNickname: null),
               _channel(id: 'b', title: 'B', ownerId: 'u2', ownerNickname: null),
             ],
-            elysiaUserId: 'u-elysia',
             ownerNames: const <String, String>{'u-elysia': '爱莉', 'u2': '小樱'},
             onEnter: entered.add,
           ),
@@ -818,7 +819,7 @@ void main() {
       );
       await settle(tester);
 
-      expect(find.text('爱莉'), findsWidgets); // 主播名兜底 + 爱莉角标
+      expect(find.text('爱莉'), findsOneWidget); // 仅主播名兜底（角标入口已撤下）
       expect(find.text('小樱'), findsOneWidget);
       await tester.tap(find.text('B'));
       await settle(tester);

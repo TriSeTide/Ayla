@@ -48,7 +48,8 @@ Future<void> _pump(
 
 void main() {
   group('MessagesPage 窄屏', () {
-    testWidgets('首帧：三 tab 逐字 + 私信面板（爱莉入口/会话列表/页脚）', (WidgetTester tester) async {
+    // 爱莉入口已随对接层撤下（撤下清单 §2.2）：私信面板只剩会话列表 + 页脚。
+    testWidgets('首帧：三 tab 逐字 + 私信面板（会话列表/页脚）', (WidgetTester tester) async {
       await _pump(tester, const MessagesPage());
       expect(find.text('私信'), findsOneWidget);
       expect(find.text('好友列表'), findsOneWidget);

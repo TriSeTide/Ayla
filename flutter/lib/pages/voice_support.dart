@@ -36,7 +36,7 @@ import '../core/net/dio_client.dart' show ApiException;
 import '../core/ws/chat_ws.dart';
 import '../core/ws/voice_ws.dart';
 import '../state/auth_state.dart';
-import '../state/chat_providers.dart' show chatWsProvider, elysiaProfileProvider;
+import '../state/chat_providers.dart' show chatWsProvider;
 import '../state/cursor_history.dart';
 import '../state/favorite_status.dart';
 import '../state/media_paged_list.dart';
@@ -1299,11 +1299,6 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
     // 否则电平变化不会再唤醒本页。
     final bool isOwner = channel != null && channel.ownerId == selfId;
     final String? sessionError = _session.error;
-    // 爱莉的 user id（成员行头像光环判定；web `VoiceChannelPanel.tsx` 从 presence store 读）。
-    // ⚠️ 必须**在这里**（build 期）watch：本值随后被 [ListenableBuilder] 的 builder 捕获使用，
-    // 而那条路径由 10Hz notify 在 build 之外触发 —— 在回调里 `ref.watch` 会晚注册依赖。
-    final String? elysiaUserId =
-        ref.watch(elysiaProfileProvider).valueOrNull?.userId;
     // 自己出现在对账里而分页第一页还没有 ⇒ 刷新一次（web `VoiceChannelPanel.tsx:96–100`）。
     if (selfInStore && _members.loaded && !_refreshedForSelf) {
       _refreshedForSelf = true;
@@ -1342,9 +1337,6 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       ],
       selfUserId: selfId,
       selfMember: selfId == null ? null : _rowOf(voice, selfId),
-      // 值在 build 期取好（`valueOrNull`：无网络时该 FutureProvider 处于 AsyncError，
-      // `.value` 会**抛出** —— 实测 LateInitializationError 冒到 build）。
-      elysiaUserId: elysiaUserId,
       count: displayCount,
       isOwner: isOwner,
       self: voice.selfState(),

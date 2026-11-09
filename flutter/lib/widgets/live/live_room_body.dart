@@ -152,8 +152,8 @@ class AylaLiveRoomData {
 
   /// 名单弹层**即将打开**（页面借此发起权威名单拉取）。
   ///
-  /// 事实源：web 由弹层自己在打开时拉（`LiveViewerSheet.tsx:44–79` 的
-  /// `getLiveChannelViewers` + `getElysiaProfile`）；Flutter 的网络层不进 `lib/widgets`
+  /// 事实源：web 由弹层自己在打开时拉（`LiveViewerSheet.tsx:44–65` 的
+  /// `getLiveChannelViewers`）；Flutter 的网络层不进 `lib/widgets`
   /// ⇒ 同一次拉取由页面承接（`live_support.dart` 的 `AylaLiveViewerSheetController`）。
   /// 默认 null ⇒ 行为不变。
   final VoidCallback? onOpenViewerSheet;

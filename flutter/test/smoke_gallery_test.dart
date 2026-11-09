@@ -52,7 +52,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     '聊天消息气泡（MessageBubble.tsx）',
     '媒体消息族（MediaContent.tsx）',
     '气泡内媒体宽度（fit-content / flex:1 两档语义）',
-    '分享卡 / 爱莉入口卡（ShareBubble.tsx + ElysiaEntry.tsx）',
+    '分享卡（ShareBubble.tsx）',
     '会话列表（ConversationList.tsx）',
     '@ 成员选择器（MentionPicker.tsx）',
     '群表情包面板（EmojiPackPanel.tsx）',
@@ -84,7 +84,6 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'AylaVoiceMemberRow（components/voice/VoiceMemberRow.tsx 219 行 + app.css 2917–3095 + auroraqua.css 59/77/89/664）',
     'AylaVoiceChannelCreate（components/voice/VoiceChannelCreate.tsx 80 行 + app.css 2848–2869 + auroraqua.css 502–531 + private.css 229–236）',
     'AylaVoiceChannelPanel（components/voice/VoiceChannelPanel.tsx 158 行 + app.css 2873–2915 + voice.css 32–56/377–381 + auroraqua.css 584–610）',
-    'AylaElysiaVoicePanel（components/voice/ElysiaVoicePanel.tsx 108 行 + app.css 3122–3156 / 1324–1333 / 1362）',
     'AylaVoiceRoomBody（components/voice/VoiceRoomBody.tsx 327 行 + voice.css 12–470 + app.css 2105–2138/3473–3477 + base.css 463–472）',
   ],
   'posts · 帖子 / 评论': <String>[

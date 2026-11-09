@@ -211,7 +211,6 @@ class AylaMessageList extends StatefulWidget {
     required this.messages,
     required this.currentUserId,
     this.conversation,
-    this.elysiaUserId,
     this.hasMore = false,
     this.loading = false,
     this.onLoadMore,
@@ -244,9 +243,6 @@ class AylaMessageList extends StatefulWidget {
 
   final String? currentUserId;
   final AylaConversationSummary? conversation;
-
-  /// 爱莉 profile 的 user.id：匹配即爱莉专属气泡。
-  final String? elysiaUserId;
 
   final bool hasMore;
   final bool loading;
@@ -1130,8 +1126,10 @@ class _AylaMessageListState extends State<AylaMessageList> {
         : AylaMessageBubble(
             msg: m,
             isSelf: isSelf,
-            isElysia: widget.elysiaUserId != null &&
-                m.senderId == widget.elysiaUserId,
+            // 爱莉气泡分支保留、入口恒假：爱莉对接层已撤下（
+            // `docs/plans/爱莉前端对接层撤下清单.md` §3 方案 A），
+            // 等新对接接回时由页面层重新提供判定来源。
+            isElysia: false,
             justArrived: justArrived,
             // ⚠️ **2026-10-26 修复（退群成员头像）**：昵称/头像的**首选来源是消息
             // 自带的 `sender` 快照**（后端 `MessageSerializer.sender`），成员表只作

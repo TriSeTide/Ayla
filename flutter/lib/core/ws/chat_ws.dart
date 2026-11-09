@@ -11,8 +11,8 @@
 /// | [onFrame] | `chat.ts:952–955`（页面级监听：typing / 认证消息刷新 / 评论帧） |
 ///
 /// ## 41 个接收 case 的对账（**缺席即缺席**）
-/// - **消息域批次实装 18 条**：`message.new` · `message.recall` · `message.poke` · `message.read` ·
-///   `typing` · `history.sync` · `chat.subscribed` · `pong` · `error` · `elysia.reply` ·
+/// - **消息域批次实装 17 条**：`message.new` · `message.recall` · `message.poke` · `message.read` ·
+///   `typing` · `history.sync` · `chat.subscribed` · `pong` · `error` ·
 ///   `group.request.new` · `group.request.resolved` · `group.invite.new` · `friend.request.new` ·
 ///   `friend.request.resolved` · `group.member.left` · `group.created` · `group.joined`；
 /// - **房内页批次转正 12 条**（2026-09-28）：`voice.channel.*`(4) · `live.channel.*`(4) ·
@@ -620,8 +620,6 @@ class AylaChatWsClient {
             unawaited(reconcileConversation(id));
           }
         }
-      case 'elysia.reply':
-        _onElysiaReply(data);
       case 'conversation.updated':
         _onConversationUpdated(data);
       case 'conversation.members.changed':
@@ -830,55 +828,6 @@ class AylaChatWsClient {
       _chat.bumpGroupActivity(convId);
     } else {
       _chat.bumpConversationActivity(convId);
-    }
-  }
-
-  /// `elysia.reply`（web `chat.ts:885–936`）。
-  void _onElysiaReply(Map<String, dynamic> data) {
-    final String convId = _str(data['conversation_id']);
-    final int seq = _int(data['seq']);
-    final AylaChatMessage msg = AylaChatMessage(
-      id: _str(data['message_id']),
-      conversationId: convId,
-      senderId: _str(data['sender_id']),
-      type: AylaMessageType.parse(data['type'] as String?),
-      content: _str(data['content']),
-      status: AylaMessageStatus.sent,
-      seq: seq,
-      createdAt: _str(data['ts']),
-    );
-    _message.upsertMessage(convId, msg);
-    final AylaConversationSummary? conv = _chat.byId(convId);
-    if (conv != null) {
-      _chat.setLastMessage(
-        convId,
-        AylaLastMessagePreview(
-          seq: seq,
-          type: msg.type,
-          content: msg.content,
-          senderId: msg.senderId,
-          senderName: _previewSenderName(conv, msg.senderId),
-          status: 'sent',
-          createdAt: msg.createdAt,
-          preview: msg.content.isNotEmpty ? msg.content : _typePreview(msg.type),
-        ),
-      );
-      if (conv.isGroup) _chat.bumpGroupActivity(convId);
-    }
-    final bool atBottom = _chat.activeConversationId == convId &&
-        _message.viewerAtBottom(convId);
-    if (atBottom) {
-      _message.markReadByMe(convId, msg.id);
-      unawaited(
-        AylaChatApi.markMessageRead(convId, msg.id, exact: true)
-            .then((_) => _badges.fetch())
-            .catchError((Object _) {}),
-      );
-    } else {
-      _chat.bumpUnread(convId, seq: seq);
-      if (conv == null || conv.isPrivate) {
-        unawaited(_badges.fetch());
-      }
     }
   }
 

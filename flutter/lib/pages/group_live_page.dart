@@ -151,7 +151,7 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
   final AylaShareController _share = AylaShareController();
 
   /// 在看名单弹层的**权威数据子链**（web 是弹层内部自己拉 —— `LiveViewerSheet.tsx:44–65`
-  /// 的 `getLiveChannelViewers` + `:67–79` 的 `getElysiaProfile`；Flutter 侧网络层不进
+  /// 的 `getLiveChannelViewers`；Flutter 侧网络层不进
   /// `lib/widgets` ⇒ 由页面持有、经 [AylaLiveRoomBody.data.viewerSheet] 注入）。
   AylaLiveViewerSheetController? _viewerSheet;
 

@@ -41,9 +41,7 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
-import '../core/api/elysia_api.dart' show AylaElysiaApi;
 import '../core/api/live_api.dart';
-import '../core/models/elysia_profile.dart' show AylaElysiaProfile;
 import '../core/net/dio_client.dart' show ApiException;
 import '../core/net/live_play_url.dart' show aylaNormalizeLivePlayUrl;
 import '../core/platform/detached_live.dart';
@@ -1783,7 +1781,6 @@ class AylaLiveViewerSheetController extends ChangeNotifier {
   AylaLiveViewerSheetController({
     this.fetcher,
     this.errorMessage,
-    this.elysiaReader,
   });
 
   /// 名单读取（null → [AylaLiveApi.getLiveChannelViewers]；测试可注入 fake）。
@@ -1791,9 +1788,6 @@ class AylaLiveViewerSheetController extends ChangeNotifier {
 
   /// 失败文案的取值口径（web tsx 54–60 的 `reason instanceof Error && reason.message`）。
   final String Function(Object error)? errorMessage;
-
-  /// 爱莉档案读取（null → [AylaElysiaApi.getProfile]；测试可注入）。
-  final AylaElysiaProfile? Function()? elysiaReader;
 
   AylaLiveViewerSheetData _value = const AylaLiveViewerSheetData();
 
@@ -1837,7 +1831,6 @@ class AylaLiveViewerSheetController extends ChangeNotifier {
         viewers: rows,
         count: page.count,
         hasMore: page.hasMore,
-        elysiaUserId: _value.elysiaUserId,
         onRetry: _value.onRetry,
         // ⚠️ 这里的 `onOpenProfile` **恒 null**（`_value` 只由本类写入，本类从不给它赋值）
         // ⇒ 它**不是**「点名单行跳主页」的接线点。那个回调由**页面在 build 里**注入：
@@ -1864,22 +1857,6 @@ class AylaLiveViewerSheetController extends ChangeNotifier {
     }
   }
 
-  /// 补上爱莉标记（web `LiveViewerSheet.tsx:67–79`：`getElysiaProfile()` →
-  /// `profile.enabled ? profile.user.id : null`；**失败静默** —— 名单照常展示，
-  /// 只是不标注爱莉光环）。
-  Future<void> loadElysiaUserId() async {
-    if (_value.elysiaUserId != null) return;
-    try {
-      final AylaElysiaProfile? profile =
-          elysiaReader != null ? elysiaReader!() : await AylaElysiaApi.getProfile();
-      if (profile == null || !profile.enabled || profile.userId == null) return;
-      _value = _value.copyWith(elysiaUserId: profile.userId);
-      notifyListeners();
-    } catch (_) {
-      // 爱莉档案不可用：不标注
-    }
-  }
-
   /// 打开弹层（`AylaLiveViewerStrip.onOpen` 的接收端）。
   ///
   /// 幂等：已经有权威名单或已有错误时**不重复拉**（弹层关掉再开不闪骨架）；
@@ -1888,7 +1865,6 @@ class AylaLiveViewerSheetController extends ChangeNotifier {
   void onOpen(String channelId) {
     if (_value.viewers != null || _value.error != null) return;
     unawaited(load(channelId));
-    unawaited(loadElysiaUserId());
   }
 
   /// 打开弹层时的重试回调（web tsx 97 的「重试」→ `reloadToken + 1`）。

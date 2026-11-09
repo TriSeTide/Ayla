@@ -114,7 +114,6 @@ class AylaConversationList extends StatelessWidget {
     required this.conversations,
     required this.activeId,
     required this.onSelect,
-    this.elysiaUserId,
     this.disableAvatarNav = false,
     this.revealItems = false,
     this.isOnline,
@@ -132,9 +131,6 @@ class AylaConversationList extends StatelessWidget {
   final String? activeId;
 
   final void Function(String id) onSelect;
-
-  /// 爱莉 user id（决定光环/头像是否走爱莉专属形态）。
-  final String? elysiaUserId;
 
   /// 快捷消息栏内：头像不可点（不跳个人主页，tsx 66–67）。
   final bool disableAvatarNav;
@@ -200,7 +196,6 @@ class AylaConversationList extends StatelessWidget {
         final Widget row = _ConversationRow(
           conversation: conversations[slot.index],
           slot: slot,
-          elysiaUserId: elysiaUserId,
           disableAvatarNav: disableAvatarNav,
           isOnline: isOnline,
           statusLabel: statusLabel,
@@ -226,7 +221,6 @@ class _ConversationRow extends StatefulWidget {
   const _ConversationRow({
     required this.conversation,
     required this.slot,
-    this.elysiaUserId,
     this.disableAvatarNav = false,
     this.isOnline,
     this.statusLabel,
@@ -238,7 +232,6 @@ class _ConversationRow extends StatefulWidget {
 
   final AylaConversationSummary conversation;
   final AylaNavHighlightSlot slot;
-  final String? elysiaUserId;
   final bool disableAvatarNav;
   final bool Function(AylaUserPublic? peer)? isOnline;
   final String Function(AylaUserPublic? peer, bool online)? statusLabel;
@@ -264,9 +257,7 @@ class _ConversationRowState extends State<_ConversationRow> {
     final bool isPrivate = conv.isPrivate;
     final bool online =
         widget.isOnline?.call(peer) ?? (peer?.online ?? false);
-    final bool isElysia =
-        widget.elysiaUserId != null && peer?.id == widget.elysiaUserId;
-    final bool isOnline = isPrivate && (online || isElysia);
+    final bool isOnline = isPrivate && online;
     final String title = isPrivate
         ? (peer?.displayName ?? _nonEmpty(conv.title) ?? '未命名会话')
         : (_nonEmpty(conv.title) ?? '未命名群聊');
@@ -322,7 +313,7 @@ class _ConversationRowState extends State<_ConversationRow> {
                   ),
                   child: Row(
                     children: <Widget>[
-                      _avatar(title, peer, isPrivate, isElysia, online),
+                      _avatar(title, peer, isPrivate, online),
                       const SizedBox(width: AylaSpacing.sp3),
                       Expanded(child: _body(title, peer, isPrivate, isOnline)),
                       if (conv.unreadCount > 0) ...<Widget>[
@@ -382,7 +373,6 @@ class _ConversationRowState extends State<_ConversationRow> {
     String title,
     AylaUserPublic? peer,
     bool isPrivate,
-    bool isElysia,
     bool online,
   ) {
     final bool tappable = !widget.disableAvatarNav &&
@@ -396,7 +386,7 @@ class _ConversationRowState extends State<_ConversationRow> {
       online: isPrivate ? online : false,
       // 传 peer 让头像自订阅 presence 实时在线态（web ConversationList.tsx:85）。
       user: isPrivate ? peer : null,
-      core: isElysia ? AylaAvatarCore.elysia : AylaAvatarCore.user,
+      core: AylaAvatarCore.user,
       resourceUrl: isPrivate ? peer?.avatar : _nonEmpty(conv.avatar),
       onTap: tappable && target != null ? () => widget.onAvatarTap!(target) : null,
       semanticLabel: tappable ? '查看 $title 的个人主页' : null,
@@ -617,7 +607,6 @@ Widget aylaConversationListSamples() {
           builder: (BuildContext context, void Function(void Function()) setLocal) {
             return AylaConversationList(
               activeId: activeId,
-              elysiaUserId: 'elysia',
               onSelect: (String id) => setLocal(() => activeId = id),
               onTogglePin: (_, __) {},
               onDelete: (_) {},
