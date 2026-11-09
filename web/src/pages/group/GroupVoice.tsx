@@ -7,9 +7,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { getElysiaProfile } from "../../api/elysia";
 import * as voiceApi from "../../api/voice";
-import type { ElysiaProfile } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { VoiceChannelList } from "../../components/voice/VoiceChannelList";
 import { VoiceRoomBody } from "../../components/voice/VoiceRoomBody";
@@ -36,7 +34,6 @@ export function GroupVoice({
   const channels = useVoiceStore((s) => s.channels);
   // 从分享消息点击进入：免本群白名单校验（2026-09-15 用户定稿：任何人点进都能看到）
   const fromShare = (useLocation().state as { fromShare?: boolean } | null)?.fromShare === true;
-  const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   const directory = useDirectoryPage("voice", { groupId }, !routeChannelId);
   const groupChannels = directory.items;
   const loaded = !directory.loading || groupChannels.length > 0;
@@ -99,18 +96,6 @@ export function GroupVoice({
     return () => { cancelled = true; };
   }, [routeChannelId, groupId, channels]);
 
-  useEffect(() => {
-    let cancelled = false;
-    getElysiaProfile()
-      .then((p) => {
-        if (!cancelled) setElysiaProfile(p.enabled ? p : null);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const handleJoin = useCallback(
     (channelId: string) => {
       navigate(`/group/${groupId}/voice/${encodeURIComponent(channelId)}`);
@@ -159,7 +144,6 @@ export function GroupVoice({
           channelName={currentChannel.name}
           channel={currentChannel}
           livekit={joining ? "connecting" : joinError ? "failed" : currentChannelId === currentChannel.id ? livekit : "idle"}
-          elysiaProfile={elysiaProfile}
           groupId={currentChannel.group}
           onToggleMic={() => void toggleMic()}
           onLeave={() => void handleLeave()}

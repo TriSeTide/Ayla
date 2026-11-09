@@ -90,6 +90,7 @@
   --text-secondary: #7e95bd;
   --text-on-pink: #722e88;
   --bubble-self: linear-gradient(135deg, #9dbfe6, #bdd4e9);
+  /* 爱莉气泡渐变（② 视觉身份层）：当前无挂载点，等待新对接。 */
   --bubble-elysia: linear-gradient(135deg, #fcd8ff, #f9b0ff);
   --bubble-other: rgba(255, 250, 251, 0.72);
   --glow-shadow: 0 0 16px rgba(247, 150, 255, 0.45);

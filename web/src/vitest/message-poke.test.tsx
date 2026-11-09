@@ -75,8 +75,7 @@ describe("MessageList 戳一戳居中提示", () => {
       <MessageList
         messages={[pokeMessage()]}
         conversation={groupConversation()}
-        elysiaUserId={null}
-        hasMore={false}
+          hasMore={false}
         loading={false}
         onLoadMore={() => undefined}
       />,
@@ -93,8 +92,7 @@ describe("MessageList 戳一戳居中提示", () => {
       <MessageList
         messages={[pokeMessage(), { ...pokeMessage(), id: "poke2", seq: 6 }]}
         conversation={groupConversation()}
-        elysiaUserId={null}
-        hasMore={false}
+          hasMore={false}
         loading={false}
         onLoadMore={() => undefined}
       />,

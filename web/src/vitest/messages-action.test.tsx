@@ -18,10 +18,6 @@ import { useAuthStore } from "../stores/auth";
 vi.mock("../components/chat/ConversationList", () => ({
   ConversationList: () => <div data-testid="conversation-list" />,
 }));
-vi.mock("../components/chat/ElysiaEntry", () => ({
-  ElysiaEntry: () => <div data-testid="elysia-entry" />,
-}));
-
 vi.mock("../api/chat", () => ({
   listConversationsPage: vi.fn(async (params: { type?: string }) => { const all = await chatApi.listConversations(); const results = all.filter((row) => !params.type || params.type === "all" || row.type === params.type); return { results, total: results.length, has_more: false, next_cursor: null }; }),
   listMyInvitesPage: vi.fn(async () => { const results = await chatApi.listMyInvites(); return { results, total: results.length, has_more: false, next_cursor: null }; }),
@@ -43,10 +39,6 @@ vi.mock("../api/users", () => ({
   listFriends: vi.fn().mockResolvedValue([]),
   listFriendRequests: vi.fn().mockResolvedValue([]),
   actionFriendRequest: vi.fn().mockResolvedValue({ detail: "ok", status: "accepted" }),
-}));
-
-vi.mock("../api/elysia", () => ({
-  getElysiaProfile: vi.fn().mockResolvedValue({ enabled: false, user: null }),
 }));
 
 const req: FriendRequest = {

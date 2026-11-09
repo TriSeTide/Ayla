@@ -73,7 +73,14 @@ export function MessageBubble({
 }: {
   message: ChatMessage;
   isSelf: boolean;
-  /** 爱莉消息（专属气泡样式），由父级按 sender 判定 */
+  /**
+   * 爱莉消息（专属气泡样式），由父级按 sender 判定。
+   *
+   * ⚠️ **当前无数据来源（2026-11 爱莉前端对接层撤下，清单 §3 方案 A）**：
+   * 爱莉 profile 接口与 `elysiaUserId` 传递链已删除，所有调用方传 `false`，
+   * 本分支恒不成立。保留代码与 `--bubble-elysia` / `bubble-elysia` 样式，
+   * 避免新对接重做时再从 git 历史里捞；接回时只需恢复父级判定来源。
+   */
   isElysia?: boolean;
   /** 新到达消息（乐观发送 / WS 实时）挂到达动画；初始历史加载为 false */
   justArrived?: boolean;
@@ -212,6 +219,7 @@ export function MessageBubble({
     }, DOUBLE_CLICK_MS);
   };
 
+  // 爱莉专属气泡分支（方案 A 保留）：当前 isElysia 恒为 false，见 prop 注释。
   const bubbleClass = recalled
     ? "bubble bubble-other recalled"
     : isSelf

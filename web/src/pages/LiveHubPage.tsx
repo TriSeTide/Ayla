@@ -7,7 +7,6 @@
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { getElysiaProfile } from "../api/elysia";
 import { ensureUser } from "../api/users";
 import { LiveHall } from "../components/live/LiveHall";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
@@ -51,7 +50,6 @@ export function LiveHubPage() {
     owner: filter === "mine" ? currentUserId : undefined,
   });
   const { items: channels, loading, error, refresh } = directory;
-  const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
   const [ownerNames, setOwnerNames] = useState<Record<string, string>>({});
   // §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画）
   const [replayNonce, setReplayNonce] = useState(0);
@@ -105,20 +103,6 @@ export function LiveHubPage() {
   // 下拉刷新仅当滚动容器（.directory-content）已在顶部时响应
   const isHubAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    getElysiaProfile()
-      .then((p) => {
-        if (!cancelled) setElysiaUserId(p.enabled ? p.user.id : null);
-      })
-      .catch(() => {
-        /* 爱莉入口静默降级：加载失败不展示（elysiaUserId 保持 null） */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // 侧栏统计：X 直播间（directory.total）· Y 在播（已加载数据中 status=live 数）
   const liveCount = useMemo(() => channels.filter((channel) => channel.status === "live").length, [channels]);
 
@@ -155,7 +139,6 @@ export function LiveHubPage() {
               ) : (
                 <LiveHall
                   channels={visibleChannels}
-                  elysiaUserId={elysiaUserId}
                   ownerNames={ownerNames}
                   onEnter={(id) => navigate(`/live/${id}`)}
                 />

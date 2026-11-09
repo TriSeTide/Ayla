@@ -3,7 +3,6 @@
  * - subscribe 发送 subscribe 帧
  * - 收到 message.new → 消息 store 更新 + 未打开会话未读 +1
  * - 收到 message.recall / message.read / typing → 正确路由
- * - 收到 elysia.reply → 爱莉消息渲染（前端不生成内容）
  * - 重连后按各会话 lastSeq 发 resume（补发基线）
  * - 心跳 ping
  */
@@ -633,33 +632,6 @@ describe("ChatWSClient", () => {
     });
     expect(seen).toEqual(["peer"]);
     off();
-    client.disconnect();
-  });
-
-  it("elysia.reply → 爱莉消息 upsert（内容来自服务端投影，前端不生成）", () => {
-    const client = new ChatWSClient();
-    client.connect();
-    vi.runOnlyPendingTimers();
-    const ws = instances[0];
-
-    fire(ws, {
-      type: "elysia.reply",
-      data: {
-        conversation_id: "c1",
-        message_id: "e99",
-        sender_id: "elysia-user",
-        content: "你好，这是爱莉的回复",
-        type: "text",
-        seq: 8,
-        event_id: "evt-1",
-        ts: "2026-08-10T00:01:00Z",
-      },
-    });
-    const bucket = useMessageStore.getState().buckets["c1"];
-    expect(bucket.messages).toHaveLength(1);
-    expect(bucket.messages[0].sender_id).toBe("elysia-user");
-    expect(bucket.messages[0].content).toBe("你好，这是爱莉的回复");
-    expect(bucket.lastSeq).toBe(8);
     client.disconnect();
   });
 

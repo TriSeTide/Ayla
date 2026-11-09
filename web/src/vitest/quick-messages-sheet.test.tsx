@@ -37,14 +37,6 @@ vi.mock("../components/chat/ConversationList", () => ({
   ),
 }));
 
-vi.mock("../components/chat/ElysiaEntry", () => ({
-  ElysiaEntry: ({ onEnter }: { onEnter: () => void }) => (
-    <button type="button" onClick={onEnter}>
-      爱莉入口
-    </button>
-  ),
-}));
-
 vi.mock("../components/chat/PrivateChatPane", () => ({
   PrivateChatPane: ({
     onBack,
@@ -83,10 +75,6 @@ vi.mock("../api/users", () => ({
   listFriends: vi.fn().mockResolvedValue([]),
   listFriendRequests: vi.fn().mockResolvedValue([]),
   actionFriendRequest: vi.fn().mockResolvedValue({ detail: "ok", status: "accepted" }),
-}));
-
-vi.mock("../api/elysia", () => ({
-  getElysiaProfile: vi.fn().mockResolvedValue({ enabled: true, user: { id: "u2" } }),
 }));
 
 const req: FriendRequest = {

@@ -13,10 +13,8 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import * as chatApi from "../../api/chat";
 import { useSocialPage } from "../../hooks/useSocialPage";
 import { DirectoryLoadMore } from "../../components/DirectoryLoadMore";
-import { getElysiaProfile } from "../../api/elysia";
 import * as usersApi from "../../api/users";
 import type {
-  ElysiaProfile,
   FriendRequest,
   GroupInvite,
   GroupJoinRequest,
@@ -31,7 +29,6 @@ import { usePresenceStore } from "../../stores/presence";
 import { presenceOnline, withLiveStatus } from "../../utils/displayStatus";
 import { chatWS } from "../../ws/chat";
 import { ConversationList } from "./ConversationList";
-import { ElysiaEntry } from "./ElysiaEntry";
 import { PrivateChatPane } from "./PrivateChatPane";
 
 type Tab = "chat" | "requests";
@@ -59,8 +56,6 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
   const dismissNotice = useNoticeStore((s) => s.dismiss);
   const realtimeLeaveNotices = realtimeNotices.filter((notice) => notice.kind === "group.member.left");
 
-  const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
-
   // ESC 关闭
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -69,15 +64,6 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
-
-  // 爱莉入口（私信 tab 顶部）
-  useEffect(() => {
-    getElysiaProfile()
-      .then((p) => setElysiaProfile(p.enabled ? p : null))
-      .catch(() => {
-        /* 爱莉入口静默降级：加载失败不展示 */
-      });
-  }, []);
 
   // 认证消息数据（与 /messages 认证消息 tab 同源：好友申请/群邀请/退群通知/入群申请）
   const refreshSocial0 = friendRequestPage.refresh;
@@ -109,14 +95,6 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
   const requestBadgeCount = badges ? useBadgesStore.getState().requestBadge() : 0;
 
   const refreshBadges = () => void useBadgesStore.getState().fetch();
-
-  // 打开与某用户（爱莉/会话）的私聊，栏内联（不跳路由）
-  const openUserChat = useCallback((userId: string) => {
-    chatApi
-      .openPrivateConversation(userId)
-      .then((conv) => setActiveChatId(conv.id))
-      .catch(() => {});
-  }, []);
 
   const handleFriendAction = useCallback((req: FriendRequest, action: "accept" | "reject") => {
     usersApi
@@ -217,13 +195,9 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
           </div>
         ) : tab === "chat" ? (
           <div className="messages-private quick-messages-private">
-            {elysiaProfile && (
-              <ElysiaEntry profile={elysiaProfile} onEnter={() => openUserChat(elysiaProfile.user.id)} />
-            )}
             <ConversationList
               conversations={privateConvs}
               activeId={null}
-              elysiaUserId={elysiaProfile?.user.id ?? null}
               onSelect={(id) => setActiveChatId(id)}
               disableAvatarNav
             />

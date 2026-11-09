@@ -446,20 +446,6 @@ export interface SubGroup {
   created_at: string;
 }
 
-/* ================= M5-2 爱莉 profile（对齐 backend/apps/elysia_bridge/serializers.py） ================= */
-
-/** ElysiaProfileSerializer 读字段 */
-export interface ElysiaProfile {
-  id: number;
-  user: UserPublic;
-  stream_id: string;
-  platform: string;
-  enabled: boolean;
-  display_name: string;
-  chat_type: "private" | "group";
-  created_at: string;
-}
-
 /* ================= Chat WS 帧（对齐 backend/apps/chat/consumers.py） ================= */
 
 export interface ChatSubscribedFrame {
@@ -560,20 +546,6 @@ export interface TypingFrame {
 export interface HistorySyncFrame {
   type: "history.sync";
   data: { conversation_id: string; last_seq: number };
-}
-
-export interface ElysiaReplyFrame {
-  type: "elysia.reply";
-  data: {
-    conversation_id: string;
-    message_id: string;
-    sender_id: string;
-    content: string;
-    type: MessageType;
-    seq: number;
-    event_id: string;
-    ts: string;
-  };
 }
 
 export interface GroupRequestNewFrame {
@@ -838,7 +810,6 @@ export type ChatServerFrame =
   | MessagePokeFrame
   | TypingFrame
   | HistorySyncFrame
-  | ElysiaReplyFrame
   | SubGroupChangedFrame
   | SubGroupDeletedFrame
   | SubGroupReadFrame
@@ -869,8 +840,6 @@ export type ChatServerFrame =
   | BoardgameRoomDeletedFrame
   | BoardgameRoomUpdatedFrame
   | FavoriteChangedFrame
-  | ElysiaVoiceCallStatusFrame
-  | ElysiaVoiceProjectedFrame
   | ChatErrorFrame
   | PongFrame;
 
@@ -959,77 +928,6 @@ export interface VoiceJoinResult {
 /** POST /voice/channels/<id>/media-token/ 返回（长时通话续签；与 join 的 media 同形） */
 export interface VoiceMediaTokenResult {
   media: VoiceMediaConfig;
-}
-
-/* ---------- 爱莉语音编排（对齐 elysia_bridge/views.py ElysiaVoiceCall*） ---------- */
-
-/** _call_status_data 暴露的安全字段 */
-export interface ElysiaVoiceCallStatus {
-  call_id: string;
-  episode_id: string | null;
-  state: string;
-  mode: string;
-  provider: string;
-  created_at: string;
-  updated_at: string;
-  resumable: boolean;
-  connected: boolean;
-  input_audio_bytes: number;
-  output_audio_bytes: number;
-  interruptions: number;
-  failure_reason: string | null;
-}
-
-/** _ticket_data（WS ticket 信息，不含 secret） */
-export interface ElysiaVoiceConnection {
-  url: string;
-  resource: string;
-  subprotocol: string;
-  expires_at: string;
-}
-
-/** POST /elysia/voice-calls/ 返回（reused=true 为单并发复用的正常路径） */
-export interface ElysiaVoiceCallCreateResult {
-  call: ElysiaVoiceCallStatus;
-  connection: ElysiaVoiceConnection | null;
-  reused: boolean;
-}
-
-/** POST .../text/ 与 .../end/ 返回 */
-export interface ElysiaVoiceCommandResult {
-  command_id: string;
-  status: string;
-  accepted: boolean;
-}
-
-/** POST .../poll/ 返回（一次性对账兜底；projected_total = 该通话已投影消息数） */
-export interface ElysiaVoicePollResult {
-  projected: unknown[];
-  total: number;
-  projected_total: number;
-}
-
-/**
- * elysia.voice.call.status —— 爱莉语音通话状态事件（后端 observer WS 事件驱动，
- * 替代前端 5s 状态轮询；通话是应用级单例，帧只含中性技术状态）。
- */
-export interface ElysiaVoiceCallStatusFrame {
-  type: "elysia.voice.call.status";
-  data: {
-    call: ElysiaVoiceCallStatus;
-  };
-}
-
-/**
- * elysia.voice.projected —— 爱莉语音转写投影计数事件（后端 observer WS 事件驱动，
- * 替代前端 10s 投影轮询；projected_total = 累计投影消息数，幂等覆盖）。
- */
-export interface ElysiaVoiceProjectedFrame {
-  type: "elysia.voice.projected";
-  data: {
-    call_id: string;
-    projected_total: number;
-  };
 }
 
 /* ---------- Voice WS 帧（对齐 backend/apps/voice/consumers.py） ---------- */

@@ -3,7 +3,6 @@
  * - 频道 REST：列表/建频道/详情字段对齐；join 503 显式暴露给调用方
  * - heartbeat 非成员 → 403
  * - leave 幂等
- * - 爱莉编排：reused=true 正常返回；文本注入空文本 400；502 爱莉侧不可用
  * - token 纪律：本层不打日志（无 console 调用可 grep 验证）
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -161,87 +160,5 @@ describe("api/voice 频道 REST", () => {
       next_cursor: "loop", has_more: true, total: 2,
     })));
     await expect(voiceApi.listVoiceChannelMembers("1")).rejects.toThrow("继续位置");
-  });
-});
-
-describe("api/voice 爱莉语音编排", () => {
-  const callStatus = {
-    call_id: "call-1",
-    episode_id: "ep-1",
-    state: "active",
-    mode: "auto",
-    provider: "voice_live",
-    created_at: "t",
-    updated_at: "t",
-    resumable: true,
-    connected: true,
-    input_audio_bytes: 0,
-    output_audio_bytes: 0,
-    interruptions: 0,
-    failure_reason: null,
-  };
-
-  it("createElysiaVoiceCall → reused=true 正常返回（单并发复用不是错误）", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ call: callStatus, connection: null, reused: true }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const result = await voiceApi.createElysiaVoiceCall();
-    expect(result.reused).toBe(true);
-    expect(result.call.call_id).toBe("call-1");
-  });
-
-  it("sendElysiaVoiceText 空文本 → 后端 400（前端应先拦截）", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(jsonResponse({ detail: "text 不能为空" }, 400));
-    vi.stubGlobal("fetch", fetchMock);
-    const err = await voiceApi.sendElysiaVoiceText("call-1", "").catch((e) => e);
-    expect((err as ApiError).status).toBe(400);
-  });
-
-  it("sendElysiaVoiceText 正常 → {command_id, status, accepted}", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ command_id: "cmd-1", status: "accepted", accepted: true }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const result = await voiceApi.sendElysiaVoiceText("call-1", "你好");
-    expect(result.accepted).toBe(true);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body).toEqual({ text: "你好" });
-  });
-
-  it("endElysiaVoiceCall 幂等：重复结束都成功", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ command_id: "cmd-2", status: "ended", accepted: true }))
-      .mockResolvedValueOnce(jsonResponse({ command_id: "cmd-2", status: "ended", accepted: true }));
-    vi.stubGlobal("fetch", fetchMock);
-    await voiceApi.endElysiaVoiceCall("call-1");
-    await voiceApi.endElysiaVoiceCall("call-1");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("pollElysiaVoiceCall → {projected, total}", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ projected: [{ event_id: "e1" }], total: 3 }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const result = await voiceApi.pollElysiaVoiceCall("call-1");
-    expect(result.total).toBe(3);
-  });
-
-  it("profile 未配置 → 503；Elysium 侧错误 → 502", async () => {
-    const fetch503 = vi.fn().mockResolvedValue(jsonResponse({ detail: "爱莉 profile 尚未初始化" }, 503));
-    vi.stubGlobal("fetch", fetch503);
-    const err503 = await voiceApi.createElysiaVoiceCall().catch((e) => e);
-    expect((err503 as ApiError).status).toBe(503);
-
-    const fetch502 = vi.fn().mockResolvedValue(
-      jsonResponse({ detail: "Elysium 侧错误: boom", code: "elysia_error" }, 502),
-    );
-    vi.stubGlobal("fetch", fetch502);
-    const err502 = await voiceApi.getElysiaVoiceCall("call-1").catch((e) => e);
-    expect((err502 as ApiError).status).toBe(502);
   });
 });

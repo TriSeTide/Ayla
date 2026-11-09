@@ -12,7 +12,7 @@
  *   上层 slider（透明轨道 + indigo 圆把手）；
  *   - 自己条目：设定 = 本地麦克风音量（0~100），跳动随 localAudioLevel；
  *   - 远端条目：设定 = 本地播放音量（0~100），跳动随 member.audioLevel；
- * - 爱莉条目（isElysia）：头像光环区分，状态显示与普通成员一致。
+ * - 成员头像光环统一按在线状态渲染，无按用户身份的额外样式分支。
  */
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
@@ -92,7 +92,6 @@ function VoiceVolumeMeter({
 export function VoiceMemberRow({
   member,
   isSelf,
-  isElysia,
   onVolumeChange,
   onLocalVolumeChange,
   onToggleMic,
@@ -100,8 +99,6 @@ export function VoiceMemberRow({
 }: {
   member: VoiceMemberState;
   isSelf: boolean;
-  /** 爱莉条目（profile.user.id 命中）；只影响头像光环 */
-  isElysia: boolean;
   onVolumeChange: (userId: string, volume: number) => void;
   /** 本地麦克风音量 0~100（自己说话别人听到的响度） */
   onLocalVolumeChange: (volume: number) => void;
@@ -144,7 +141,6 @@ export function VoiceMemberRow({
         label={displayName}
         size={32}
         online={memberOnline}
-        isElysia={isElysia}
         imageUrl={user?.avatar || null}
         onClick={() => goUserProfile(currentUserId, member.user_id)}
         ariaLabel={`查看 ${displayName} 的个人主页`}

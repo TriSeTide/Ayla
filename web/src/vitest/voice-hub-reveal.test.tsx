@@ -12,9 +12,6 @@ import { useShellStore } from "../stores/shell";
 import { useVoiceStore } from "../stores/voice";
 import { disposeDirectoryTracking } from "../stores/directory";
 
-vi.mock("../api/elysia", () => ({
-  getElysiaProfile: vi.fn().mockResolvedValue({ enabled: false, user: null }),
-}));
 vi.mock("../api/voice", () => ({
   listVoiceChannels: vi.fn(),
   listVoiceChannelsPage: vi.fn(),

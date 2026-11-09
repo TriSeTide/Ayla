@@ -17,7 +17,6 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { motion, useIsPresent } from "framer-motion";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "../../api/client";
-import { getElysiaProfile } from "../../api/elysia";
 import * as chatApi from "../../api/chat";
 import type { ChatMessage, ConversationMember, SubGroup } from "../../api/types";
 import { MessageInput, type MessageInputHandle } from "../../components/chat/MessageInput";
@@ -53,7 +52,6 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
   const messages = bucket?.messages ?? [];
 
   const [quote, setQuote] = useState<ChatMessage | null>(null);
-  const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
   const subgroupPage = useSocialPage("subgroups", { groupId }, active);
   // 窄屏选项卡默认收起；同一按钮始终持有焦点，展开不重挂输入框。
   const [subgroupsCollapsed, setSubgroupsCollapsed] = useState(true);
@@ -124,21 +122,6 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
     establishingSelection,
   );
   const subgroupComposerRef = usePanelSwapMotion<HTMLDivElement>(subgroupSelection, ":scope > .composer", active && !establishingSelection);
-
-  // 爱莉身份（U1：群聊爱莉消息专属气泡判定，与 PrivateChatPane/MessagesPage 同数据源）
-  useEffect(() => {
-    let cancelled = false;
-    getElysiaProfile()
-      .then((p) => {
-        if (!cancelled) setElysiaUserId(p.user?.id ?? null);
-      })
-      .catch(() => {
-        // profile 未初始化/加载失败 → elysiaUserId 保持 null（无爱莉气泡判定）
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const activeConv = useMemo(
     () => conversations.find((c) => c.id === groupId) ?? null,
@@ -296,7 +279,6 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
         key={`${groupId}:${activeSubgroupId ?? "all"}`}
         messages={messages}
         conversation={activeConv}
-        elysiaUserId={elysiaUserId}
         hasMore={bucket?.hasMore ?? false}
         loading={bucket?.loading ?? false}
         onLoadMore={() =>

@@ -30,7 +30,6 @@ vi.mock("../api/chat", () => ({
   listConversationMembersPage: vi.fn(),
   sendPoke: vi.fn().mockResolvedValue({}),
 }));
-vi.mock("../api/elysia", () => ({ getElysiaProfile: vi.fn(() => new Promise(() => {})) }));
 vi.mock("../ws/chat", () => ({ chatWS: { subscribe: vi.fn() } }));
 vi.mock("../hooks/useChat", async () => ({
   messageInSubgroup: (await vi.importActual<typeof import("../hooks/useChat")>("../hooks/useChat")).messageInSubgroup,

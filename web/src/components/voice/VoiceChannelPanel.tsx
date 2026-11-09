@@ -5,7 +5,6 @@
  * - 控制条复用 VoiceControls。
  */
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import type { ElysiaProfile } from "../../api/types";
 import * as voiceApi from "../../api/voice";
 import { useAuthStore } from "../../stores/auth";
 import type { LiveKitConnectionState } from "../../stores/voice";
@@ -21,7 +20,6 @@ export function VoiceChannelPanel({
   channelId,
   ownerId,
   livekit,
-  elysiaProfile,
   onToggleMic,
   onLeave,
   onRejoin,
@@ -33,7 +31,6 @@ export function VoiceChannelPanel({
   channelId?: string;
   ownerId?: string;
   livekit: LiveKitConnectionState;
-  elysiaProfile: ElysiaProfile | null;
   onToggleMic: () => void;
   onLeave: () => void;
   onRejoin: () => void;
@@ -74,7 +71,6 @@ export function VoiceChannelPanel({
   // 渲染层已兜底自己可见，这里纠正分页数据本身（joined 帧若在订阅前广播则不会触发 invalidate）。
   const selfInStore = useVoiceStore((s) => (selfId != null ? s.members[selfId] != null : false));
   const refreshedChannelRef = useRef<string | null>(null);
-  const elysiaUserId = elysiaProfile?.user.id ?? null;
   const isOwner = ownerId != null && ownerId === currentUser?.id;
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   useEffect(() => { setInvalidated(false); setBusyUserId(null); }, [scope]);
@@ -123,14 +119,12 @@ export function VoiceChannelPanel({
           !pages.loading && !pages.error && <div className="voice-list-empty">当前还没有成员</div>
         ) : (
           mergedList.map((m) => {
-            const isElysia = elysiaUserId != null && m.user_id === elysiaUserId;
             return (
               <Fragment key={m.user_id}>
               <VoiceMemberRow
                 key={m.user_id}
                 member={m}
                 isSelf={m.user_id === currentUser?.id}
-                isElysia={isElysia}
                 onVolumeChange={onVolumeChange}
                 onLocalVolumeChange={onLocalVolumeChange}
                 onToggleMic={onToggleMic}

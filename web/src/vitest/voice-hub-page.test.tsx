@@ -22,10 +22,6 @@ import { useVoiceStore } from "../stores/voice";
 import { disposeDirectoryTracking } from "../stores/directory";
 
 // mock 一律用纯 async 实现（不用 mockResolvedValue）：不受 restoreAllMocks/clearAllMocks 影响
-vi.mock("../api/elysia", () => ({
-  getElysiaProfile: async () => ({ enabled: false }),
-}));
-
 vi.mock("../api/voice", async () => {
   const actual = await vi.importActual<typeof import("../api/voice")>("../api/voice");
   const channel = {

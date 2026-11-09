@@ -29,9 +29,6 @@ import { clearScrollMemory, saveScrollPosition } from "../hooks/useScrollRestore
 
 /* ---------------- 语音 ---------------- */
 
-vi.mock("../api/elysia", () => ({
-  getElysiaProfile: async () => ({ enabled: false, user: null }),
-}));
 vi.mock("../api/voice", async () => {
   const actual = await vi.importActual<typeof import("../api/voice")>("../api/voice");
   return { ...actual, listVoiceChannelsPage: vi.fn() };

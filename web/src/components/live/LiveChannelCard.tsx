@@ -9,14 +9,19 @@ import { ResourceImage } from "../ResourceImage";
 import { formatViewerCount, liveViewerBadge } from "../../utils/liveViewers";
 
 /** The same cover/title/source card serves the hall and read-only directory projections. */
-export function LiveChannelCard({ channel, onEnter, ownerName, isElysia = false, revealDelay, action }: {
+export function LiveChannelCard({ channel, onEnter, ownerName, revealDelay, action, isElysia }: {
   channel: LiveCardData;
   onEnter: () => void;
   ownerName?: string;
-  isElysia?: boolean;
   revealDelay?: number;
   /** undefined keeps the scene's favorite control; null removes it. */
   action?: ReactNode;
+  /**
+   * 爱莉专属角标（视觉身份层，.live-badge-elysia）。
+   * 爱莉 profile 接口与 elysiaUserId 传递链已删除，当前没有调用方传 true，
+   * 分支恒不成立；保留组件与样式，等待新的对接方案接回。
+   */
+  isElysia?: boolean;
 }) {
   const labels = cardVisibilityLabels(channel);
   const owner = channel.owner_nickname || ownerName;
@@ -32,8 +37,8 @@ export function LiveChannelCard({ channel, onEnter, ownerName, isElysia = false,
         {channel.cover ? <ResourceImage src={channel.cover} alt="" className="live-card-cover-image" />
           : <IconVideo width={28} height={28} aria-hidden="true" />}
         <span className="live-card-cover-badge">
-          {status && <span className={`live-badge ${status.className}`}>{status.label}</span>}
           {isElysia && <span className="live-badge live-badge-elysia">爱莉</span>}
+          {status && <span className={`live-badge ${status.className}`}>{status.label}</span>}
         </span>
         {viewers != null && (
           <span className="live-card-viewers" aria-label={`${viewers} 人在看`}>

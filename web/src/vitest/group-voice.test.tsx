@@ -30,10 +30,6 @@ vi.mock("../api/voice", () => ({
 const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
 let animatedCards: Array<{ node: HTMLElement; delay: number | undefined }>;
 
-vi.mock("../api/elysia", () => ({
-  getElysiaProfile: vi.fn().mockResolvedValue({ enabled: false, user: null }),
-}));
-
 vi.mock("../components/voice/VoiceRoomBody", () => ({
   VoiceRoomBody: (props: { channelName: string; onLeave: () => void; onRejoin: () => void; livekit: string; connectionError?: string | null }) => (
     <div>

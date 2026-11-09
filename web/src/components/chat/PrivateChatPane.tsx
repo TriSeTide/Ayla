@@ -8,7 +8,6 @@
 import { useEffect, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, useIsPresent } from "framer-motion";
 import type { ChatMessage } from "../../api/types";
-import { getElysiaProfile } from "../../api/elysia";
 import { getUserDetail } from "../../api/users";
 import * as chatApi from "../../api/chat";
 import { Avatar } from "../Avatar";
@@ -57,11 +56,10 @@ export function PrivateChatPane({
   const [quote, setQuote] = useState<ChatMessage | null>(null);
   const [peerTyping, setPeerTyping] = useState<Record<string, boolean>>({});
 
-  // 精确查询当前对端好友关系；爱莉身份由独立配置接口返回。
+  // 精确查询当前对端好友关系。
   // friendsLoaded=false（加载中/失败）→ 视为未知，不禁用输入（后端 403 权威拦截）。
   const [peerIsFriend, setPeerIsFriend] = useState(false);
   const [friendsLoaded, setFriendsLoaded] = useState(false);
-  const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
 
   const conv = useMemo(
     () => conversations.find((c) => c.id === conversationId) ?? null,
@@ -78,13 +76,6 @@ export function PrivateChatPane({
       setPeerIsFriend(user.relation === "friend" || user.relation === "self");
       setFriendsLoaded(true);
     }).catch(() => { /* Unknown relationship remains server-authorized. */ });
-    getElysiaProfile()
-      .then((p) => {
-        if (!cancelled) setElysiaUserId(p.user?.id ?? null);
-      })
-      .catch(() => {
-        // profile 未初始化/加载失败 → elysiaUserId 保持 null（走好友判断即可）
-      });
     return () => {
       cancelled = true;
     };
@@ -154,12 +145,11 @@ export function PrivateChatPane({
   const peerOnline = usePresenceOnline(peer);
   const peerDisplayStatus = useDisplayStatus(peer);
   const title = peer?.nickname || peer?.username || "私聊";
-  // 非好友禁发：私聊 + 对端已知 + 好友列表已加载 + 对端不是爱莉 + 对端不在好友列表
+  // 非好友禁发：私聊 + 对端已知 + 好友列表已加载 + 对端不在好友列表
   const blocked =
     conv?.type === "private" &&
     peer != null &&
     friendsLoaded &&
-    !(elysiaUserId != null && peer.id === elysiaUserId) &&
     !peerIsFriend;
 
   return (
@@ -191,7 +181,7 @@ export function PrivateChatPane({
           online={peerOnline}
           imageUrl={peer?.avatar || null}
           onClick={
-            !disableAvatarNav && peer && !(elysiaUserId != null && peer.id === elysiaUserId)
+            !disableAvatarNav && peer
               ? () => goUserProfile(null, peer.id)
               : undefined
           }
@@ -218,7 +208,6 @@ export function PrivateChatPane({
       <MessageList
         messages={messages}
         conversation={conv}
-        elysiaUserId={elysiaUserId}
         hasMore={bucket?.hasMore ?? false}
         loading={bucket?.loading ?? false}
         onLoadMore={() => loadMoreHistory(conversationId)}

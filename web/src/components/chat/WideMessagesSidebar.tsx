@@ -16,10 +16,9 @@ import * as chatApi from "../../api/chat";
 import { useSocialPage } from "../../hooks/useSocialPage";
 import { DirectoryLoadMore } from "../../components/DirectoryLoadMore";
 import * as usersApi from "../../api/users";
-import type { ElysiaProfile, FriendRequest, GroupInvite, GroupJoinRequest } from "../../api/types";
+import type { FriendRequest, GroupInvite, GroupJoinRequest } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { ConversationList } from "./ConversationList";
-import { ElysiaEntry } from "./ElysiaEntry";
 import { useBadgesStore } from "../../stores/badges";
 import { useChatStore, sortPrivateByActivity } from "../../stores/chat";
 import { useAuthStore } from "../../stores/auth";
@@ -81,18 +80,9 @@ export function WideMessagesSidebar({
   const realtimeNotices = useNoticeStore((state) => state.notices);
   const dismissNotice = useNoticeStore((state) => state.dismiss);
   const realtimeLeaveNotices = realtimeNotices.filter((notice) => notice.kind === "group.member.left");
-  const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   const [removingFriendId, setRemovingFriendId] = useState<string | null>(null);
 
-  // 爱莉入口（私信 tab 顶部）
-  useEffect(() => {
-    import("../../api/elysia")
-      .then(({ getElysiaProfile }) => getElysiaProfile())
-      .then((p) => setElysiaProfile(p.enabled ? p : null))
-      .catch(() => {});
-  }, []);
-
-  // 打开与某用户的私聊会话（好友/爱莉点击 → 选中会话）
+  // 打开与某用户的私聊会话（好友点击 → 选中会话）
   const openUserChat = useCallback(
     (userId: string) => {
       chatApi.openPrivateConversation(userId)
@@ -212,17 +202,10 @@ export function WideMessagesSidebar({
 
       {tab === "chat" ? (
         <div className="messages-private">
-          {elysiaProfile && (
-            <ElysiaEntry
-              profile={elysiaProfile}
-              onEnter={() => openUserChat(elysiaProfile.user.id)}
-            />
-          )}
           <ConversationList
             key={revealNonce}
             conversations={privateConversations}
             activeId={activeId}
-            elysiaUserId={elysiaProfile?.user?.id}
             onSelect={onSelect}
             revealItems={!loading}
           />

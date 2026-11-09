@@ -9,7 +9,6 @@ import type { VoiceChannelDescriptor } from "../api/types";
 
 const stubs = vi.hoisted(() => ({ join: vi.fn(), refresh: vi.fn(), resetLocal: vi.fn() }));
 vi.mock("../api/voice", () => ({ deleteVoiceChannel: vi.fn(), getVoiceChannel: vi.fn() }));
-vi.mock("../api/elysia", () => ({ getElysiaProfile: async () => ({ enabled: false }) }));
 vi.mock("../ws/voice", () => ({ voiceWS: { connect: vi.fn() } }));
 vi.mock("../hooks/useListEntryMotion", () => ({ useListEntryMotion: vi.fn() }));
 vi.mock("../hooks/useDirectoryPage", () => ({ useDirectoryPage: () => ({ items: [], refresh: stubs.refresh, loading: false }) }));

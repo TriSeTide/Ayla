@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as voiceApi from "../../api/voice";
 import { uploadMediaFile, mediaContentUrl, resolveMediaPath } from "../../api/media";
-import type { ElysiaProfile, VoiceChannelDescriptor } from "../../api/types";
+import type { VoiceChannelDescriptor } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
 import { ShareButton } from "../share/ShareButton";
 import { voiceSharePayload } from "../../utils/sharePayload";
@@ -39,7 +39,6 @@ export function VoiceRoomBody({
   ownerId,
   channel,
   livekit,
-  elysiaProfile,
   onToggleMic,
   onLeave,
   onRejoin,
@@ -57,7 +56,6 @@ export function VoiceRoomBody({
   /** 完整的频道对象，用于显示标签等信息 */
   channel?: VoiceChannelDescriptor | null;
   livekit: LiveKitConnectionState;
-  elysiaProfile: ElysiaProfile | null;
   onToggleMic: () => void;
   onLeave: () => void;
   onRejoin: () => void;
@@ -303,7 +301,6 @@ export function VoiceRoomBody({
             channelId={channelId}
             ownerId={ownerId}
             livekit={livekit}
-            elysiaProfile={elysiaProfile}
             onToggleMic={onToggleMic}
             onLeave={onLeave}
             onRejoin={onRejoin}

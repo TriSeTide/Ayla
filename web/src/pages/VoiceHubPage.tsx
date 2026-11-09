@@ -8,9 +8,7 @@
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { getElysiaProfile } from "../api/elysia";
 import * as voiceApi from "../api/voice";
-import type { ElysiaProfile } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { VoiceRoomBody } from "../components/voice/VoiceRoomBody";
 import { VoiceChannelList } from "../components/voice/VoiceChannelList";
@@ -63,7 +61,6 @@ export function VoiceHubPage() {
     owner: filter === "mine" ? currentUserId : undefined,
   }, !routeChannelId);
   const channelsLoading = directory.loading;
-  const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   // 删除语音房确认弹窗
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const hubRef = useRef<HTMLDivElement>(null);
@@ -145,18 +142,6 @@ export function VoiceHubPage() {
     voiceWS.connect();
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    getElysiaProfile()
-      .then((p) => {
-        if (!cancelled) setElysiaProfile(p.enabled ? p : null);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const handleJoin = useCallback(
     async (channelId: string) => {
       navigate(`/voice/${encodeURIComponent(channelId)}`);
@@ -219,7 +204,6 @@ export function VoiceHubPage() {
             channelName={currentChannel.name}
             channel={currentChannel}
             livekit={joining ? "connecting" : joinError ? "failed" : currentChannelId === currentChannel.id ? livekit : "idle"}
-            elysiaProfile={elysiaProfile}
             groupId={currentChannel.group}
             onToggleMic={() => void toggleMic()}
             onLeave={() => void handleLeave()}

@@ -28,9 +28,6 @@ vi.mock("../api/live", () => ({
   getLiveChannel: vi.fn(),
   getLiveChannelStatus: vi.fn(),
 }));
-vi.mock("../api/elysia", () => ({
-  getElysiaProfile: vi.fn().mockResolvedValue({ enabled: false, user: null }),
-}));
 vi.mock("../utils/navigation", () => ({
   goUserProfile: vi.fn(),
   navigateTo: vi.fn(),

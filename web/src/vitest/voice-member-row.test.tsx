@@ -70,8 +70,7 @@ describe("VoiceMemberRow", () => {
       <VoiceMemberRow
         member={member()}
         isSelf
-        isElysia={false}
-        onVolumeChange={vi.fn()}
+          onVolumeChange={vi.fn()}
         onLocalVolumeChange={vi.fn()}
         onToggleMic={vi.fn()}
         onToggleMemberMuted={vi.fn()}
@@ -97,8 +96,7 @@ describe("VoiceMemberRow", () => {
       <VoiceMemberRow
         member={member()}
         isSelf
-        isElysia={false}
-        onVolumeChange={vi.fn()}
+          onVolumeChange={vi.fn()}
         onLocalVolumeChange={vi.fn()}
         onToggleMic={onToggleMic}
         onToggleMemberMuted={vi.fn()}
@@ -116,8 +114,7 @@ describe("VoiceMemberRow", () => {
       <VoiceMemberRow
         member={member()}
         isSelf
-        isElysia={false}
-        onVolumeChange={vi.fn()}
+          onVolumeChange={vi.fn()}
         onLocalVolumeChange={vi.fn()}
         onToggleMic={vi.fn()}
         onToggleMemberMuted={vi.fn()}
@@ -133,8 +130,7 @@ describe("VoiceMemberRow", () => {
       <VoiceMemberRow
         member={member()}
         isSelf
-        isElysia={false}
-        onVolumeChange={vi.fn()}
+          onVolumeChange={vi.fn()}
         onLocalVolumeChange={onLocalVolumeChange}
         onToggleMic={vi.fn()}
         onToggleMemberMuted={vi.fn()}
@@ -151,8 +147,7 @@ describe("VoiceMemberRow", () => {
       <VoiceMemberRow
         member={member({ user_id: "u_other", volume: 40, audioLevel: 0.31 })}
         isSelf={false}
-        isElysia={false}
-        onVolumeChange={vi.fn()}
+          onVolumeChange={vi.fn()}
         onLocalVolumeChange={vi.fn()}
         onToggleMic={vi.fn()}
         onToggleMemberMuted={vi.fn()}
@@ -173,8 +168,7 @@ describe("VoiceMemberRow", () => {
       <VoiceMemberRow
         member={member({ user_id: "u_other", locallyMuted: true, audioLevel: 0.9 })}
         isSelf={false}
-        isElysia={false}
-        onVolumeChange={vi.fn()}
+          onVolumeChange={vi.fn()}
         onLocalVolumeChange={vi.fn()}
         onToggleMic={vi.fn()}
         onToggleMemberMuted={onToggleMemberMuted}
@@ -195,8 +189,7 @@ describe("VoiceMemberRow", () => {
       <VoiceMemberRow
         member={member({ user_id: "u_other" })}
         isSelf={false}
-        isElysia={false}
-        onVolumeChange={onVolumeChange}
+          onVolumeChange={onVolumeChange}
         onLocalVolumeChange={vi.fn()}
         onToggleMic={vi.fn()}
         onToggleMemberMuted={vi.fn()}

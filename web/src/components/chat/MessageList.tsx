@@ -120,7 +120,6 @@ function scrollToBottom(element: HTMLElement) {
 export function MessageList({
   messages,
   conversation,
-  elysiaUserId,
   hasMore,
   loading,
   onLoadMore,
@@ -143,8 +142,6 @@ export function MessageList({
 }: {
   messages: ChatMessage[];
   conversation: ConversationSummary | null;
-  /** 爱莉 profile 的 user.id：匹配 sender_id 即爱莉专属气泡 */
-  elysiaUserId?: string | null;
   hasMore: boolean;
   loading: boolean;
   /** 可返回 Promise；调用方仍拥有 API 错误展示职责。 */
@@ -1059,7 +1056,10 @@ export function MessageList({
                 <MessageBubble
                   message={m}
                   isSelf={isSelf}
-                  isElysia={elysiaUserId != null && m.sender_id === elysiaUserId}
+                  // ⚠️ 当前无数据来源（2026-11 爱莉前端对接层撤下）：爱莉身份判定的
+                  // profile 接口已删除，isElysia 恒为 false。MessageBubble 内的
+                  // bubble-elysia 样式分支与 token 属视觉身份层，保留待新对接接回。
+                  isElysia={false}
                   justArrived={justArrivedIds.has(m.id)}
                   // ⚠️ **2026-10-26 修复（退群成员头像）**：此前只从 `conversation.members`
                   // 反查昵称/头像，**成员退群后就不在成员表里** ⇒ 历史消息头像失去名字

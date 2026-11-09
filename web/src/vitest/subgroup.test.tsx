@@ -488,9 +488,6 @@ describe("GroupChat 子群选项卡", () => {
     ]),
     sendPoke: vi.fn().mockResolvedValue({}),
   }));
-  vi.mock("../api/elysia", () => ({
-    getElysiaProfile: vi.fn().mockResolvedValue({ user: { id: "me" } }),
-  }));
   vi.mock("../hooks/useChat", async () => ({
     messageInSubgroup: (await vi.importActual<typeof import("../hooks/useChat")>("../hooks/useChat")).messageInSubgroup,
     loadHistory: vi.fn().mockResolvedValue([]),

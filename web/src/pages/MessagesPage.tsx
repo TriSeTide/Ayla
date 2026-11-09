@@ -13,14 +13,12 @@ import { useNavigate } from "react-router-dom";
 import * as chatApi from "../api/chat";
 import { useSocialPage } from "../hooks/useSocialPage";
 import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
-import { getElysiaProfile } from "../api/elysia";
 import * as usersApi from "../api/users";
-import type { ElysiaProfile, FriendRequest, GroupInvite, GroupJoinRequest, UserPublic } from "../api/types";
+import type { FriendRequest, GroupInvite, GroupJoinRequest, UserPublic } from "../api/types";
 import { Avatar } from "../components/Avatar";
 import { PrivateChatPane } from "../components/chat/PrivateChatPane";
 import { WideMessagesSidebar } from "../components/chat/WideMessagesSidebar";
 import { ConversationList } from "../components/chat/ConversationList";
-import { ElysiaEntry } from "../components/chat/ElysiaEntry";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { ConversationTransition } from "../components/motion/ConversationTransition";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
@@ -69,15 +67,7 @@ export function MessagesPage() {
   const privateRef = useRef<HTMLDivElement>(null);
   // §3.4 刷新动画：刷新完成后递增，key 变化强制会话列表重挂载 → reveal 重播
   const [revealNonce, setRevealNonce] = useState(0);
-  const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   const [removingFriendId, setRemovingFriendId] = useState<string | null>(null);
-
-  // 爱莉入口（私信 tab 顶部）
-  useEffect(() => {
-    getElysiaProfile()
-      .then((p) => setElysiaProfile(p.enabled ? p : null))
-      .catch(() => {});
-  }, []);
 
   // 好友 tab 数据（窄屏用；宽屏由 WideMessagesSidebar 自理）
   const refreshSocial0 = friendsPage.refresh;
@@ -246,22 +236,10 @@ export function MessagesPage() {
       {tab === "chat" ? (
         <div className="messages-private" ref={privateRef}>
           <PullToRefresh isAtTop={isPrivateAtTop} onRefresh={refreshConversations}>
-            {elysiaProfile && (
-              <ElysiaEntry
-                profile={elysiaProfile}
-                onEnter={() => {
-                  chatApi
-                    .openPrivateConversation(elysiaProfile.user.id)
-                    .then((conv) => navigate(`/chat/${conv.id}`))
-                    .catch(() => {});
-                }}
-              />
-            )}
             <ConversationList
               key={revealNonce}
               conversations={privateConvs}
               activeId={null}
-              elysiaUserId={elysiaProfile?.user.id ?? null}
               onSelect={(id) => navigate(`/chat/${id}`)}
               revealItems={!conversationsLoading}
             />

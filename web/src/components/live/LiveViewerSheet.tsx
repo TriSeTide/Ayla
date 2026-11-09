@@ -14,7 +14,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getLiveChannelViewers } from "../../api/live";
 import type { LiveViewerItem } from "../../api/types";
-import { getElysiaProfile } from "../../api/elysia";
 import { useAuthStore } from "../../stores/auth";
 import { CreateSheet } from "../../layout/CreateSheet";
 import { Avatar } from "../Avatar";
@@ -39,7 +38,6 @@ export function LiveViewerSheet({
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
-  const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,20 +61,6 @@ export function LiveViewerSheet({
       cancelled = true;
     };
   }, [channelId, reloadToken]);
-
-  useEffect(() => {
-    let cancelled = false;
-    getElysiaProfile()
-      .then((profile) => {
-        if (!cancelled) setElysiaUserId(profile.enabled ? profile.user.id : null);
-      })
-      .catch(() => {
-        /* 爱莉档案不可用：名单照常展示，仅不标注爱莉光环 */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const rows = viewers ?? (error ? [] : preview);
   const total = count ?? rows.length;
@@ -128,7 +112,6 @@ export function LiveViewerSheet({
                       label={viewer.nickname}
                       size={36}
                       online
-                      isElysia={elysiaUserId != null && viewer.user_id === elysiaUserId}
                       imageUrl={viewer.avatar || null}
                     />
                     <span className="live-viewer-row-name">{viewer.nickname || "用户"}</span>

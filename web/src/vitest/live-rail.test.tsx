@@ -317,7 +317,6 @@ describe("LiveHall 大厅卡片封面占位", () => {
     render(
       <LiveHall
         channels={[liveCh(1, "爱莉电台", "live"), liveCh(2, "回放", "ended")]}
-        elysiaUserId="u1"
         ownerNames={{ u1: "爱莉", u2: "小樱" }}
         onEnter={onEnter}
       />,
@@ -329,8 +328,7 @@ describe("LiveHall 大厅卡片封面占位", () => {
     expect(screen.getByText("已结束")).toBeInTheDocument();
     // 来源标识（两个卡片都是公开）
     expect(screen.getAllByText("公开").length).toBe(2);
-    // 爱莉角标（owner 是 elysiaUserId）+ 主播名都渲染
-    expect(screen.getAllByText("爱莉").length).toBeGreaterThanOrEqual(2);
+    // 主播名渲染（爱莉角标已随对接层撤下，不再断言）
     expect(screen.getByText("小樱")).toBeInTheDocument();
     // 点击卡片进入
     screen.getByText("爱莉电台").click();
@@ -343,7 +341,6 @@ describe("LiveHall 大厅卡片封面占位", () => {
     render(
       <LiveHall
         channels={[ch]}
-        elysiaUserId={null}
         ownerNames={{ u1: "懒拉名字" }}
         onEnter={onEnter}
       />,

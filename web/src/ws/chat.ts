@@ -6,7 +6,7 @@
  * - 断开重连：指数退避 1s→2s→...→30s 上限；重连成功后对每个已订阅会话
  *   发 resume {last_message_seq: <该会话 lastSeq>} 补发
  * - 心跳：每 30s 发 ping（保活，Redis TTL）
- * - 事件分发：message.new/recall/read/typing/elysia.reply/history.sync → 对应 store/handler
+ * - 事件分发：message.new/recall/read/typing/history.sync → 对应 store/handler
  */
 import { useAuthStore } from "../stores/auth";
 import { useBadgesStore } from "../stores/badges";
@@ -879,58 +879,6 @@ export class ChatWSClient {
             d.target_id,
             d.action === "added" ? d.favorite_id : null,
           );
-        }
-        break;
-      }
-      case "elysia.reply": {
-        const d = frame.data;
-        const msg: ChatMessage = {
-          id: d.message_id,
-          conversation_id: d.conversation_id,
-          sender_id: d.sender_id,
-          type: d.type,
-          content: d.content,
-          media_id: null,
-          reply_to: null,
-          read_by_me: false,
-          status: "sent",
-          seq: d.seq,
-          created_at: d.ts,
-        };
-        message.upsertMessage(d.conversation_id, msg);
-        const conv = chat.conversations.find((c) => c.id === d.conversation_id);
-        if (conv) {
-          // 爱莉回复也要更新会话列表预览 + 群排序（与 message.new 对齐）。
-          chat.setLastMessage(conv.id, {
-            seq: d.seq,
-            type: d.type,
-            content: d.content,
-            sender_id: d.sender_id,
-            sender_name: previewSenderName(conv, d.sender_id),
-            status: "sent",
-            created_at: d.ts,
-            preview:
-              d.content ||
-              (d.type === "image" ? "[图片]" : d.type === "video" ? "[视频]" : d.type === "voice" ? "[语音]" : undefined),
-          });
-          if (conv.type === "group") chat.bumpGroupActivity(conv.id);
-        }
-        const atBottom =
-          chat.activeConversationId === d.conversation_id &&
-          (message.viewerAtBottom[d.conversation_id] ?? true);
-        if (atBottom) {
-          // 正在底部看最新消息：爱莉回复直接已读，不弹标签。
-          message.markReadByMe(d.conversation_id, d.message_id);
-          chatApi
-            .markMessageRead(d.conversation_id, d.message_id, true)
-            .then(() => useBadgesStore.getState().fetch())
-            .catch(() => { /* 已读失败，下次进入会话重试 */ });
-        } else {
-          chat.bumpUnread(d.conversation_id, { seq: d.seq });
-          if (!conv || conv.type === "private") {
-            // 爱莉回复多为私信：私信未读 → 全局消息入口红点实时刷新
-            void useBadgesStore.getState().fetch();
-          }
         }
         break;
       }

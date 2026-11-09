@@ -54,14 +54,12 @@ function previewLabel(conv: ConversationSummary): string {
 export function ConversationList({
   conversations,
   activeId,
-  elysiaUserId,
   onSelect,
   disableAvatarNav = false,
   revealItems = false,
 }: {
   conversations: ConversationSummary[];
   activeId: string | null;
-  elysiaUserId?: string | null;
   onSelect: (id: string) => void;
   /** 快捷消息栏内：头像不可点（不跳个人主页，R-QM） */
   disableAvatarNav?: boolean;
@@ -88,11 +86,10 @@ export function ConversationList({
           onlineUsers,
           withLiveStatus(onlineStatuses, conv.peer),
         );
-        const isElysia = elysiaUserId != null && conv.peer?.id === elysiaUserId;
         const title = isPrivate
           ? conv.peer?.nickname || conv.peer?.username || conv.title || "未命名会话"
           : conv.title || "未命名群聊";
-        const isOnline = isPrivate && (peerOnline || isElysia);
+        const isOnline = isPrivate && peerOnline;
         const delay = revealItems ? staggerDelay(idx) : 0;
         return (
           <li
@@ -110,8 +107,7 @@ export function ConversationList({
               <Avatar
                 label={title}
                 size={40}
-                online={isPrivate ? peerOnline || isElysia : false}
-                isElysia={isElysia}
+                online={isPrivate ? peerOnline : false}
                 imageUrl={isPrivate ? (conv.peer?.avatar || null) : (conv.avatar || null)}
                 onClick={
                   !disableAvatarNav && isPrivate && conv.peer

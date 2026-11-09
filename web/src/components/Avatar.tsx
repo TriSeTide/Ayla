@@ -26,7 +26,12 @@ export function Avatar({
   label?: string;
   size?: number;
   online?: boolean;
-  /** 爱莉专属光环（呼吸辉光），不可复用于普通用户（design.md §8 Don't） */
+  /**
+   * 爱莉专属光环（呼吸辉光），不可复用于普通用户（design.md §8 Don't）。
+   *
+   * ② 视觉身份层：当前无挂载点，等待新对接 —— 爱莉身份来源（profile）已撤下，
+   * 无调用方传 true，默认退化为普通头像。
+   */
   isElysia?: boolean;
   imageUrl?: string | null;
   style?: CSSProperties;

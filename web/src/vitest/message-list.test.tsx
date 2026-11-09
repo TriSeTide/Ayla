@@ -134,7 +134,6 @@ describe("MessageList U16 窗口化", () => {
       <MessageList
         messages={messages}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
@@ -154,7 +153,6 @@ describe("MessageList U16 窗口化", () => {
       <MessageList
         messages={messages}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={onLoadMore}
@@ -186,7 +184,6 @@ describe("MessageList U16 窗口化", () => {
       <MessageList
         messages={messages}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore
         loading={false}
         onLoadMore={onLoadMore}
@@ -218,7 +215,6 @@ describe("MessageList U16 窗口化", () => {
       <MessageList
         messages={messages}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
@@ -248,7 +244,6 @@ describe("MessageList U16 窗口化", () => {
       <MessageList
         messages={messages20}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore
         loading={false}
         onLoadMore={onLoadMore}
@@ -274,8 +269,7 @@ describe("MessageList U16 窗口化", () => {
         <MessageList
           messages={messages70}
           conversation={conversation()}
-          elysiaUserId={null}
-          hasMore
+            hasMore
           loading={false}
           onLoadMore={onLoadMore}
         />,
@@ -292,7 +286,6 @@ describe("MessageList U16 窗口化", () => {
       <MessageList
         messages={messages}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
@@ -357,7 +350,6 @@ describe("MessageList @ 我跳转（F9）", () => {
       <MessageList
         messages={messages}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
@@ -390,7 +382,6 @@ describe("MessageList @ 我跳转（F9）", () => {
       <MessageList
         messages={messages}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
@@ -414,7 +405,6 @@ describe("MessageList @ 我跳转（F9）", () => {
       <MessageList
         messages={messages}
         conversation={conv}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
@@ -442,7 +432,6 @@ describe("MessageList @ 我跳转（F9）", () => {
       <MessageList
         messages={[target, reply]}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
@@ -499,7 +488,6 @@ describe("MessageList 未读消息视口已读", () => {
       <MessageList
         messages={messages}
         conversation={conv}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
@@ -528,7 +516,6 @@ describe("MessageList 未读消息视口已读", () => {
       <MessageList
         messages={messages}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
@@ -553,7 +540,6 @@ describe("MessageList 外部跳转（收藏消息定位）", () => {
       <MessageList
         messages={messages}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
@@ -577,7 +563,6 @@ describe("MessageList 外部跳转（收藏消息定位）", () => {
       <MessageList
         messages={messages}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
@@ -601,7 +586,6 @@ describe("MessageList 外部跳转（收藏消息定位）", () => {
       <MessageList
         messages={messages}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
@@ -632,7 +616,6 @@ describe("MessageList 外部跳转（收藏消息定位）", () => {
       <MessageList
         messages={messages}
         conversation={conversation()}
-        elysiaUserId={null}
         hasMore={false}
         loading={false}
         onLoadMore={vi.fn()}
