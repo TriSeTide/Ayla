@@ -606,21 +606,31 @@ class AylaBrandWordmark extends StatelessWidget {
   Widget build(BuildContext context) {
     // 白描边：对齐 web 的 `-webkit-text-stroke: 0.35px` + `paint-order: stroke fill`。
     //
-    // Flutter 没有 text-stroke，等价做法是「先画一遍只有描边的文字，再叠渐变字」：
-    // 描边用 `Paint..style = stroke` 当 foreground，宽度取 2×（描边居中跨在字形轮廓上，
-    // 一半在里一半在外；先画的这一层被后画的填充字盖住内侧，视觉上只剩外侧 0.35px）。
-    final double strokeWidth = 2 * _kBrandStrokePx;
+    // Flutter 没有 text-stroke。等价做法是「描边字形 + 渐变填充字形」两层叠加：
+    // 描边宽度取 2×（描边居中跨在字形轮廓上，一半在里一半在外；后画的填充层盖住
+    // 内侧，视觉上只剩外侧 0.35px）。
+    //
+    // 描边层**不能是第二个 Text**：`find.text()` 按 widget 树里的 Text.data 匹配，
+    // 两层 Text 会让同一个字标命中 2 个 widget（2026-11-09 品牌基线红）。因此描边
+    // 改由 [_BrandStrokePainter] 用 Canvas 绘制，整棵子树只保留一个 Text。
+    final TextStyle strokeStyle = style.copyWith(
+      foreground: Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2 * _kBrandStrokePx
+        ..strokeJoin = StrokeJoin.round
+        ..color = AylaColors.brandStroke,
+    );
+    final TextPainter strokePainter = TextPainter(
+      text: TextSpan(text: text, style: strokeStyle),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.center,
+    )..layout();
     return Stack(
       children: <Widget>[
-        // ① 描边层（tofu 关：只影响宽高估算，不影响字形）
-        Text(
-          text,
-          style: style.copyWith(
-            foreground: Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = strokeWidth
-              ..strokeJoin = StrokeJoin.round
-              ..color = AylaColors.brandStroke,
+        // ① 描边层：纯 Canvas 绘制，不产生第二个 Text widget。
+        Positioned.fill(
+          child: IgnorePointer(
+            child: CustomPaint(painter: _BrandStrokePainter(strokePainter)),
           ),
         ),
         // ② 渐变填充层（盖住描边内侧，只留外侧细边）
@@ -637,6 +647,22 @@ class AylaBrandWordmark extends StatelessWidget {
       ],
     );
   }
+}
+
+/// 绘制字标白描边。与填充层共用同一段排版结果，避免出现第二个 `Text` widget。
+class _BrandStrokePainter extends CustomPainter {
+  const _BrandStrokePainter(this.painter);
+
+  final TextPainter painter;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    painter.paint(canvas, Offset((size.width - painter.width) / 2, (size.height - painter.height) / 2));
+  }
+
+  @override
+  bool shouldRepaint(_BrandStrokePainter oldDelegate) =>
+      oldDelegate.painter.text != painter.text || oldDelegate.painter.size != painter.size;
 }
 
 /// 白描边粗细（px）：对齐 logo 自带白色分隔带的比例，同 web 的 0.35px。
