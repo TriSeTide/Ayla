@@ -30,12 +30,6 @@ DATABASES = {
 
 DEBUG = False
 
-# 测试环境不内嵌启动 SSE 出站投影（避免测试触发 lifespan 时连接真实 Elysium）
-ELYSIA_BRIDGE_INLINE = False
-
-# 测试环境不启动 Voice Live observer 后台线程（避免 ensure 调用连接真实 Elysium）
-VOICE_OBSERVER_ENABLED = False
-
 # 测试环境强制清空 LIVEKIT_*：本机 backend/.env 可能配了真实密钥，测试不得读进来。
 # livekit 配置由用例用 override_settings 显式打开（见 apps/voice/tests/test_media_token.py）。
 LIVEKIT_API_KEY = ""

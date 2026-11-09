@@ -9,6 +9,7 @@ chat 视图 —— 私聊/群聊/消息/已读/撤回/群管理 REST。
 import logging
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Max, Q
 from django.utils import timezone
 from rest_framework import status
@@ -46,6 +47,26 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 User = get_user_model()
+
+
+def _notify_ayla_inbound(outbox_row) -> None:
+    """通知在线爱莉通道 consumer「有新入站待推」（D-3）。
+
+    只发一个「有新东西了」的组事件，**不携带消息正文**；正文由 consumer 自己
+    按 seq 读库，避免广播载荷成为第二条权威副本。失败只记日志——下一次
+    resume / 重连会从 outbox 补投，不影响用户消息落库。
+    """
+    try:
+        from apps.elysia_bridge import services as ayla_services
+
+        profile = ayla_services.profile_for_message(outbox_row.message)
+        if profile is None:
+            return
+        ayla_services.notify_inbound_ready(profile.id, outbox_row.seq)
+    except Exception:
+        logger.exception(
+            "ayla inbound notify failed for outbox row %s", getattr(outbox_row, "id", None)
+        )
 
 
 def _get_conv_or_404(conv_id):
@@ -590,19 +611,37 @@ class MessageView(APIView):
             if subgroup is None:
                 return _not_found("子群不存在")
 
-        msg = services.create_message(
-            request.user,
-            conv,
-            content=data.get("content") or "",
-            msg_type=data.get("type"),
-            reply_to=reply_to,
-            idempotency_key=key,
-            media_id=data.get("media_id"),
-            segments=data.get("segments"),
-            share_payload=data.get("share_payload"),
-            subgroup=subgroup,
-        )
-        # 戳一戳：独立广播帧（不进未读/已读/红点链路），也不 inject 爱莉主链
+        # 消息落库 + 爱莉通道入站登记（outbox）在同一事务内（REQUIREMENTS.zh.md §9）：
+        # 提交后 DSH 才可能读到这条待投递记录，不存在「消息已可见但 outbox 还没写」
+        # 或反之的窗口。
+        outbox_row = None
+        with transaction.atomic():
+            msg = services.create_message(
+                request.user,
+                conv,
+                content=data.get("content") or "",
+                msg_type=data.get("type"),
+                reply_to=reply_to,
+                idempotency_key=key,
+                media_id=data.get("media_id"),
+                segments=data.get("segments"),
+                share_payload=data.get("share_payload"),
+                subgroup=subgroup,
+            )
+            # 内层 atomic 是 savepoint：投递登记失败只回滚这一段，
+            # **不阻塞用户消息落库**（失败必须可观测，见下面的 logger.exception）。
+            try:
+                with transaction.atomic():
+                    from apps.elysia_bridge.services import enqueue_for_delivery
+
+                    outbox_row = enqueue_for_delivery(msg)
+            except Exception:
+                logger.exception(
+                    "ayla inbound enqueue failed for message %s (conv %s)",
+                    msg.id,
+                    conv.id,
+                )
+        # 戳一戳：独立广播帧（不进未读/已读/红点链路），也不进爱莉通道
         # （轻互动不是聊天内容，不进入 Elysium 意识通道）。
         if data.get("type") == Message.TYPE_POKE:
             services.broadcast_message_poke(msg)
@@ -612,14 +651,10 @@ class MessageView(APIView):
             )
         # 只有真正落库后才广播
         services.broadcast_message_new(msg)
-        # 爱莉桥接：若该会话对端是爱莉，把用户消息 inject 到 Elysium 主链
-        # （失败不阻塞/不回滚用户消息；仅告警，由桥接重试或人工处理）
-        try:
-            from apps.elysia_bridge.services import on_user_message_to_elysia
-
-            on_user_message_to_elysia(message=msg, conversation=conv)
-        except Exception:
-            logger.exception("elysia bridge inject failed for message %s", msg.id)
+        # 事务已提交：通知在线的通道 consumer 去推这条待投递消息。
+        # 广播失败不影响本次请求（下一次 resume / 重连会补投）。
+        if outbox_row is not None:
+            _notify_ayla_inbound(outbox_row)
         return Response(
             MessageSerializer(msg, context={"request": request}).data,
             status=status.HTTP_201_CREATED,

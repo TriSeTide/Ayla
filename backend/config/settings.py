@@ -259,28 +259,6 @@ MEDIA_TMP_DIR = Path(
 )
 MEDIA_TMP_DIR.mkdir(parents=True, exist_ok=True)
 
-# ---------- 爱莉桥接（M4-4） ----------
-# ELYSIA_BASE_URL：阶段三 Elysium API 根地址（不含 /api/v1 前缀，客户端拼接）。
-# ELYSIA_CREDENTIAL_FILE：service credential 一次性 secret 落盘路径（本机配置，
-#   Git 忽略，不提交仓库；access/refresh token 只存内存，重启后用它重换 session）。
-# ELYSIA_SSE_RECONNECT_SECONDS：SSE 断线重连的有界退避初始间隔。
-ELYSIA_BASE_URL = env.str("ELYSIA_BASE_URL", default="")
-ELYSIA_CREDENTIAL_FILE = env.str(
-    "ELYSIA_CREDENTIAL_FILE",
-    default=str(BASE_DIR / "runtime" / "elysia_credential.json"),
-)
-ELYSIA_SSE_RECONNECT_SECONDS = env.float("ELYSIA_SSE_RECONNECT_SECONDS", default=3.0)
-ELYSIA_SSE_EVENT_TYPES = env.list(
-    "ELYSIA_SSE_EVENT_TYPES", default=["chat.message"]
-)
-# 内嵌出站投影：ASGI lifespan 启动时在 Ayla 后端进程内运行 run_bridge_loop
-# （文件锁保证单实例）。关闭时需独立进程 `manage.py run_bridge`。
-ELYSIA_BRIDGE_INLINE = env.bool("ELYSIA_BRIDGE_INLINE", default=True)
-
-# 爱莉 Voice Live observer WS 订阅（事件驱动替代前端 5s/10s 轮询）：
-# 创建/复用通话时启动后台观察线程；测试/禁用时关闭。
-VOICE_OBSERVER_ENABLED = env.bool("VOICE_OBSERVER_ENABLED", default=True)
-
 # ---------- 客户端发布（更新检查） ----------
 # 发布产物与 manifest-<channel>.json 由 Ayla/scripts/publish_release.py 上传到
 # 服务器上的只读发布目录；Django 只读清单，不托管二进制（二进制由 nginx /releases/ 直出）。

@@ -11,7 +11,7 @@ import pytest
 
 from apps.accounts.models import Friendship
 from apps.chat.tests.helpers import auth_as, make_private, new_key
-from apps.elysia_bridge.models import ElysiaProfile, generate_elysia_stream_id
+from apps.elysia_bridge.models import ElysiaProfile
 
 NOT_FRIEND_MSG = "对方已不是你的好友，无法发送消息"
 
@@ -27,11 +27,7 @@ def _send(client, conv, content="你好"):
 def _make_elysia(user_factory, username):
     """建一个爱莉 profile 绑定的用户（应用内身份）。"""
     elysia = user_factory(username=username, nickname="爱莉")
-    ElysiaProfile.objects.create(
-        user=elysia,
-        stream_id=generate_elysia_stream_id(elysia.id),
-        enabled=True,
-    )
+    ElysiaProfile.objects.create(user=elysia, enabled=True)
     return elysia
 
 
@@ -135,11 +131,7 @@ class TestElysiaPrivateExemption:
     def test_disabled_elysia_still_exempt(self, auth_client, user_factory):
         """profile.enabled=False 不影响放行（好友校验只看身份绑定，不看开关）。"""
         elysia = user_factory(username="fp_e3", nickname="爱莉")
-        ElysiaProfile.objects.create(
-            user=elysia,
-            stream_id=generate_elysia_stream_id(elysia.id),
-            enabled=False,
-        )
+        ElysiaProfile.objects.create(user=elysia, enabled=False)
         ca, _ = auth_client(username="fp_a_e3")
         conv = ca.post(
             "/api/v1/chat/conversations/private/",

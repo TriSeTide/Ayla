@@ -1,28 +1,24 @@
-"""Ayla 后端一键启动器：runserver + 内嵌 SSE 出站投影（run_bridge）。
+"""Ayla 后端一键启动器：runserver。
 
 用法：
     python launcher.py                 # 默认 127.0.0.1:8100
     AYLA_HOST=0.0.0.0 AYLA_PORT=8000 python launcher.py
 
 设计（AGENTS.md §7 生命周期与 owner）：
-- 本启动器是 runserver 进程的 owner；run_bridge（SSE 出站投影）已内嵌到
-  ASGI lifespan（config/asgi.py → apps/elysia_bridge/inline.py），由
-  `ELYSIA_BRIDGE_INLINE`（默认 True）控制，无需第二个进程；
+- 本启动器是 runserver 进程的 owner；旧的内嵌 SSE 出站投影（run_bridge）
+  已随 elysia_bridge 旧桥接一并删除，无需第二个进程；
 - 启动前检查目标端口是否已被占用：被占用则报告真实监听进程 PID（netstat
   查询），不偷偷启动第二实例；
 - **启动前自动应用数据库迁移**（`manage.py migrate --no-input`）：Django
   runserver 只警告不自动迁移（2026-09-10 事故：迁移未执行 + 新代码访问
   新字段 → 生产 500，见 docs/report/媒体链路500-迁移未执行-根因与修复）；
   迁移失败拒绝启动（显式失败，避免"新代码 + 旧 schema"静默上线）；
-- Ctrl+C（SIGINT）→ runserver 自身优雅退出（内嵌 bridge 随 lifespan
-  shutdown 停止）；
+- Ctrl+C（SIGINT）→ runserver 自身优雅退出；
 - runserver 默认 `--noreload`：避免 reloader 分裂出的 worker 与启动器
   生命周期解耦；代码改动后重启本启动器即可。
 
 等价拆分调试：
-    python manage.py runserver 127.0.0.1:8100 --noreload   # 含内嵌 bridge
-    ELYSIA_BRIDGE_INLINE=False python manage.py runserver 127.0.0.1:8100
-    python manage.py run_bridge                             # 独立 bridge
+    python manage.py runserver 127.0.0.1:8100 --noreload
 
 退出码：runserver 子进程的退出码；被信号中断时返回 130。
 """
