@@ -356,7 +356,87 @@ def idempotency_key_for_client_message(client_message_id: str) -> str:
     return f"ayla-{digest[:24]}"
 
 
+# ---------- 用户规则一 + 二：新账号默认已是爱莉的好友，并默认有一条私聊会话 ----------
+#
+# 用户（TriSeTide）定的三条规则（2026-11-11）：
+#   1. 所有账号默认有爱莉的好友；
+#   2. 消息列表默认有爱莉的聊天会话；
+#   3. ElyH 连上 Ayla 时爱莉在线（见 accounts.presence 的 ElyH 段）。
+#
+# 这里刻意**不引入任何「爱莉专属入口」**：爱莉就是一个普通 user（username=elysia，
+# ElysiaProfile 绑定），注册后按普通好友 + 普通私聊处理，前端照常渲染。
+#
+# 为什么放在 elysia_bridge 而不是 accounts：目标（爱莉身份）由 ElysiaProfile 定义，
+# 该模型的 owner 是本 app；accounts 只调用，不反向依赖桥接模型的语义。
+
+
+def elysia_user():
+    """返回启用的爱莉应用内 User；没有绑定 / profile 被禁用 / user 失效 → None。
+
+    只认 `ElysiaProfile(enabled=True)` 绑定的 user，不按 username 猜——
+    账号可以被改名，用户名不是身份契约。
+    """
+    from .models import ElysiaProfile
+
+    profile = (
+        ElysiaProfile.objects.select_related("user")
+        .filter(enabled=True, user__is_active=True)
+        .order_by("id")
+        .first()
+    )
+    return profile.user if profile is not None else None
+
+
+def ensure_elysia_relationship(user) -> bool:
+    """让 user 与爱莉互为好友，并确保存在一条私聊会话。幂等。
+
+    返回 True 表示本次已确保（含"本来就有"），False 表示**未处理**（爱莉
+    profile 缺失/禁用，或 user 本身无效）。这两类是预期内的降级：只记一行
+    warning 日志，不抛异常。
+
+    但**数据库错误不被吞**：`update_or_create` / `get_or_create_conversation`
+    的真实失败会向上抛，由调用方决定——`RegisterView` 用 try/except 兜住
+    （账号已经建好了，关系补齐失败不该把 201 变成 500）。吞掉 DB 错误会让
+    "以为补齐了、其实没有"变成静默数据缺陷（AGENTS.md §8）。
+
+    幂等实现（全部是可安全重复的写法）：
+    - Friendship 用 `update_or_create`，DB 层 `unique_together(user, friend)`
+      兜底并发；status 统一 accepted（双向各一条，与 FriendRequestActionView
+      accept 的写入形状一致）；
+    - 会话复用 `chat.services.get_or_create_conversation`——**不在此重写建会话逻辑**
+      （私聊"同两人只有一个会话"的幂等规则只允许有一份实现）。
+    """
+    if user is None or not getattr(user, "pk", None):
+        logger.warning("ensure_elysia_relationship skipped: invalid user")
+        return False
+    elysia = elysia_user()
+    if elysia is None:
+        # 静默跳过 + 一行日志：测试库/新部署里爱莉可能还没建，注册不能因此失败。
+        logger.warning(
+            "ensure_elysia_relationship skipped for user=%s: no enabled elysia profile",
+            getattr(user, "pk", None),
+        )
+        return False
+    if str(elysia.pk) == str(user.pk):
+        # 爱莉自己不需要和自己做朋友。
+        return False
+
+    from apps.accounts.models import Friendship
+    from apps.chat import services as chat_services
+
+    for owner, friend in ((user, elysia), (elysia, user)):
+        Friendship.objects.update_or_create(
+            user=owner,
+            friend=friend,
+            defaults={"status": Friendship.STATUS_ACCEPTED},
+        )
+    chat_services.get_or_create_conversation(user, elysia)
+    return True
+
+
 __all__ = [
+    "ensure_elysia_relationship",
+    "elysia_user",
     "BridgeError",
     "ProfileNotConfigured",
     "broadcast_elysia_profile_updated",

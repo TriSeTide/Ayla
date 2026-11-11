@@ -37,26 +37,36 @@ class UserPublicSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "date_joined"]
 
-    def get_online(self, obj) -> bool:
-        from .presence import get_presence
+    @staticmethod
+    def _is_online(obj) -> bool:
+        """在线 = Ayla 前端 presence **或** ElyH 通道连接（两个独立标记源，取或）。
 
-        # 隐身：对外完全离线（即使有活跃连接）
+        隐身（invisible）只作用于 Ayla 前端自己的 presence——那套 key 由
+        PresenceConsumer 维护，用户可自主隐身；**ElyH 标记不参与隐身判断**：
+        爱莉没有"隐身"概念，ElyH 连着就是在线（规则三，用户定）。
+        两套标记分离的理由见 presence.py 的 ElyH 段注释。
+        """
+        from .presence import get_presence, is_elyh_online
+
         if obj.status == User.STATUS_INVISIBLE:
-            return False
-        return get_presence(obj.id) is not None
+            # 隐身的 Ayla presence 对外视为离线；ElyH 通道是另一条事实，不跟着隐身。
+            return is_elyh_online(obj.id)
+        return get_presence(obj.id) is not None or is_elyh_online(obj.id)
+
+    def get_online(self, obj) -> bool:
+        return self._is_online(obj)
 
     def get_display_status(self, obj) -> str:
         """对外显示文案（任务 06）：auto 跟随实时在线，dnd/away/invisible 固定文案。"""
-        from .presence import get_presence
-
         if obj.status == User.STATUS_DND:
             return "勿扰"
         if obj.status == User.STATUS_AWAY:
             return "离开"
         if obj.status == User.STATUS_INVISIBLE:
-            return "离线"
-        # auto（含未知旧值兜底）：按实时 presence 显示
-        return "在线" if get_presence(obj.id) is not None else "离线"
+            # 隐身文案固定「离线」；唯一例外是 ElyH 通道仍连着（不参与隐身）。
+            return "在线" if self._is_online(obj) else "离线"
+        # auto（含未知旧值兜底）：Ayla presence 或 ElyH 通道任一在线即「在线」
+        return "在线" if self._is_online(obj) else "离线"
 
 
 class RegisterSerializer(serializers.ModelSerializer):

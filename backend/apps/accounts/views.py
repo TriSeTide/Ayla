@@ -177,6 +177,17 @@ class RegisterView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        # 用户规则一 + 二（2026-11-11）：注册即成爱莉的好友，并默认有一条私聊会话。
+        # 失败不得让注册失败（爱莉 profile 可能尚未建立/被禁用）；helper 自己已
+        # try 之外仍包一层，防止意外的编程错误把 201 变成 500。
+        try:
+            from apps.elysia_bridge.services import ensure_elysia_relationship
+
+            ensure_elysia_relationship(user)
+        except Exception:  # noqa: BLE001 - 账号已创建，关系补齐是尽力而为
+            logger.exception(
+                "ensure_elysia_relationship failed after register user=%s", user.id
+            )
         refresh = RefreshToken.for_user(user)
         payload = {
             "user": UserPublicSerializer(user, context={"request": request}).data,

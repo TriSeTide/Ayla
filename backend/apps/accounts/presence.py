@@ -25,6 +25,15 @@
 返回 True；调用方（`PresenceConsumer.disconnect`）只在 True 时 clear + 广播 offline。
 存储不可用时返回 None——**不许猜**：无法证明"这是最后一条连接"就不广播离线，
 真实离线仍由 `presence:<user_id>` 的 60s TTL 兜底（serializers 读不到 key 即离线）。
+
+### 第二个独立标记源：ElyH（DSH 插件）通道
+
+`presence:elyh:<user_id>` 表达"爱莉的 ElyH 通道当前连着 Ayla"，由
+`elysia_bridge.consumers.AylaBridgeConsumer` 的 connect / ping / disconnect
+维护，TTL 90s（DSH 每 30s ping 一次）。它与上面的 `presence:<user_id>` **完全
+独立**，不共享 key、不共享引用计数：两套来源各自增删，对外可见性取"或"
+（`serializers.UserPublicSerializer`）。这样前端直连和 ElyH 常连可以同时存在，
+不会因为一方断开把另一方标成离线。
 """
 import json
 import logging
@@ -114,6 +123,81 @@ def clear_presence(user_id: str) -> None:
         client.delete(_key(user_id))
     except Exception:
         logger.warning("presence clear failed for user=%s", user_id, exc_info=True)
+
+
+# ---------- ElyH（DSH 插件）独立在线标记 ----------
+#
+# 规则三（用户定，方案 B）：ElyH 连上 Ayla 时爱莉在线，断开即离线。
+#
+# **刻意不复用 `presence:<user_id>`**：那个 key 由 Ayla 前端 PresenceConsumer
+# 维护（活连接引用计数 + 60s TTL，断开/心跳都会写它）。ElyH 若共用同一个 key，
+# 两条来源会互相 clear / 互相续期，产生「谁最后断开谁说了算」的竞态，把真实
+# 在线的另一侧标成离线。因此这里另起一个 key 族 `presence:elyh:<user_id>`，
+# 只由 ElyH 通道的 connect / ping / disconnect 读写，两套标记互不干扰，
+# 对外查询时取「或」关系（见 accounts.serializers.UserPublicSerializer）。
+#
+# TTL 取 90s：DSH 侧每 30s ping 一次，90s = 3 个心跳周期。DSH 进程被 kill /
+# 网络闪断来不及发 close 时，标记最多 90s 自然过期，不会留下永久在线幽灵；
+# 偶发丢 1~2 个 ping 也不会误判离线。
+_ELYH_PREFIX = "presence:elyh:"
+_ELYH_TTL = 90
+
+
+def _elyh_key(user_id: str) -> str:
+    """ElyH 在线标记 key（与 Ayla 前端的 presence key 分离，见上文说明）。"""
+    return f"{_ELYH_PREFIX}{user_id}"
+
+
+def mark_elyh_online(user_id: str, owner: str | None = None) -> None:
+    """标记 ElyH 已连接（幂等写入 + 续期）。
+
+    `owner` 是写入方身份（bridge consumer 的 channel_name）。连接被顶替时，
+    新连接先写标记，旧连接的 disconnect 晚到——它带着**自己的** owner 去清，
+    比较后不匹配即跳过（见 clear_elyh_online）。存储不可用只降级（记日志），
+    不阻断 WS 主流程。
+    """
+    try:
+        client = _redis_client()
+        payload = json.dumps({"ts": _now_iso(), "owner": owner})
+        client.setex(_elyh_key(user_id), _ELYH_TTL, payload)
+    except Exception:
+        logger.warning("elyh presence mark failed for user=%s", user_id, exc_info=True)
+
+
+def clear_elyh_online(user_id: str, owner: str | None = None) -> None:
+    """清除 ElyH 在线标记。
+
+    `owner=None`：无条件清除（运维/测试）。
+    给定 owner：只有当存量的标记确实由该连接写入时才清——被顶替的旧连接不得
+    清掉新连接的标记。这里的「读-比较-删」不是原子的，最坏结果只是标记多活到
+    TTL 到期（方向上是「短暂仍显示在线」），不会把真实在线误判成离线。
+    """
+    key = _elyh_key(user_id)
+    try:
+        client = _redis_client()
+        if owner is not None:
+            raw = client.get(key)
+            if raw:
+                try:
+                    stored = json.loads(raw).get("owner")
+                except (json.JSONDecodeError, AttributeError):
+                    stored = None
+                # 存量标记没有 owner（早期写法/人工写入）时仍允许清除。
+                if stored is not None and stored != owner:
+                    return
+        client.delete(key)
+    except Exception:
+        logger.warning("elyh presence clear failed for user=%s", user_id, exc_info=True)
+
+
+def is_elyh_online(user_id: str) -> bool:
+    """ElyH 是否在线；读不到或存储不可用一律 False（无证据即不在线，不猜）。"""
+    try:
+        client = _redis_client()
+        return bool(client.exists(_elyh_key(user_id)))
+    except Exception:
+        logger.warning("elyh presence read failed for user=%s", user_id, exc_info=True)
+        return False
 
 
 # ---------- 多连接引用计数（活连接集合） ----------

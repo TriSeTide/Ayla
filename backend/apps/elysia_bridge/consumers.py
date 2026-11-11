@@ -197,6 +197,11 @@ class AylaBridgeConsumer(AsyncJsonWebsocketConsumer):
             self.group_name,
             {"type": "ayla.bridge.replaced", "by": self.channel_name},
         )
+        # 规则三（方案 B）：ElyH 连上 → 爱莉在线。写入**独立**标记源
+        # `presence:elyh:<user_id>`，与 Ayla 前端 PresenceConsumer 的
+        # `presence:<user_id>` 完全分离，两条来源不互相清除。
+        # owner=channel_name：连接被顶替时旧连接晚到的 disconnect 不得清掉新连接的标记。
+        await self._mark_elyh_online()
         logger.info(
             "ayla bridge connected: profile=%s user=%s channel=%s",
             self.profile.id,
@@ -209,6 +214,8 @@ class AylaBridgeConsumer(AsyncJsonWebsocketConsumer):
             await self.channel_layer.group_discard(
                 self.group_name, self.channel_name
             )
+            # 规则三：ElyH 断开 → 爱莉离线（带 owner 比较，避免顶替场景误清）。
+            await self._clear_elyh_online()
             logger.info(
                 "ayla bridge disconnected: profile=%s channel=%s code=%s",
                 getattr(getattr(self, "profile", None), "id", None),
@@ -248,6 +255,9 @@ class AylaBridgeConsumer(AsyncJsonWebsocketConsumer):
             return
         frame_type = content.get("type")
         if frame_type == "ping":
+            # 心跳同时给 ElyH 在线标记续期：标记 TTL(90s) 略大于心跳周期(30s)，
+            # 不续期的话一条健康长连接会在 90s 后自己"掉线"。
+            await self._mark_elyh_online()
             await self.send_json({"v": services.PROTOCOL_VERSION, "type": "pong"})
         elif frame_type == "resume":
             await self._handle_resume(content)
@@ -381,6 +391,28 @@ class AylaBridgeConsumer(AsyncJsonWebsocketConsumer):
         await self.close(code=4409)
 
     # ---------- 内部 ----------
+
+    async def _mark_elyh_online(self):
+        """写/续 ElyH 在线标记（规则三）。存储不可用只降级，不影响通道本身。"""
+        from apps.accounts.presence import mark_elyh_online
+
+        user_id = getattr(getattr(self, "user", None), "id", None)
+        if not user_id:
+            return
+        await database_sync_to_async(mark_elyh_online)(
+            user_id, owner=self.channel_name
+        )
+
+    async def _clear_elyh_online(self):
+        """清 ElyH 在线标记（带 owner 比较：顶替场景下旧连接不得清掉新连接的）。"""
+        from apps.accounts.presence import clear_elyh_online
+
+        user_id = getattr(getattr(self, "user", None), "id", None)
+        if not user_id:
+            return
+        await database_sync_to_async(clear_elyh_online)(
+            user_id, owner=self.channel_name
+        )
 
     async def _drain_pending(self, from_seq: int, *, count_attempt: bool, skip_pushed: bool) -> int:
         """按 seq 升序把 pending 全部推完（分批，避免一次把内存打满）。
