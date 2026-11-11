@@ -133,11 +133,13 @@ EMAIL_CODE_RESEND_COOLDOWN = env.int("EMAIL_CODE_RESEND_COOLDOWN", default=60)
 
 AUTH_USER_MODEL = "accounts.User"
 
+# 只保留「不相似 / 有长度 / 非常见弱密码」三项。
+# NumericPasswordValidator 已移除（2026-11-11）：用户明确要求允许纯数字密码，
+# 该验证器只拦「全部是数字」这一种形状，不参与强度判断，移除后其余三项照常生效。
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
-    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
 # Django REST Framework

@@ -70,9 +70,32 @@ def test_change_password_unauth_401(api_client):
 
 
 def test_change_password_weak_rejected(auth_client):
+    """太常见的密码仍被 CommonPasswordValidator 拒绝。"""
     client, user = auth_client()
     code = _send_code(client, user.email)
     resp = _post(client, PASSWORD_URL, {"code": code, "new_password": "12345678"})
+    assert resp.status_code == 400
+    assert "new_password" in resp.json()
+
+
+def test_change_password_accepts_digits_only(auth_client):
+    """纯数字密码可以设置（NumericPasswordValidator 已于 2026-11-11 移除）。
+
+    用 47382910 而不是 12345678：后者在常见密码榜上，会被
+    CommonPasswordValidator 拦下，测不出「纯数字是否放行」这件事。
+    """
+    client, user = auth_client()
+    code = _send_code(client, user.email)
+    resp = _post(client, PASSWORD_URL, {"code": code, "new_password": "47382910"})
+    assert resp.status_code == 200
+    assert _login(client, user.username, "47382910").status_code == 200
+
+
+def test_change_password_still_requires_min_length(auth_client):
+    """移除的只是「不能全数字」，最短长度仍是 8 位。"""
+    client, user = auth_client()
+    code = _send_code(client, user.email)
+    resp = _post(client, PASSWORD_URL, {"code": code, "new_password": "4738"})
     assert resp.status_code == 400
     assert "new_password" in resp.json()
 
