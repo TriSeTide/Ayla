@@ -11,6 +11,7 @@ import type { ChatMessage } from "../../api/types";
 import { getUserDetail } from "../../api/users";
 import * as chatApi from "../../api/chat";
 import { Avatar } from "../Avatar";
+import { isElysiaUser } from "../../utils/elysiaIdentity";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
 import { IconBack } from "../icons";
@@ -179,6 +180,7 @@ export function PrivateChatPane({
           label={title}
           size={36}
           online={peerOnline}
+          isElysia={isElysiaUser(peer)}
           imageUrl={peer?.avatar || null}
           onClick={
             !disableAvatarNav && peer

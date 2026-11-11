@@ -20,6 +20,7 @@ import { goUserProfile } from "../../utils/navigation";
 import { IconChevronDown } from "../icons";
 import { canRecall, MessageBubble } from "./MessageBubble";
 import { segmentPreview } from "../../utils/segment";
+import { isElysiaUser } from "../../utils/elysiaIdentity";
 
 const GROUP_GAP_MS = 5 * 60 * 1000;
 const HISTORY_PRELOAD_THRESHOLD = 400;
@@ -1056,10 +1057,9 @@ export function MessageList({
                 <MessageBubble
                   message={m}
                   isSelf={isSelf}
-                  // ⚠️ 当前无数据来源（2026-11 爱莉前端对接层撤下）：爱莉身份判定的
-                  // profile 接口已删除，isElysia 恒为 false。MessageBubble 内的
-                  // bubble-elysia 样式分支与 token 属视觉身份层，保留待新对接接回。
-                  isElysia={false}
+                  // 爱莉身份按 username 判定（utils/elysiaIdentity.ts）；
+                  // 只影响气泡配色，不参与权限或可见性。
+                  isElysia={isElysiaUser(m.sender)}
                   justArrived={justArrivedIds.has(m.id)}
                   // ⚠️ **2026-10-26 修复（退群成员头像）**：此前只从 `conversation.members`
                   // 反查昵称/头像，**成员退群后就不在成员表里** ⇒ 历史消息头像失去名字

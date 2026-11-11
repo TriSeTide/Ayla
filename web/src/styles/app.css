@@ -341,8 +341,8 @@
   outline: var(--focus-ring);
   outline-offset: 2px;
 }
-/* 爱莉头像光环（② 视觉身份层）：当前无挂载点，等待新对接 —— 爱莉身份判定来源已撤下，
-   `is-elysia` 类当前无人挂载；源码保留供新对接复用。 */
+/* 爱莉头像光环（② 视觉身份层）：由 utils/elysiaIdentity.ts 按 username 判定后挂载，
+   见 Avatar.tsx 的 isElysia prop（仅装饰，不参与权限判断）。 */
 .avatar-halo-btn.is-elysia {
   animation: halo-breathe 3.2s ease-in-out infinite;
 }
@@ -369,7 +369,7 @@
   color: var(--indigo-700);
 }
 
-/* 爱莉头像底色（② 视觉身份层）：当前无挂载点，等待新对接。 */
+/* 爱莉头像底色（② 视觉身份层）：粉底，与头像光环同时挂载。 */
 .avatar-core-elysia {
   background: linear-gradient(135deg, var(--sakura-100), var(--sakura-300));
   color: var(--grape-700);

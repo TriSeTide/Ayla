@@ -27,6 +27,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/user_public.dart' show AylaUserPublic;
+import '../../core/elysia_identity.dart' show isElysiaUsername;
 import '../../state/display_status.dart' show presenceOnline, withLiveStatus;
 import '../../state/presence_providers.dart' show presenceStateProvider;
 import '../../state/presence_state.dart'
@@ -159,6 +160,20 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
   /// 本头像的**身份 id**（用于取资料覆盖）：优先 [AylaAvatarHalo.user] 的 id。
   String? get _identityId => widget.user?.id ?? widget.userId;
 
+  /// 实际生效的底色形态。
+  ///
+  /// 调用方给了 [AylaAvatarHalo.user] 且其 username 是爱莉时，自动用
+  /// [AylaAvatarCore.elysia]，**不需要 37 个使用点各传一次 core**（与 web 侧
+  /// `utils/elysiaIdentity.ts` 同一判据：username 是唯一还活着的身份来源）。
+  ///
+  /// 显式传 [AylaAvatarCore.elysia] 仍然优先（画布样张要单独展示该形态）。
+  AylaAvatarCore get _core {
+    if (widget.core == AylaAvatarCore.elysia) return AylaAvatarCore.elysia;
+    return isElysiaUsername(widget.user?.username)
+        ? AylaAvatarCore.elysia
+        : AylaAvatarCore.user;
+  }
+
   /// `user.updated` 帧带来的资料覆盖（无身份 / 无覆盖 / 无 scope ⇒ null）。
   ///
   /// 这是「换头像不热更新」的修复点：帧把新头像写进 `AylaPresenceState._profiles`，
@@ -247,7 +262,7 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
   void _syncBreathe(bool online) {
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
     final bool shouldBreathe = online &&
-        widget.core == AylaAvatarCore.elysia &&
+        _core == AylaAvatarCore.elysia &&
         !reduceMotion;
     if (shouldBreathe && !_breathe.isAnimating) {
       _breathe.repeat();
@@ -261,7 +276,7 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
   void didUpdateWidget(covariant AylaAvatarHalo oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.online != oldWidget.online ||
-        widget.core != oldWidget.core) {
+        _core != oldWidget.core) {
       didChangeDependencies();
     }
   }
@@ -400,7 +415,7 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
     // 头像本体：core 渐变底 + Fredoka 500 字（app.css .avatar-core-*）
     final List<Color> coreColors;
     final Color coreColor;
-    switch (widget.core) {
+    switch (_core) {
       case AylaAvatarCore.user:
         coreColors = AylaGradients.avatarCoreUser;
         coreColor = AylaColors.indigo700;
@@ -483,7 +498,7 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
 
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
     final bool breathe = online &&
-        widget.core == AylaAvatarCore.elysia &&
+        _core == AylaAvatarCore.elysia &&
         !reduceMotion;
 
     if (breathe) {
@@ -527,7 +542,7 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
           gradient: ringGradient,
           // reduced-motion：静态 0 0 8px rgba(247,150,255,.5)
           boxShadow: online &&
-                  widget.core == AylaAvatarCore.elysia
+                  _core == AylaAvatarCore.elysia
               ? const <BoxShadow>[
                   BoxShadow(
                     color: AylaColors.haloBreathSoft,
