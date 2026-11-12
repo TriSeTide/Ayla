@@ -337,17 +337,32 @@ class AylaMediaDownloadQueue {
       } finally {
         await handle.close();
       }
-      // Windows 上 `rename` 覆盖已存在文件会偶发 AccessDenied（errno 5）——
-      // 先删目标再改名，把「原子替换」退化成「删除+改名」，最坏情况是崩溃在
-      // 两者之间留下空队列文件（下次启动按空队列处理，可接受：缓存是增强项）。
-      if (await file.exists()) {
+      // Windows 上 `rename` **不能覆盖已存在文件**（报 AccessDenied errno 5），
+      // 所以「删除+改名」是这里的唯一路径，问题在于它有窗口：删掉目标之后、
+      // 改名之前，另一个实例或清理方（测试 tearDown）动到同一路径就会失败，
+      // 整次写盘被静默丢弃 —— 队列文件停在旧内容。实测 8 轮里 2 轮命中。
+      //
+      // 做法：把「删除+改名」整体重试。注意不能指望 rename 覆盖成功，
+      // 必须先删（第一次试「不删直接 rename」是白费一轮——Windows 必失败）。
+      bool renamed = false;
+      FileSystemException? lastError;
+      for (int attempt = 0; attempt < 4 && !renamed; attempt++) {
+        if (attempt > 0) {
+          await Future<void>.delayed(Duration(milliseconds: 15 * attempt));
+        }
         try {
-          await file.delete();
+          if (await file.exists()) await file.delete();
         } catch (_) {
-          // 删不掉就直接 rename，交给下面的 catch 记录
+          // 删不掉：仍试一次 rename，失败会记进 lastError 并进入下一轮
+        }
+        try {
+          await tmp.rename(file.path);
+          renamed = true;
+        } on FileSystemException catch (error) {
+          lastError = error;
         }
       }
-      await tmp.rename(file.path);
+      if (!renamed && lastError != null) throw lastError;
     } catch (error) {
       debugPrint('[AylaDownloadQueue] 写队列失败（忽略）：$error');
       try {
@@ -426,9 +441,27 @@ class AylaMediaDownloadQueue {
     if (hook != null) await hook();
   }
 
+  /// 触发一次保活同步但不阻塞调用方，同时留一个句柄给 [waitIdle]。
+  void _fireKeepAlive() {
+    final Future<void> run = _syncKeepAlive();
+    _pendingKeepAlive = run;
+    unawaited(run.whenComplete(() {
+      if (identical(_pendingKeepAlive, run)) _pendingKeepAlive = null;
+    }));
+  }
+
   /// 保活同步钩子（生产由 main.dart 接到 AylaDownloadKeepAlive.syncWithQueue；
   /// 单测可注入替身断言「队列有活/空了会触发保活」）。
   Future<void> Function()? keepAliveSync;
+
+  /// 最近一次「未 await 的保活同步」。
+  ///
+  /// `_syncKeepAlive()` 在任务结束时以 unawaited 触发（不能让保活阻塞下载），
+  /// 于是「任务空了」与「保活同步做完」之间存在空窗：`waitIdle()` 只看任务状态
+  /// 就返回，测试随后 tearDown 删目录，而钩子可能还没跑完 —— 表现为
+  /// `syncs` 偶发少一次、或写盘撞上已删除的目录（PathAccessException）。
+  /// 这里记一下，让 `waitIdle()` 能等到它。
+  Future<void>? _pendingKeepAlive;
 
   AylaDownloadTask? _nextPending() {
     for (final AylaDownloadTask t in _tasks.values) {
@@ -447,7 +480,7 @@ class AylaMediaDownloadQueue {
         // 成功：任务完成即从队列移除（不留垃圾记录）
         _tasks.remove(task.key);
         await _persist();
-        unawaited(_syncKeepAlive()); // 队列空了要停掉前台服务
+        _fireKeepAlive(); // 队列空了要停掉前台服务（不阻塞下载，见 _pendingKeepAlive）
         return;
       }
       // 返回 null = 缓存层放弃（下载失败 / 0 字节 / 原图已过期不冒充）
@@ -495,11 +528,22 @@ class AylaMediaDownloadQueue {
     final DateTime deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
       await pump();
-      final bool busy = _tasks.values.any(
-        (AylaDownloadTask t) => t.state != AylaDownloadState.failed,
-      );
-      if (!busy) return;
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      // _running 也要看：`pump()` 用 unawaited 起下载，任务刚被移出 _tasks
+      // 时 _run() 的收尾（含最后一次 _persist）可能还没跑完。
+      final bool busy = _running > 0 ||
+          _tasks.values.any(
+            (AylaDownloadTask t) => t.state != AylaDownloadState.failed,
+          );
+      if (busy) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        continue;
+      }
+      // 任务虽空，但结束时的保活同步可能还在跑（unawaited）。
+      // 不等它，调用方（测试 tearDown）会先删掉目录。
+      final Future<void>? sync = _pendingKeepAlive;
+      if (sync == null) return;
+      await sync;
+      if (_pendingKeepAlive == null) return;
     }
   }
 

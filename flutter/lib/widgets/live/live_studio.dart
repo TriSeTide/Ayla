@@ -175,6 +175,9 @@ class _AylaLiveHostAvatarState extends State<AylaLiveHostAvatar> {
       label: name,
       size: widget.size,
       online: widget.online,
+      // 传 user ⇒ 按 username 自动判定爱莉（粉色底 + 呼吸光环；显式 core 仍优先）。
+      // 本件自己已懒拉过该主播的公开资料，直接复用，不必再发请求。
+      user: host,
       // 传 id ⇒ 光环实时 + `user.updated` 的资料覆盖（换头像/换昵称也跟手）。
       userId: widget.userId,
       resourceUrl: src,

@@ -710,6 +710,8 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
                     role: _roleOf(m.role),
                     avatarUrl: (m.user.avatar ?? '').isEmpty ? null : m.user.avatar,
                     online: memberOnline(m), // tsx 971
+                    // 传 user ⇒ 头像按 username 判定爱莉（复用缓存里已有的对象）。
+                    user: m.user,
                   ),
             ],
             selectedId: _transferSelectedId,
@@ -1106,6 +1108,8 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
                   online: memberOnline(m), // tsx 764
                   role: _roleOf(m.role),
                   isSelf: m.user.id == currentUserId,
+                  // 传 user ⇒ 头像按 username 判定爱莉（复用缓存里已有的对象）。
+                  user: m.user,
                 ),
             ],
             loading: members?.loading ?? false,

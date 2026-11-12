@@ -87,6 +87,8 @@ class AylaRequestRow extends StatelessWidget {
             label: label,
             size: 36,
             online: avatarOnline,
+            // 传 user ⇒ 头像自取 presence / 资料覆盖，并按 username 自动判定爱莉。
+            user: avatar,
             userId: avatar?.id,
             resourceUrl: avatar?.avatar,
             onTap: onAvatarTap,
@@ -265,6 +267,7 @@ class AylaFriendRow extends StatelessWidget {
                         label: label,
                         size: avatarSize,
                         online: online,
+                        user: user,
                         userId: user.id,
                         resourceUrl: user.avatar,
                         onTap: onAvatarTap,

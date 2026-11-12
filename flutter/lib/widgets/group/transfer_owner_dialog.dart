@@ -32,6 +32,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
@@ -48,6 +49,7 @@ class AylaTransferMember {
     this.role = AylaGroupRole.member,
     this.avatarUrl,
     this.online = false,
+    this.user,
   });
 
   /// 稳定 id（选中态按它比较）。
@@ -64,6 +66,11 @@ class AylaTransferMember {
 
   /// 在线状态。
   final bool online;
+
+  /// 来源用户对象（web `m.user`）。本件其余字段就是它的展示投影。
+  ///
+  /// 只用于头像判定爱莉（`core/elysia_identity.dart`）；null = 调用方没带。
+  final AylaUserPublic? user;
 }
 
 /// 转让群主弹窗：搜索 + 成员列表（单选）+ 取消/确认。
@@ -424,6 +431,8 @@ class _Row extends StatelessWidget {
                 label: member.displayName,
                 size: 36,
                 online: member.online,
+                // 传 user 让头像按 username 判定爱莉（粉色底 + 呼吸光环）。
+                user: member.user,
                 userId: member.id,
                 resourceUrl: member.avatarUrl,
               ),

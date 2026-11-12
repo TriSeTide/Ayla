@@ -57,6 +57,7 @@ import 'package:flutter/services.dart' show LengthLimitingTextInputFormatter, Te
 
 import '../../core/models/media_kind.dart';
 import '../../core/models/post.dart' show AylaMediaDescriptor;
+import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../core/media/media_picker.dart' show AylaPickedFile;
 import '../../core/media/media_signer.dart';
 import '../../core/media/media_upload.dart' show AylaUploadException;
@@ -406,6 +407,16 @@ class _DanmakuRow extends StatelessWidget {
           label: item.senderNickname,
           size: 20, // tsx 54 `size={20}`（光环外径 = 20 + 2.5×2）
           online: item.senderOnline,
+          // 传 user ⇒ 按 username 自动判定爱莉（粉色底 + 呼吸光环）。
+          // 条目只有 id/昵称/头像 ⇒ 就地构造这层展示投影；id 为空则不造身份。
+          user: item.senderUserId.isEmpty
+              ? null
+              : AylaUserPublic(
+                  id: item.senderUserId,
+                  nickname: item.senderNickname,
+                  avatar: item.senderAvatarUrl,
+                  online: item.senderOnline,
+                ),
           // 普查 D 修复（恒灰）：senderOnline 是死参（3 个页面调用点全不传）
           // ⇒ 改传 id，由头像按 presence store 判在线。
           userId: item.senderUserId,

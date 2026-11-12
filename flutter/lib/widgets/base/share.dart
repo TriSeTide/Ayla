@@ -35,6 +35,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/models/share_payload.dart';
+import '../../core/models/user_public.dart' show AylaUserPublic;
 // ⚠️ **本件 → pages 的反向依赖**（用户 2026-10-09 裁决明确授权）：
 // 自给自足档要复用 `share_support.dart` 的 [AylaShareController] + [aylaOpenShareSheet]。
 // `share_support.dart` 本身 import 本件（取 [AylaShareSheet]）⇒ 构成**循环 import**
@@ -659,7 +660,12 @@ class _AylaShareSheetState extends State<AylaShareSheet> {
       child: Row(
         children: <Widget>[
           // 私聊对端是**具体用户** ⇒ 传 id 让头像自订阅 presence（群行不传）。
-          _rowAvatar(conv.peerAvatarUrl, name, userId: conv.peerId),
+          _rowAvatar(
+            conv.peerAvatarUrl,
+            name,
+            userId: conv.peerId,
+            username: conv.peerUsername,
+          ),
           const SizedBox(width: 12),
           Expanded(child: _rowMain(t, name, conv.unreadCount)),
         ],
@@ -671,10 +677,22 @@ class _AylaShareSheetState extends State<AylaShareSheet> {
   ///
   /// [userId] 只在**私聊行**传（对端是具体某个用户 ⇒ 该显示 TA 的实时在线态）；
   /// 群行的头像是群头像（不是人）⇒ 保持静态灰环，与 web `ShareSheet.tsx:154` 一致。
-  Widget _rowAvatar(String? url, String label, {String? userId}) {
+  ///
+  /// [username] 同样只在私聊行传：头像据此自动判定爱莉（粉色底 + 呼吸光环）。
+  /// 群行没有 username（群不是人）⇒ 不构造用户，保持普通头像。
+  Widget _rowAvatar(String? url, String label, {String? userId, String? username}) {
     return AylaAvatarHalo(
       label: label,
       size: 32,
+      user: userId == null
+          ? null
+          : AylaUserPublic(
+              id: userId,
+              username: username,
+              // 昵称不在这里补：展示名仍由 `label` 参数决定（对端是自己时是「我」，
+              // 那不是对端真实昵称，不能写进用户对象）。
+              avatar: url,
+            ),
       userId: userId,
       resourceUrl: url,
     );

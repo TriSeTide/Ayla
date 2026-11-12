@@ -268,6 +268,8 @@ class _AppShellState extends ConsumerState<AppShell> {
       messagesActive: aylaIsMessagesRoute(pathname),
       messageBadge: messageBadge,
       userName: user?.nickname ?? '',
+      // 传 username ⇒ 顶栏头像按 username 判定爱莉（粉色底 + 呼吸光环）。
+      userUsername: user?.username,
       userAvatarUrl: user?.avatar,
       userOnline: user?.online ?? false,
       // 传 id ⇒ 顶栏头像自订阅 presence。
@@ -309,6 +311,8 @@ class _AppShellState extends ConsumerState<AppShell> {
       topBar = AylaTopNav(
         variant: AylaTopNavVariant.home,
         userName: user?.nickname ?? '',
+        // 窄屏同宽屏：传 username ⇒ 头像按 username 判定爱莉。
+        userUsername: user?.username,
         userAvatarUrl: user?.avatar,
         userOnline: user?.online ?? false,
         // 窄屏同宽屏：传 id 让头像自订阅 presence。

@@ -42,6 +42,7 @@ import 'package:flutter/material.dart';
 import '../../core/media/media_actions.dart' show AylaMediaActions;
 import '../../core/media/media_signer.dart' show MediaVariant;
 import '../../core/models/post.dart';
+import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../core/net/dio_client.dart' show ApiException;
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
@@ -802,6 +803,19 @@ class _AylaCommentListState extends State<AylaCommentList> {
                 label: name,
                 size: 32, // Avatar size={32}
                 online: widget.isAuthorOnline?.call(c) ?? false,
+                // 传 user ⇒ 按 username 自动判定爱莉（AylaPostAuthor 与
+                // AylaUserPublic 是同一契约的两个投影，这里只做展示态换算）。
+                user: author == null
+                    ? null
+                    : AylaUserPublic(
+                        id: author.id,
+                        username: author.username,
+                        nickname: author.nickname,
+                        avatar: author.avatar,
+                        status: author.status,
+                        online: author.online,
+                        displayStatus: author.displayStatus,
+                      ),
                 userId: author?.id,
                 resourceUrl: author?.avatar,
                 onTap: author == null

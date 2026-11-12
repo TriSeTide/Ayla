@@ -63,6 +63,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
@@ -149,6 +150,7 @@ class AylaTopNav extends StatefulWidget {
     this.messagesActive = false,
     this.messageBadge = 0,
     this.userName = '',
+    this.userUsername,
     this.userAvatarUrl,
     this.userOnline = true,
     this.userId,
@@ -180,6 +182,14 @@ class AylaTopNav extends StatefulWidget {
 
   /// 当前用户昵称。
   final String userName;
+
+  /// 当前用户的 **username**（登录标识；与昵称不同，改名不动）。
+  ///
+  /// 用途只有一个：头像据此判定「是不是爱莉」（`core/elysia_identity.dart`
+  /// 的 `isElysiaUsername`）⇒ 粉色底 + 呼吸光环。**只作展示判定**，不参与权限。
+  ///
+  /// null ⇒ 顶栏头像按普通用户渲染（不造身份）。
+  final String? userUsername;
 
   /// 头像 URL（null = 文字头像）。
   final String? userAvatarUrl;
@@ -414,6 +424,17 @@ class _AylaTopNavState extends State<AylaTopNav> {
                   label: widget.userName,
                   size: 40,
                   online: widget.userOnline,
+                  // 传 user ⇒ 按 username 自动判定爱莉（粉色底 + 呼吸光环）。
+                  // 复用壳层已经有的当前用户字段，不额外发请求；没 id 则不造身份。
+                  user: widget.userId == null
+                      ? null
+                      : AylaUserPublic(
+                          id: widget.userId!,
+                          username: widget.userUsername,
+                          nickname: widget.userName,
+                          avatar: widget.userAvatarUrl,
+                          online: widget.userOnline,
+                        ),
                   // 传 id ⇒ 头像自订阅 presence（此前只有静态 userOnline 快照）。
                   userId: widget.userId,
                   resourceUrl: widget.userAvatarUrl,
@@ -846,6 +867,16 @@ class _AylaTopNavState extends State<AylaTopNav> {
             label: widget.userName,
             size: 36, // `NarrowTopBar.tsx:182` size={36}
             online: widget.userOnline,
+            // 同宽屏档：传 user 以自动判定爱莉（没 id 则不造身份）。
+            user: widget.userId == null
+                ? null
+                : AylaUserPublic(
+                    id: widget.userId!,
+                    username: widget.userUsername,
+                    nickname: widget.userName,
+                    avatar: widget.userAvatarUrl,
+                    online: widget.userOnline,
+                  ),
             // 传 id ⇒ 头像自订阅 presence（同宽屏档）。
             userId: widget.userId,
             resourceUrl: widget.userAvatarUrl,

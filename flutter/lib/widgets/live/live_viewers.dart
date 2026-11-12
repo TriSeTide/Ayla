@@ -25,6 +25,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show SchedulerBinding;
 
+import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/glass.dart';
@@ -257,6 +258,17 @@ class _AylaLiveViewerStripState extends State<AylaLiveViewerStrip> {
                               size: 26, // tsx 64：`size={26}`
                               // tsx 66：预览头像恒 `online`（这份名单就是「正在看」的人）
                               online: true,
+                              // 传 user ⇒ 按 username 自动判定爱莉（粉色底 + 呼吸光环）。
+                              // 名单条目只有 id/昵称/头像 ⇒ 就地构造这层展示投影
+                              // （没有 id 则不造身份）。
+                              user: viewer.userId.isEmpty
+                                  ? null
+                                  : AylaUserPublic(
+                                      id: viewer.userId,
+                                      nickname: viewer.nickname,
+                                      avatar: viewer.avatar,
+                                      online: true,
+                                    ),
                               // 仍是**具体某个用户** ⇒ 传 id 让 `user.updated`
                               // 覆盖换头像后的 URL（名单来自 REST 快照，会过期）。
                               userId: viewer.userId,
@@ -563,6 +575,15 @@ class _ViewerRowState extends State<_ViewerRow> {
                   size: 36, // tsx 115：`size={36}`
                   online: true,
                   core: widget.isElysia ? AylaAvatarCore.elysia : AylaAvatarCore.user,
+                  // 传 user ⇒ 按 username 自动判定爱莉（显式 core 仍优先）。
+                  user: widget.viewer.userId.isEmpty
+                      ? null
+                      : AylaUserPublic(
+                          id: widget.viewer.userId,
+                          nickname: widget.viewer.nickname,
+                          avatar: widget.viewer.avatar,
+                          online: true,
+                        ),
                   // 同观看条：具体用户 ⇒ 传 id 让换头像热更新。
                   userId: widget.viewer.userId,
                   resourceUrl: widget.viewer.avatar.isEmpty

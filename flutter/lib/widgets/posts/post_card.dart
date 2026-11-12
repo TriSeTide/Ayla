@@ -34,6 +34,7 @@ import 'package:flutter/material.dart';
 import '../../core/media/media_signer.dart' show MediaVariant;
 import '../../core/models/post.dart';
 import '../../core/models/share_payload.dart' show AylaSharePayload;
+import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../state/favorite_status.dart';
@@ -359,6 +360,19 @@ class _AylaPostCardState extends State<AylaPostCard> {
                     label: authorName,
                     size: 36,
                     online: authorOnline,
+                    // 传 user ⇒ 按 username 自动判定爱莉（AylaPostAuthor 与
+                    // AylaUserPublic 是同一契约的两个投影，这里只做展示态换算）。
+                    user: author == null
+                        ? null
+                        : AylaUserPublic(
+                            id: author.id,
+                            username: author.username,
+                            nickname: author.nickname,
+                            avatar: author.avatar,
+                            status: author.status,
+                            online: author.online,
+                            displayStatus: author.displayStatus,
+                          ),
                     userId: author?.id,
                     resourceUrl: author?.avatar,
                     onTap: author == null ? null : widget.onAuthorTap,

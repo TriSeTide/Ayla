@@ -33,6 +33,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
@@ -107,6 +108,7 @@ class AylaVoiceMemberRow extends StatelessWidget {
     required this.member,
     this.isSelf = false,
     this.isElysia = false,
+    this.user,
     this.self,
     this.displayName,
     this.avatarUrl,
@@ -129,6 +131,15 @@ class AylaVoiceMemberRow extends StatelessWidget {
   /// ⚠️ 功能对接层已撤下（撤下清单 §2.2 / §3 方案 A）：[AylaVoiceChannelPanel] 不再有
   /// `elysiaUserId` 来源 ⇒ 恒传 `false`。光环分支按方案 A 保留，等新对接。
   final bool isElysia;
+
+  /// 该成员的公开资料（页面层从用户缓存给出，web `ensureUser` 的等价物）。
+  ///
+  /// 只有一个用途：头像据此判定「是不是爱莉」（`core/elysia_identity.dart`）
+  /// ⇒ 粉色底 + 呼吸光环。**只作展示判定**，不参与权限。
+  ///
+  /// 与 [isElysia] 的关系：显式 [isElysia] 仍然优先（画布样张要单独展示该形态）；
+  /// 两者都缺省 ⇒ 普通头像（不造身份）。
+  final AylaUserPublic? user;
 
   /// [isSelf] 为 true 时的本地媒体事实（web 的 `useVoiceStore` 三个读）。
   final AylaVoiceSelfState? self;
@@ -210,6 +221,8 @@ class AylaVoiceMemberRow extends StatelessWidget {
           label: name,
           size: 32, // tsx 145：`size={32}`
           online: online,
+          // 传 user ⇒ 按 username 自动判定爱莉（显式 core 仍优先）。
+          user: user,
           userId: member.userId,
           core: isElysia ? AylaAvatarCore.elysia : AylaAvatarCore.user,
           resourceUrl: avatarUrl,

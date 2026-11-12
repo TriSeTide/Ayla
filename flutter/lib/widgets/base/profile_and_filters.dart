@@ -9,6 +9,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart' show AylaMsgActionButton;
 import '../../theme/glass.dart';
@@ -132,6 +133,17 @@ class AylaUserProfileCard extends StatelessWidget {
                 label: name,
                 size: 56, // <Avatar size={56} online={online} />
                 online: online,
+                // 传 user ⇒ 按 username 自动判定爱莉（粉色底 + 呼吸光环）。
+                // 只作展示投影：库里本就没有对端 id 时保持 null（不造身份）。
+                user: userId == null
+                    ? null
+                    : AylaUserPublic(
+                        id: userId!,
+                        username: username,
+                        nickname: nickname.isEmpty ? null : nickname,
+                        avatar: avatarUrl,
+                        online: online,
+                      ),
                 // 传 id ⇒ 头像自订阅 presence（此前只有静态 online 快照）。
                 userId: userId,
                 resourceUrl: avatarUrl,

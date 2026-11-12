@@ -35,6 +35,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../theme/app_theme.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
@@ -61,6 +62,7 @@ class AylaVoicePanelMember {
     this.displayName,
     this.avatarUrl,
     this.online = false,
+    this.user,
   });
 
   /// 媒体与音量事实（含 `userId`）。
@@ -74,6 +76,11 @@ class AylaVoicePanelMember {
 
   /// 在线光环（页面层从 presence 计算，隐身强制离线）。
   final bool online;
+
+  /// 该成员的公开资料（页面层已懒拉过的那份，直接复用，不额外发请求）。
+  ///
+  /// 只用于头像判定爱莉（`core/elysia_identity.dart`）；null = 尚未拉到。
+  final AylaUserPublic? user;
 }
 
 /// 成员分页状态（web `usePagedMediaList` 投影，逐字段对应 [AylaDirectoryLoadMore]）。
@@ -257,6 +264,7 @@ class _AylaVoiceChannelPanelState extends State<AylaVoiceChannelPanel> {
             displayName: m.displayName,
             avatarUrl: m.avatarUrl,
             online: m.online,
+            user: m.user,
             onVolumeChange: widget.onVolumeChange,
             onLocalVolumeChange: widget.onLocalVolumeChange,
             onToggleMic: widget.onToggleMic,

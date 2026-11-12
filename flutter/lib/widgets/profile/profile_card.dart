@@ -41,6 +41,7 @@ import 'package:flutter/material.dart';
 // ContainerRenderObjectMixin / RenderBoxContainerDefaultsMixin / ContainerBoxParentData。
 import 'package:flutter/rendering.dart';
 
+import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
@@ -255,6 +256,17 @@ class AylaProfileIdentity extends StatelessWidget {
           label: displayName,
           size: avatarSize,
           online: online,
+          // 传 user ⇒ 按 username 自动判定爱莉（粉色底 + 呼吸光环）。
+          // 没有 id 时保持 null（不造身份）；有 id 才构造这层展示投影。
+          user: userId == null
+              ? null
+              : AylaUserPublic(
+                  id: userId!,
+                  username: username,
+                  nickname: displayName,
+                  avatar: avatarUrl,
+                  online: online,
+                ),
           // 传 id ⇒ 头像自订阅 presence（此前只有静态 online 快照）。
           userId: userId,
           resourceUrl: avatarUrl,

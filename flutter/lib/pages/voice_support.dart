@@ -1172,6 +1172,8 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       displayName: profile?.displayName,
       avatarUrl: profile?.avatar,
       online: profile?.online ?? false,
+      // 页面层已经懒拉过的资料直接复用 ⇒ 头像据此判定爱莉（不额外发请求）。
+      user: profile,
     );
   }
 
