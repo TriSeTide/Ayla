@@ -266,6 +266,7 @@ export function MessagesPage() {
                     size={40}
                     online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, f.user))}
                     imageUrl={f.user.avatar || null}
+                    user={f.user}
                     onClick={(e) => {
                       e.stopPropagation();
                       goUserProfile(useAuthStore.getState().currentUser?.id, f.user.id);
@@ -361,7 +362,7 @@ function RequestRow({
   const onlineStatuses = usePresenceStore((s) => s.statuses);
   return (
     <div className="request-row">
-      <Avatar label={avatar.nickname || avatar.username} size={36} online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, avatar))} imageUrl={avatar.avatar || null} />
+      <Avatar label={avatar.nickname || avatar.username} size={36} online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, avatar))} imageUrl={avatar.avatar || null} user={avatar} />
       <div className="request-body">
         <span className="request-name">{name}</span>
         {message && <span className="request-msg">{message}</span>}

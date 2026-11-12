@@ -118,6 +118,7 @@ export function CommentList({
                   size={32}
                   online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, c.author))}
                   imageUrl={c.author.avatar || null}
+                  user={c.author}
                   onClick={() => goUserProfile(currentUserId, c.author.id)}
                   ariaLabel={`查看 ${c.author.nickname || c.author.username} 的个人主页`}
                 />

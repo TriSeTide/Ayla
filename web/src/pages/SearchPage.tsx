@@ -394,6 +394,7 @@ export function SearchPage() {
                   size={36}
                   online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, u))}
                   imageUrl={u.avatar || null}
+                  user={u}
                   onClick={() => {
                     saveScrollPosition(scope, pageRef.current);
                     goUserProfile(useAuthStore.getState().currentUser?.id, u.id);

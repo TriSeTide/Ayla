@@ -166,6 +166,7 @@ export function ProfilePage() {
                 size={64}
                 online={currentUserOnline}
                 imageUrl={avatarPreview ?? (currentUser.avatar || null)}
+                user={currentUser}
               />
             </div>
             <div className="profile-names">

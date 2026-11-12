@@ -15,7 +15,6 @@ import { useAuthStore } from "../../stores/auth";
 import { usePresenceStore } from "../../stores/presence";
 import { goUserProfile } from "../../utils/navigation";
 import { displayStatusOf, presenceOnline, withLiveStatus } from "../../utils/displayStatus";
-import { isElysiaUser } from "../../utils/elysiaIdentity";
 import { staggerDelay } from "../../hooks/useRevealOnEnter";
 import { Avatar } from "../Avatar";
 import { ConversationMoreMenu } from "./ConversationMoreMenu";
@@ -109,7 +108,7 @@ export function ConversationList({
                 label={title}
                 size={40}
                 online={isPrivate ? peerOnline : false}
-                isElysia={isPrivate && isElysiaUser(conv.peer)}
+                user={isPrivate ? conv.peer : null}
                 imageUrl={isPrivate ? (conv.peer?.avatar || null) : (conv.avatar || null)}
                 onClick={
                   !disableAvatarNav && isPrivate && conv.peer

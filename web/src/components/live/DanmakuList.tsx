@@ -54,6 +54,7 @@ function DanmakuItem({
         size={20}
         online={senderOnline}
         imageUrl={item.sender.avatar || null}
+        user={senderUser}
         onClick={() => goUserProfile(null, item.sender.user_id)}
         ariaLabel={`查看 ${item.sender.nickname} 的个人主页`}
       />

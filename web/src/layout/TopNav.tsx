@@ -138,6 +138,7 @@ export function TopNav({
             size={40}
             online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, currentUser))}
             imageUrl={currentUser.avatar || null}
+            user={currentUser}
           />
         )}
       </Link>
@@ -217,7 +218,7 @@ export function TopNav({
               <SearchDropGroup title="用户" count={searchResults?.users?.total ?? 0} onMore={goFullSearch}>
                 {(searchResults?.users?.items ?? []).map((u) => (
                   <button key={u.id} type="button" className="search-drop-row" onMouseDown={() => navigate(`/search?q=${encodeURIComponent(query)}`)}>
-                    <Avatar label={u.nickname || u.username} size={28} online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, u))} imageUrl={u.avatar || null} />
+                    <Avatar label={u.nickname || u.username} size={28} online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, u))} imageUrl={u.avatar || null} user={u} />
                     <span>{u.nickname || u.username}</span>
                   </button>
                 ))}

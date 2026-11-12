@@ -8,6 +8,14 @@ import { ApiError } from "../api/client";
 const auth = vi.hoisted(() => ({ login: vi.fn(), register: vi.fn(), isAuthenticated: false }));
 vi.mock("../hooks/useAuth", () => ({ useAuth: () => auth }));
 
+// 注册页要求先发邮箱验证码（accounts 的 register 契约带 code）；
+// 不发码时 onSubmit 会在 setSubmitting 之前就返回，测不到「注册中…」。
+const sendCode = vi.hoisted(() => vi.fn());
+vi.mock("../api/auth", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../api/auth")>(),
+  sendEmailCode: sendCode,
+}));
+
 function pendingRequest() {
   let reject!: (error: Error) => void;
   const promise = new Promise<void>((_, fail) => { reject = fail; });
@@ -55,16 +63,23 @@ describe("public authentication forms", () => {
   it("preserves the registration payload and draft on server failure", async () => {
     const pending = pendingRequest();
     auth.register.mockReturnValueOnce(pending.promise);
+    sendCode.mockResolvedValueOnce(undefined);
     const { container } = render(<MemoryRouter><RegisterPage /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText("用户名"), { target: { value: " fixture-user " } });
     fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "fixture@example.test" } });
     fireEvent.change(screen.getByLabelText("密码（至少 8 位）"), { target: { value: "fixture-password" } });
     fireEvent.change(screen.getByLabelText("确认密码"), { target: { value: "fixture-password" } });
+    // 先发码：注册页要求验证码，不发码时提交在校验阶段就被拦下，
+    // 测不到「注册中…」与 aria-busy。
+    fireEvent.click(screen.getByRole("button", { name: /发送验证码/ }));
+    await waitFor(() => expect(sendCode).toHaveBeenCalledWith({ email: "fixture@example.test" }));
+    fireEvent.change(await screen.findByLabelText("邮箱验证码"), { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: "注册" }));
     expect(screen.getByRole("button", { name: "注册中…" })).toBeDisabled();
     expect(container.querySelector("form")).toHaveAttribute("aria-busy", "true");
     expect(auth.register).toHaveBeenCalledWith({
-      username: "fixture-user", email: "fixture@example.test", password: "fixture-password", nickname: undefined,
+      username: "fixture-user", email: "fixture@example.test", password: "fixture-password",
+      nickname: undefined, code: "123456",
     });
     await act(async () => pending.reject(new ApiError(409, "合成用户名已存在")));
     expect(screen.getByRole("alert")).toHaveTextContent("合成用户名已存在");

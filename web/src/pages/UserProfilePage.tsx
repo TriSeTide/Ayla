@@ -133,6 +133,7 @@ export function UserProfilePage() {
                     size={64}
                     online={online}
                     imageUrl={user.avatar || null}
+                    user={user}
                   />
                 </div>
                 <div className="profile-names">

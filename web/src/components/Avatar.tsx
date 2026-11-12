@@ -11,12 +11,14 @@
  */
 import type { CSSProperties, MouseEventHandler } from "react";
 import { ResourceImage } from "./ResourceImage";
+import { isElysiaUser } from "../utils/elysiaIdentity";
 
 export function Avatar({
   label,
   size = 40,
   online = false,
-  isElysia = false,
+  isElysia,
+  user,
   imageUrl,
   style,
   onClick,
@@ -29,10 +31,17 @@ export function Avatar({
   /**
    * 爱莉专属光环（呼吸辉光），不可复用于普通用户（design.md §8 Don't）。
    *
-   * ② 视觉身份层：当前无挂载点，等待新对接 —— 爱莉身份来源（profile）已撤下，
-   * 无调用方传 true，默认退化为普通头像。
+   * 通常不用传：给了 [user] 时组件自己按 username 判定（见 utils/elysiaIdentity）。
+   * 显式传值优先，用于画布样张这类必须单独展示该形态的场合。
    */
   isElysia?: boolean;
+  /**
+   * 头像所属用户。给了就自动判定是不是爱莉，**无需调用点各传 isElysia**。
+   *
+   * 这是「全应用爱莉头像都变粉」的唯一入口：37 个调用点只要把手上已有的
+   * user/author/sender 对象递进来即可。
+   */
+  user?: { username?: string | null } | null;
   imageUrl?: string | null;
   style?: CSSProperties;
   /** 可点击：跳转个人主页等（"所有头像都能点进个人页面"） */
@@ -42,10 +51,12 @@ export function Avatar({
   const safeLabel = label?.trim() || "?";
   const fontSize = Math.round(size * 0.42);
   const haloStyle = { width: size + 5, height: size + 5, ...style } as CSSProperties;
+  // 显式传值优先（画布样张要单独展示该形态）；否则按 user 判定。
+  const elysia = isElysia ?? isElysiaUser(user);
   const inner = (
     <>
       <span
-        className={`avatar-core ${isElysia ? "avatar-core-elysia" : "avatar-core-user"}`}
+        className={`avatar-core ${elysia ? "avatar-core-elysia" : "avatar-core-user"}`}
         style={{ fontSize }}
       >
         {imageUrl ? (
@@ -68,7 +79,7 @@ export function Avatar({
     return (
       <button
         type="button"
-        className={`avatar-halo avatar-halo-btn ${online ? "" : "is-offline"} ${isElysia && online ? "is-elysia" : ""}`}
+        className={`avatar-halo avatar-halo-btn ${online ? "" : "is-offline"} ${elysia && online ? "is-elysia" : ""}`}
         style={haloStyle}
         onClick={onClick}
         aria-label={ariaLabel ?? `${safeLabel} 个人主页`}
@@ -81,7 +92,7 @@ export function Avatar({
 
   return (
     <span
-      className={`avatar-halo ${online ? "" : "is-offline"} ${isElysia && online ? "is-elysia" : ""}`}
+      className={`avatar-halo ${online ? "" : "is-offline"} ${elysia && online ? "is-elysia" : ""}`}
       style={haloStyle}
       aria-hidden="true"
     >

@@ -763,6 +763,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
                       size={isNarrow ? 36 : 40}
                       online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, m.user))}
                       imageUrl={m.user.avatar || null}
+                      user={m.user}
                       onClick={() => goUserProfile(currentUser?.id, m.user.id)}
                       ariaLabel={`查看 ${m.user.nickname || m.user.username} 的个人主页`}
                     />
@@ -970,6 +971,7 @@ function TransferOwnerDialog({
                         size={36}
                         online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, m.user))}
                         imageUrl={m.user.avatar || null}
+                        user={m.user}
                       />
                       <span className="group-transfer-name">{name}</span>
                       {m.role !== "member" && (

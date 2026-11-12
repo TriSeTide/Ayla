@@ -136,6 +136,7 @@ export function MentionPicker({
                 size={32}
                 online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, m.user))}
                 imageUrl={m.user.avatar || null}
+                user={m.user}
               />
               <span className="mention-picker-name">{name}</span>
             </button>

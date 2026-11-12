@@ -46,6 +46,7 @@ export function LiveHostAvatar({
       size={size}
       online={hostOnline}
       imageUrl={host?.avatar || null}
+      user={host}
       onClick={() => ownerId && goUserProfile(null, ownerId)}
       ariaLabel={`查看主播 ${label} 的个人主页`}
     />

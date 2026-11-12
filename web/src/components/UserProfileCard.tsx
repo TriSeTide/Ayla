@@ -49,7 +49,7 @@ export function UserProfileCard({ user, onClose }: { user: UserPublic; onClose?:
   return (
     <div className="user-profile-card glass-card">
       <div className="user-profile-body">
-        <Avatar label={user.nickname || user.username} size={56} online={online} imageUrl={user.avatar || null} />
+        <Avatar label={user.nickname || user.username} size={56} online={online} imageUrl={user.avatar || null} user={user} />
         <span className="user-profile-nick">{user.nickname || user.username}</span>
         <span className="user-profile-status">{displayStatus}</span>
         {user.signature && <span className="user-profile-signature">{user.signature}</span>}

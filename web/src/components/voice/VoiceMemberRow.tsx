@@ -142,6 +142,7 @@ export function VoiceMemberRow({
         size={32}
         online={memberOnline}
         imageUrl={user?.avatar || null}
+        user={user}
         onClick={() => goUserProfile(currentUserId, member.user_id)}
         ariaLabel={`查看 ${displayName} 的个人主页`}
       />

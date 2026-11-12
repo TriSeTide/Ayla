@@ -182,6 +182,7 @@ export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "s
                 size={36}
                 online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, currentUser))}
                 imageUrl={currentUser.avatar || null}
+                user={currentUser}
               />
             )}
           </Link>

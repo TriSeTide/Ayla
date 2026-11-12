@@ -631,6 +631,7 @@ function PostDetailContent({ groupId }: { groupId?: string }) {
                 size={36}
                 online={presenceOnline(onlineUsers, post.author)}
                 imageUrl={post.author.avatar || null}
+                user={post.author}
                 onClick={() => goUserProfile(currentUserId, post.author.id)}
                 ariaLabel={`查看 ${post.author.nickname || post.author.username} 的个人主页`}
               />

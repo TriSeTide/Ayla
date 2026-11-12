@@ -14,6 +14,7 @@ import { ensureUser, getCachedUser } from "../../api/users";
 import { usePresenceStore } from "../../stores/presence";
 import { presenceOnline, withLiveStatus } from "../../utils/displayStatus";
 import { Avatar } from "../Avatar";
+import { isElysiaUser } from "../../utils/elysiaIdentity";
 import { FavoriteButton } from "../FavoriteButton";
 import { RECALL_SECONDS } from "../../hooks/useChat";
 import { HOVER_NONE_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
@@ -219,12 +220,14 @@ export function MessageBubble({
     }, DOUBLE_CLICK_MS);
   };
 
-  // 爱莉专属气泡分支（方案 A 保留）：当前 isElysia 恒为 false，见 prop 注释。
+  // 爱莉专属气泡配色。显式 isElysia 优先，否则按发送者 username 判定——
+  // 与头像用同一判据（utils/elysiaIdentity.ts），只影响配色。
+  const elysiaBubble = isElysia || isElysiaUser(senderUser);
   const bubbleClass = recalled
     ? "bubble bubble-other recalled"
     : isSelf
       ? "bubble bubble-self"
-      : isElysia
+      : elysiaBubble
         ? "bubble bubble-elysia"
         : "bubble bubble-other";
 
@@ -253,6 +256,7 @@ export function MessageBubble({
         size={32}
         online={senderOnline}
         imageUrl={senderAvatar || null}
+        user={senderUser}
         onClick={handleSenderClick}
         ariaLabel={senderName ?? "发送者个人主页"}
       />

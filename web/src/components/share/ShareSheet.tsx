@@ -197,7 +197,7 @@ export function ShareSheet({
           disabled={sending}
           aria-label={`分享给 ${displayName}`}
         >
-          <Avatar imageUrl={avatarSrc} label={displayName} size={32} />
+          <Avatar imageUrl={avatarSrc} label={displayName} size={32} user={conv.peer} />
           <span className="share-sheet-row-main">
             <span className="share-sheet-row-title">{displayName}</span>
             {conv.unread_count > 0 && (

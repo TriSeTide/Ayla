@@ -72,6 +72,7 @@ export function PostCard({
             size={36}
             online={liveAuthor ? presenceOnline(onlineUsers, liveAuthor) : undefined}
             imageUrl={author?.avatar || null}
+            user={author}
             onClick={author?.id ? (e) => {
               e.stopPropagation();
               goUserProfile(currentUserId, author.id!);
