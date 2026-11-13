@@ -838,6 +838,14 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
+  /* 尺寸容器：消息行的工具栏要在「文字模式 / 图标模式」之间按**真实可用宽度**切换。
+     用视口媒体查询做不到——同一个 vw 下聊天区宽度取决于有没有左侧栏
+     （私聊/消息中心 356、群聊 380、窄屏 0）。容器查询直接吃气泡列的真实宽度。
+     ⚠️ 阈值推导（见 .msg-actions 的 --msg-actions-slot 注释）：
+     文字模式不挤压气泡 ⇔ reserve(53) + slot_text(156) ≤ 25% × 行内宽
+     ⇒ 行内宽 ≥ 836 ⇒ 气泡列宽 ≥ 844。 */
+  container-type: inline-size;
+  container-name: msg-column;
 }
 
 /* U16 顶部历史控制：固定最小高度，按钮切换为 spinner 时不制造额外滚动跳变。 */
@@ -1054,6 +1062,17 @@
 /* ---- 消息气泡（design.md §4 Chat Bubbles） ---- */
 
 .msg-row {
+  /* ---- 操作工具栏「定宽槽位」（用户裁决：气泡宽度必须恒定）-------------------
+     行内任何时刻都按这个宽度为工具栏留位，**与当前有几键无关**（3 键 / 撤回键
+     120s 后消失成 2 键 / 上传中）⇒ 撤回消失时气泡宽度不会跳变。
+     取值 = 该档下 3 键工具栏的**自然宽**（实测，见 flutter/tool/web_row_expected.json）：
+       · 文字模式：收藏 32 + gap 4 + 引用 58 + gap 4 + 撤回 58 = 156
+       · 图标模式：收藏 26 + gap 4 + 22 + gap 4 + 22 = 78 */
+  --msg-actions-slot: 156px;
+  /* 气泡与工具栏之外被固定占掉的宽度 = 头像 37（halo = 32 核 + 2×2.5 光环）+ 行 gap 8×2。
+     ⚠️ 百分比基准是 .msg-row 的**内容盒**（已排除行 padding 0 var(--sp-1) 的 8px），
+     所以这里不能再把行 padding 算进来。 */
+  --msg-actions-reserve: 53px;
   display: flex;
   align-items: flex-end;
   gap: var(--sp-2);
@@ -1099,6 +1118,16 @@
 
 .msg-row.self .msg-body {
   align-items: flex-end;
+}
+
+/* 有工具栏的行：气泡宽度上限必须**扣掉工具栏槽位**，否则只固定槽位还不够——
+   行不溢出时气泡会吃满 75% 上限、只有溢出时才被压缩 ⇒ 3 键 / 2 键之间仍有几像素
+   跳变（改动前实测 900 档 627.8 → 633）。扣掉 reserve + slot 后，气泡上限与
+   「工具栏永远是满槽」一致 ⇒ 3 键 / 2 键 / 上传中 / 无加载 四种状态气泡严格同宽。
+   ⚠️ 只在**真的有工具栏**时扣：已撤回 / 系统消息既没有工具栏也没有头像，
+   按原 75% 上限走，不能被无谓地压窄。 */
+.msg-row:has(> .msg-actions) .msg-body {
+  max-width: min(75%, calc(100% - var(--msg-actions-reserve) - var(--msg-actions-slot)));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1304,13 +1333,28 @@
    pointer-events:none 必须：隐藏态不可点（否则触屏上看不见却能被误触）。
    桌面用 hover / 触屏用点击行切 .is-actions-open（单选由 JS 管理）。 */
 .msg-actions {
+  /* 定宽槽位：宽度恒为 --msg-actions-slot，与键数无关（撤回消失后气泡不动）。
+     ⚠️ 必须是固定 width，不能用 min-width + flex-grow：后者在 2 键时会把剩余按钮
+     拉宽（宽屏 2 键按钮 58 → 74），桌面外观会变。子键只占自然宽、永不压缩，
+     剩余空间以透明留白留在行的外缘 ⇒ 按钮始终紧贴气泡。 */
+  flex: 0 0 auto;
+  width: var(--msg-actions-slot);
   display: flex;
   align-items: center;
   gap: var(--sp-1);
+  /* 留白落在行外缘：peer 行 = [头像][气泡][工具栏]，气泡在左 ⇒ 按钮贴槽左缘；
+     self 行 row-reverse 后视觉 = [工具栏][气泡][头像]，气泡在右 ⇒ 按钮贴槽右缘
+     （见下方 .msg-row.self 规则）。两种方向下工具栏都紧贴气泡。 */
+  justify-content: flex-start;
   padding-bottom: 2px;
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+/* self 行：槽内按钮贴右缘（紧邻气泡），多余留白落在行最外缘，工具栏位置与改动前一致 */
+.msg-row.self .msg-actions {
+  justify-content: flex-end;
 }
 
 /* 键盘聚焦可达性：无论桌面/触屏，聚焦到操作按钮都显示 */
@@ -1373,6 +1417,83 @@
 .msg-send-failed-text {
   font-size: 12px;
   color: var(--destructive);
+}
+
+/* 消息行工具栏内的按钮：只占自然宽、永不压缩、永不换行。
+   槽位固定后不再靠压缩按钮挤空间 ⇒ 窄屏也不会出现「文字竖排」。
+   ⚠️ 必须限定在 .msg-actions 内：.msg-action-btn 还被发帖/收藏/直播/语音等
+   20 余处复用，它们的换行与收缩行为不受本次改动影响。 */
+.msg-actions > .msg-action-btn,
+.msg-actions > .favorite-toggle {
+  flex: 0 0 auto;
+}
+
+.msg-actions .msg-action-btn {
+  white-space: nowrap;
+}
+
+/* 工具栏按钮文字（引用/撤回）：窄屏图标模式下隐藏，宽屏恒显示。
+   包一层 span 而不是隐藏整个按钮：aria-label / 图标 / 点击语义完全不变。 */
+.msg-action-label {
+  white-space: nowrap;
+}
+
+/* ---- 工具栏图标模式（容器够宽才显示文字）：空间不够显示文字 ⇒ 只显示图标 --------
+   用户裁决：「空间够显示文字就显示文字；不够就只显示图标，禁止出现竖排」。
+
+   ⚠️ 判据用**容器查询**而不是视口媒体查询：
+   同一个 vw 下聊天区的真实宽度取决于外壳有没有左侧栏——
+   私聊/消息中心宽屏有 356px 侧栏、宽屏群聊有 380px 侧栏（ServerRail 96 + Channel 284），
+   窄屏 0。只看 vw 会在 1024 档误判（视口看着宽，但气泡列只有 668）。
+   容器 = .message-column（container-type: inline-size，见上方定义）。
+
+   阈值推导（与 Flutter 侧同一口径，用**行内宽**不用视口宽）：
+   文字模式「不吃掉气泡」⇔ rowInner − reserve − slot_text ≥ 0.75 × rowInner
+   ⇔ 0.25 × rowInner ≥ 53 + 156 = 209 ⇔ rowInner ≥ 836（按 slot_text=156 精确算 836）。
+   行内宽 = 列宽 − 2 × sp1(8) ⇒ 列宽 ≥ 844 ⇒ 低于 844 切图标模式（slot = 78）。
+   ⚠️ 用列宽而不是视口宽：宽屏私聊/消息中心有 356px 侧栏、宽屏群聊有 380px 侧栏
+   （ServerRail 96 + ChannelSidebar 284），窄屏 0 ⇒ 同一 vw 下气泡列宽差 356px 以上。
+   例：vw=1024 且有侧栏时列宽仅 668（图标档），无侧栏时 852（文字档）。
+   低于阈值时气泡上限取 75%/84% 与 calc(100% - reserve - slot) 的较小者
+   ⇒ 同样不挤压、不跳变。 */
+@container msg-column (max-width: 844px) {
+  .msg-row {
+    /* 3 键图标模式自然宽 = 收藏 26 + gap 4 + 22 + gap 4 + 22 = 78
+       （收藏键沿用 .favorite-toggle.is-compact 的 26 = 图标 16 + 左右各 5 内沿 + 边框） */
+    --msg-actions-slot: 78px;
+  }
+
+  .msg-action-label {
+    display: none;
+  }
+
+  /* 方键：图标居中、padding 0（对称），绝不换行/竖排 */
+  .msg-actions > .msg-action-btn {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+  }
+
+  /* 图标自带内联 margin-right:4px（MessageBubble.tsx 为文字模式排版而设）：
+     图标模式下必须清掉，否则图标在 22px 方键里偏左。内联样式只能用 !important 覆盖。 */
+  .msg-actions > .msg-action-btn > svg {
+    margin-right: 0 !important;
+  }
+
+  /* 收藏键同步到同一视觉尺度：高度对齐 22px 方键，宽度保持 26（= 图标 16 + 内沿），
+     三键合计 26 + 4 + 22 + 4 + 22 = 78，与 --msg-actions-slot 严格相等。 */
+  .msg-actions > .favorite-toggle.is-compact {
+    width: 26px;
+    min-width: 26px;
+    min-height: 22px;
+    max-height: 22px;
+    padding: 0;
+  }
 }
 
 .msg-action-btn:hover {
@@ -3232,6 +3353,11 @@
 
   .msg-body {
     max-width: 84%;
+  }
+
+  /* 窄屏上限 84%，同样只在有工具栏的行扣掉槽位（见 .msg-body 基规则注释） */
+  .msg-row:has(> .msg-actions) .msg-body {
+    max-width: min(84%, calc(100% - var(--msg-actions-reserve) - var(--msg-actions-slot)));
   }
 }
 

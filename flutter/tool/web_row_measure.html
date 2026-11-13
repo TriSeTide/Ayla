@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Ayla 消息行宽度对账台（工具栏定宽槽位）</title>
+<link rel="stylesheet" href="file:///E:/Elysium-AyerElysia/Elysium/Ayla/web/src/styles/tokens.css">
+<link rel="stylesheet" href="file:///E:/Elysium-AyerElysia/Elysium/Ayla/web/src/styles/base.css">
+<link rel="stylesheet" id="appcss" href="file:///E:/Elysium-AyerElysia/Elysium/Ayla/web/src/styles/app.css">
+<link rel="stylesheet" href="file:///E:/Elysium-AyerElysia/Elysium/Ayla/web/src/styles/auroraqua.css">
+<style>
+/* 与 web 生产一致的字体来源（同 @font-face 家族名，避免 CJK 回退差异影响度量） */
+@font-face { font-family: "Nunito"; font-weight: 400; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/Nunito_400Regular.ttf"); }
+@font-face { font-family: "Nunito"; font-weight: 600; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/Nunito_600SemiBold.ttf"); }
+@font-face { font-family: "Nunito"; font-weight: 700; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/Nunito_700Bold.ttf"); }
+@font-face { font-family: "Space Grotesk"; font-weight: 400; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/SpaceGrotesk_400Regular.ttf"); }
+@font-face { font-family: "Fredoka"; font-weight: 500; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/Fredoka_500Medium.ttf"); }
+html, body { margin: 0; padding: 0; background: #ECF0F2; }
+/* 图标盒：与 MessageBubble.tsx 内联样式同构（width/height 12、vertical-align -2px、margin-right 4） */
+.msg-action-btn > svg { flex: none; }
+</style>
+</head>
+<body>
+<!-- 真实外壳：?chrome= 决定宽屏两侧 chrome，用来量「生产环境真实的 rowInner」。
+     none（默认）= 无侧栏，等价于历史探针口径；
+     messages    = 宽屏私聊/消息中心（.wide-messages-sidebar 332px + gutter）；
+     group       = 宽屏群聊（.server-rail 72 + .channel-sidebar-slot 260+2×gutter）。 -->
+<style>
+  /* hidden 必须真正隐藏：作者样式里 .wide-messages-sidebar 等自带 display:flex，
+     会压过 UA 的 [hidden]{display:none}。 */
+  #shell [hidden] { display: none !important; }
+  /* 生产里宽屏侧栏在 ≤768 直接不渲染（messages.css / app.css 的窄屏媒体查询）：
+     这里同步，否则窄屏会被侧栏吃掉宽度。 */
+  @media (max-width: 768px) {
+    #chrome-messages, #chrome-rail, #chrome-group { display: none !important; }
+  }
+</style>
+<!-- 宽度按生产 CSS 逐值硬编码（messages.css:243–257 / group.css:485–503,681–703）：
+     .wide-messages-sidebar = width 332 + margin 12×2 = 356 占位
+     .server-rail           = width 72  + margin 12×2 = 96 占位
+     .channel-sidebar-slot  = calc(260 + 2×12)       = 284 占位
+     只硬编码宽度；行内元素的 CSS 全部来自真实 app.css。 -->
+<div class="chat-shell" id="shell" style="display:flex;height:100vh">
+  <aside class="wide-messages-sidebar" id="chrome-messages" hidden
+         style="flex:none;width:356px"></aside>
+  <div class="server-rail" id="chrome-rail" hidden style="flex:none;width:96px"></div>
+  <div class="channel-sidebar-slot" id="chrome-group" hidden style="flex:none;display:flex;width:284px"></div>
+  <div class="chat-main">
+    <div class="message-scroll" id="scroll"><div class="message-column" id="col"></div></div>
+  </div>
+</div>
+<script>
+/* 基线对比支持：?appcss=<file:// 绝对路径> 覆盖 app.css（用来量「改动前」的 HEAD 版本，
+   只读、不改仓库文件；基线 CSS 落在系统临时目录）。 */
+(() => {
+  const qs = new URLSearchParams(location.search);
+  const override = qs.get('appcss');
+  if (override) document.getElementById('appcss').href = override;
+  const chrome = qs.get('chrome') || 'none';
+  if (chrome === 'messages') document.getElementById('chrome-messages').hidden = false;
+  if (chrome === 'group') {
+    document.getElementById('chrome-rail').hidden = false;
+    document.getElementById('chrome-group').hidden = false;
+  }
+})();
+
+/* ---- 与 MessageBubble.tsx 逐节点同构的行 DOM ---------------------------------- */
+
+const SHORT = 'Hi';
+const LONG = 'This is a fairly long message used to measure the max bubble width so we can check whether the cap is applied against the right base box under every viewport width we care about.';
+
+const img = (w, h) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"><rect width="' + w + '" height="' + h + '" fill="#BDD4E9"/></svg>');
+
+/* Avatar.tsx：size=32 ⇒ haloStyle width/height = 37；在线/离线不影响尺寸 */
+const halo = '<span class="msg-sender-halo"><span class="avatar-halo is-offline" style="width:37px;height:37px">' +
+  '<span class="avatar-core avatar-core-user" style="font-size:13px">x</span></span></span>';
+
+/* IconQuote / IconUndo：12×12、vertical-align:-2px、margin-right:4（与 tsx 内联样式一致） */
+const icon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px">' +
+  '<path d="M3 21c3 0 7-1 7-8V5H3v8h4c0 3-1 5-4 5v3z"/><path d="M14 21c3 0 7-1 7-8V5h-7v8h4c0 3-1 5-4 5v3z"/></svg>';
+const iconUndo = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px">' +
+  '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>';
+
+/* FavoriteButton.tsx compact：IconHeart 16×16，无文本 */
+const favBtn = '<button type="button" class="favorite-toggle is-compact" aria-label="收藏">' +
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21.2l7.8-7.8 1.1-1.1a5.5 5.5 0 0 0 0-7.7z"/></svg></button>';
+
+function actions(keys) {
+  if (!keys) return '';
+  let html = favBtn;
+  html += '<button type="button" class="msg-action-btn" aria-label="引用回复">' + icon +
+    '<span class="msg-action-label">引用</span></button>';
+  if (keys === 3) {
+    html += '<button type="button" class="msg-action-btn" aria-label="撤回消息">' + iconUndo +
+      '<span class="msg-action-label">撤回</span></button>';
+  }
+  return '<div class="msg-actions">' + html + '</div>';
+}
+
+/* 乐观发送态：.msg-send-state 绝对定位（app.css:1352–1361），不占布局宽 */
+function sendState(mode) {
+  if (mode !== 'uploading') return '';
+  return '<div class="msg-send-state" data-state="uploading">' +
+    '<span class="msg-send-progress" role="status">上传中 42%</span>' +
+    '<button type="button" class="msg-action-btn" aria-label="取消发送">取消</button></div>';
+}
+
+function content(kind) {
+  if (kind === 'recalled') return '<span>你撤回了一条消息</span>';
+  if (kind === 'image') {
+    return '<div class="media-frame media-frame-image" style="width:320px;max-width:100%;aspect-ratio:320/240">' +
+      '<button type="button" class="media-frame-open" aria-label="查看图片原图">' +
+      '<img class="media-image" src="' + img(320, 240) + '" alt="图片"></button></div>';
+  }
+  return kind === 'long' ? LONG : SHORT;
+}
+
+const CASES = [
+  { id: 'self-3key-short', keys: 3, kind: 'short' },
+  { id: 'self-2key-short', keys: 2, kind: 'short' },
+  { id: 'self-3key-long', keys: 3, kind: 'long' },
+  { id: 'self-2key-long', keys: 2, kind: 'long' },
+  { id: 'self-3key-pending', keys: 3, kind: 'short', send: 'uploading' },
+  { id: 'self-2key-pending', keys: 2, kind: 'short', send: 'uploading' },
+  { id: 'self-3key-image', keys: 3, kind: 'image' },
+  { id: 'self-2key-image', keys: 2, kind: 'image' },
+  { id: 'peer-2key-short', keys: 2, kind: 'short', self: false },
+  { id: 'peer-2key-long', keys: 2, kind: 'long', self: false },
+  { id: 'peer-2key-image', keys: 2, kind: 'image', self: false },
+  /* 无工具栏的行（已撤回）：不应被扣槽位而变窄 */
+  { id: 'self-recalled', keys: 0, kind: 'recalled' },
+  { id: 'peer-recalled', keys: 0, kind: 'recalled', self: false },
+];
+
+function row(c) {
+  const self = c.self !== false;
+  const bubbleCls = c.kind === 'recalled'
+    ? 'bubble bubble-other recalled'
+    : self ? 'bubble bubble-self' : 'bubble bubble-other';
+  const media = c.kind === 'image' ? ' bubble-media' : '';
+  return '<div class="msg-row ' + (self ? 'self' : 'peer') + '">' + halo +
+    '<div class="msg-body">' +
+      '<div class="msg-bubble-wrap">' + sendState(c.send) +
+        '<div class="' + bubbleCls + media + '">' + content(c.kind) + '</div>' +
+      '</div>' +
+      '<div class="bubble-meta"><span class="bubble-time">刚刚</span></div>' +
+    '</div>' + actions(c.keys) + '</div>';
+}
+
+document.getElementById('col').innerHTML =
+  CASES.map(c => '<div data-case="' + c.id + '">' + row(c) + '</div>').join('');
+
+const R = (el) => {
+  if (!el) return null;
+  const b = el.getBoundingClientRect();
+  return { l: +b.left.toFixed(2), r: +b.right.toFixed(2), w: +b.width.toFixed(2), h: +b.height.toFixed(2) };
+};
+
+/* 单个按钮的「自然宽」= 其内容盒在 nowrap 下的 preferred width：
+   用 clone + width:max-content 量，避免被父级压缩后读不到 intrinsic。 */
+function naturalWidth(el) {
+  if (!el) return null;
+  const clone = el.cloneNode(true);
+  clone.style.cssText = 'position:absolute;left:-9999px;top:0;width:max-content;' +
+    'display:inline-flex;align-items:center;justify-content:center;';
+  el.parentElement.appendChild(clone);
+  const w = +clone.getBoundingClientRect().width.toFixed(2);
+  clone.remove();
+  return w;
+}
+
+window.__measure = () => {
+  const out = [];
+  for (const c of CASES) {
+    const holder = document.querySelector('[data-case="' + c.id + '"]');
+    if (!holder) continue;
+    const q = (s) => holder.querySelector(s);
+    const rowEl = q('.msg-row');
+    const actEl = q('.msg-actions');
+    const btns = [...holder.querySelectorAll('.msg-actions > *')];
+    const rowRect = R(rowEl);
+    const cs = getComputedStyle(rowEl);
+    const padL = parseFloat(cs.paddingLeft), padR = parseFloat(cs.paddingRight);
+    const bodyEl = q('.msg-body');
+    out.push({
+      id: c.id,
+      row: rowRect,
+      rowInner: +(rowRect.w - padL - padR).toFixed(2),
+      rowPad: +(padL + padR).toFixed(2),
+      halo: R(q('.msg-sender-halo')),
+      actions: R(actEl),
+      actionsNatural: naturalWidth(actEl),
+      slotVar: actEl ? getComputedStyle(actEl).getPropertyValue('--msg-actions-slot').trim() : '',
+      body: R(bodyEl),
+      bodyMaxWidth: bodyEl ? getComputedStyle(bodyEl).maxWidth : null,
+      bubble: R(q('.bubble')),
+      /* 图标模式的方键内图标是否居中（左右留白应相等） */
+      btnIconCentering: btns.map((b) => {
+        const svg = b.querySelector('svg');
+        if (!svg) return null;
+        const br = b.getBoundingClientRect(), sr = svg.getBoundingClientRect();
+        return { left: +(sr.left - br.left).toFixed(2), right: +(br.right - sr.right).toFixed(2),
+                 top: +(sr.top - br.top).toFixed(2), bottom: +(br.bottom - sr.bottom).toFixed(2) };
+      }),
+      /* 工具栏是否仍紧贴气泡（应恒等于行 gap = 8，与键数无关）：
+         peer 行工具栏在气泡右侧 ⇒ 量 actions.left − bubble.right；
+         self 行走 row-reverse（工具栏在气泡左侧）⇒ 量 bubble.left − actions.right。 */
+      bubbleToActions: (() => {
+        const b = q('.bubble');
+        if (!b || !actEl) return null;
+        const br = b.getBoundingClientRect(), ar = actEl.getBoundingClientRect();
+        const self = rowEl.classList.contains('self');
+        return +(self ? br.left - ar.right : ar.left - br.right).toFixed(2);
+      })(),
+      buttons: btns.map((b) => {
+        const label = b.querySelector('.msg-action-label');
+        const r = R(b);
+        const lines = label ? label.getClientRects().length : 0;
+        return {
+          cls: b.className,
+          w: r.w,
+          h: r.h,
+          natural: naturalWidth(b),
+          labelShown: lines > 0,
+          labelLines: lines,
+          labelW: label ? +label.getBoundingClientRect().width.toFixed(2) : null,
+          overflowX: b.scrollWidth - b.clientWidth,
+        };
+      }),
+      gap: cs.columnGap || cs.gap,
+      actionPadLeft: actEl ? +parseFloat(getComputedStyle(actEl).paddingLeft).toFixed(2) : null,
+      /* 槽位内按钮组的实际占用宽（= 按钮自然宽 + gap），剩余留白 = 槽位 − 该值 */
+      actionContent: (() => {
+        if (!btns.length) return null;
+        const first = btns[0].getBoundingClientRect();
+        const last = btns[btns.length - 1].getBoundingClientRect();
+        return +(last.right - first.left).toFixed(2);
+      })(),
+      haloToBubble: (() => {
+        const h = q('.msg-sender-halo'), b = q('.bubble');
+        if (!h || !b) return null;
+        const hr = h.getBoundingClientRect(), br = b.getBoundingClientRect();
+        const self = rowEl.classList.contains('self');
+        return +(self ? hr.left - br.right : br.left - hr.right).toFixed(2);
+      })(),
+      /* 槽位内未被按钮占用的透明留白（应全部落在行的外缘） */
+      actionFree: (() => {
+        if (!actEl || !btns.length) return null;
+        const ar = actEl.getBoundingClientRect();
+        const first = btns[0].getBoundingClientRect(), last = btns[btns.length - 1].getBoundingClientRect();
+        const self = rowEl.classList.contains('self');
+        // self: 按钮贴槽右缘 ⇒ 留白在左；peer: 按钮贴槽左缘 ⇒ 留白在右
+        return +Math.abs(self ? first.left - ar.left : ar.right - last.right).toFixed(2);
+      })(),
+    });
+  }
+  return {
+    chrome: new URLSearchParams(location.search).get('chrome') || 'none',
+    viewport: document.documentElement.clientWidth,
+    scrollW: +document.getElementById('scroll').getBoundingClientRect().width.toFixed(2),
+    sidebarW: (() => {
+      const el = document.getElementById('chrome-messages');
+      return el.hidden ? 0 : +el.getBoundingClientRect().width.toFixed(2);
+    })(),
+    columnW: +document.getElementById('col').getBoundingClientRect().width.toFixed(2),
+    scrollPad: (() => { const s = document.getElementById('scroll'); const s2 = getComputedStyle(s);
+      return parseFloat(s2.paddingLeft) + parseFloat(s2.paddingRight); })(),
+    rows: out,
+  };
+};
+
+/* container-type: inline-size 会把该元素变成**包含块**（containing block），
+   使内部 position:absolute/fixed 的子孙改为相对它定位。
+   .message-column 内部确实有绝对定位子孙：.msg-send-state（气泡左侧上传态）
+   —— 它挂在 .msg-bubble-wrap（position:relative）下，就近的定位祖先是 wrap，
+   不受影响。这里量一下确认它没有跑位。 */
+window.__containment = () => {
+  const badge = document.querySelector('[data-case="self-3key-pending"] .msg-send-state');
+  const wrap = document.querySelector('[data-case="self-3key-pending"] .msg-bubble-wrap');
+  const col = document.getElementById('col');
+  const R = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
+    return { l: +b.left.toFixed(2), r: +b.right.toFixed(2), w: +b.width.toFixed(2), h: +b.height.toFixed(2) }; };
+  return {
+    wrap: R(wrap),
+    sendState: R(badge),
+    /* 相对 wrap 的位移：应为 right = wrap.left - 8（气泡左侧 8px），top 居中 */
+    deltaRight: badge && wrap ? +(wrap.getBoundingClientRect().left - badge.getBoundingClientRect().right).toFixed(2) : null,
+  };
+};
+
+window.__ready = async () => {
+  await document.fonts.ready;
+  await Promise.all([...document.images].map((i) => i.decode().catch(() => {})));
+  return document.images.length;
+};
+document.fonts.ready.then(() => { document.title = 'ready'; });
+</script>
+</body>
+</html>

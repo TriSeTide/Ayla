@@ -275,7 +275,7 @@ export function MessageBubble({
           aria-label="引用回复"
         >
           <IconQuote width={12} height={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-          引用
+          <span className="msg-action-label">引用</span>
         </button>
       )}
       {onRecall && (
@@ -286,7 +286,7 @@ export function MessageBubble({
           aria-label="撤回消息"
         >
           <IconUndo width={12} height={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-          撤回
+          <span className="msg-action-label">撤回</span>
         </button>
       )}
     </div>

@@ -792,6 +792,8 @@ class AylaMsgActionButton extends StatefulWidget {
     this.minWidth,
     this.minHeight,
     this.sweep = true,
+    this.iconOnly = false,
+    this.iconOnlySize,
   });
 
   /// 是否带 **hover 扫光**（默认 **true**）。
@@ -807,6 +809,23 @@ class AylaMsgActionButton extends StatefulWidget {
   /// 因是**该处始终带扫光**，默认值为 true（与本库 [AylaIconButton] / [AylaGlassButton]
   /// 的默认 false 不同：那两处的 web 选择器组只含特定按钮，`msg-action-btn` 是明文在列）。
   final bool sweep;
+
+  /// **仅图标档**（2026-11-12 用户裁决「空间不够则仅显示图标，不再出现竖排」）。
+  ///
+  /// 为 true 时只渲染图标、不渲染 [label] 文字，并把胶囊做成**方形**
+  /// （[iconOnlySize] × [iconOnlySize]，内容居中）。等价 web 侧
+  /// `@container msg-column (max-width: 844px) { .msg-action-label { display: none } }` +
+  /// 方形按钮：那里文字是 `<span class="msg-action-label">`，窄行直接 `display:none`。
+  /// （判据是**气泡列宽**，不是窗口宽 —— 侧栏会吃掉 356~380px，见
+  /// `message_bubble.dart` 的 `kAylaMsgActionsSlotTextBreakpoint`。）
+  ///
+  /// 语义不变：[semanticLabel] 仍然是无障碍名称（web 的 `aria-label` 同理）。
+  final bool iconOnly;
+
+  /// [iconOnly] 档的方键边长（CSS px）。null = 保留 [minWidth]/内容宽。
+  ///
+  /// 现在只有气泡工具栏会传（窄行 22，宽行不传）。
+  final double? iconOnlySize;
 
   /// 胶囊最小宽度（null = 按内容自适应，web `.msg-action-btn` 的原生行为）。
   ///
@@ -881,6 +900,14 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton>
             for (final BoxShadow sh in list) sh.copyWith(color: dimColor(sh.color)),
           ];
 
+    // 图标档归零内距：方键 22 里放 12px 图标（web 窄屏 `.msg-action-btn { padding: 0 }`）。
+    final EdgeInsets pad = widget.iconOnly
+        ? EdgeInsets.zero
+        : const EdgeInsets.symmetric(
+            horizontal: AylaSpacing.sp2,
+            vertical: AylaSpacing.sp1,
+          );
+
     final Widget face = AnimatedContainer(
       // ⚠️ auroraqua.css:54–94 把本类一并纳入按钮组：`transition` 全组为
       // **200ms `--auroraqua-ease`**（与 shell.css / app.css 里各自的 `--dur-fast` 180ms
@@ -888,18 +915,24 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton>
       duration: AylaDurations.button,
       curve: AylaCurves.auroraqua,
       // 胶囊最小宽（见 [AylaMsgActionButton.minWidth]：阴影环 Stack 会放宽约束，须在这层兜住）
-      constraints: BoxConstraints(
-        minWidth: widget.minWidth ?? 0,
-        minHeight: widget.minHeight ?? 0,
-      ),
+      //
+      // 图标档（[AylaMsgActionButton.iconOnly]）按 **方键**给紧约束：边长 =
+      // `iconOnlySize`（22），内容居中，padding 归零 —— 等价 web 窄屏的
+      // `.msg-row .msg-action-btn { width:22px; height:22px; padding:0 }`。
+      constraints: widget.iconOnly && widget.iconOnlySize != null
+          ? BoxConstraints.tightFor(
+              width: widget.iconOnlySize!,
+              height: widget.iconOnlySize!,
+            )
+          : BoxConstraints(
+              minWidth: widget.minWidth ?? 0,
+              minHeight: widget.minHeight ?? 0,
+            ),
       // `.msg-action-btn { justify-content: center }`：胶囊被拉宽时**内容居中**
       // （内容 Row 是 mainAxisSize.min，缺这一句会贴在左侧 —— 实测
       //  「保存两个字要居中」）
       alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(
-        horizontal: AylaSpacing.sp2,
-        vertical: AylaSpacing.sp1,
-      ),
+      padding: pad,
       decoration: BoxDecoration(
         color: dimColor(AylaColors.glassBgStrong),
         borderRadius: BorderRadius.circular(AylaRadii.rSm),
@@ -922,29 +955,37 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton>
         // `margin-right: 4px` 属于它自己的行内盒子），这样 min-content 才含这 4px：
         // web 实测 `.msg-action-btn` 的 min-content = 16(图标盒) + 16(padding) + 2(border)
         // = 33.6，本件同一算式。
-        child: Wrap(
-          spacing: 0,
-          runSpacing: 0,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: <Widget>[
-            if (widget.icon != null)
-              Padding(
-                padding: const EdgeInsets.only(right: AylaSpacing.sp1),
-                child: IconTheme(
-                  data: IconThemeData(color: fg, size: 11),
-                  child: widget.icon!,
-                ),
+        child: widget.iconOnly
+            // 图标档：**只有图标**（web 窄屏 `.msg-action-label { display:none }`）。
+            // 不能只靠"宽 22 里放不下文字就自然折行" —— 那样会留下竖排残影，
+            // 正是用户 2026-11-12 明令禁止的形态，故直接不构建文字节点。
+            ? IconTheme(
+                data: IconThemeData(color: fg, size: 12),
+                child: widget.icon ?? const SizedBox.shrink(),
+              )
+            : Wrap(
+                spacing: 0,
+                runSpacing: 0,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  if (widget.icon != null)
+                    Padding(
+                      padding: const EdgeInsets.only(right: AylaSpacing.sp1),
+                      child: IconTheme(
+                        data: IconThemeData(color: fg, size: 11),
+                        child: widget.icon!,
+                      ),
+                    ),
+                  Text(
+                    widget.label,
+                    style: t.caption.copyWith(
+                      fontSize: 12,
+                      color: fg,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
               ),
-            Text(
-              widget.label,
-              style: t.caption.copyWith(
-                fontSize: 12,
-                color: fg,
-                height: 1.2,
-              ),
-            ),
-          ],
-        ),
       ),
     );
 

@@ -14,12 +14,25 @@
 /// + 与 Flutter 侧同一批 TTF）用 Playwright 在 375/480/900/1440 视口下读
 /// `getBoundingClientRect()`。字体已对齐 ⇒ 差值只反映布局。
 ///
-/// 关键实测（`.msg-row` 内容宽 W = 视口档对应的行宽）：
+/// ## ⚠️ 2026-11-12 口径变更（用户裁决）—— 覆盖下面的历史实测表
+///
+/// 历史实测（**旧行为**）是：工具栏作为可收缩项参与主轴收缩 ⇒ 375 档 3 键把气泡
+/// 压到 183；而 120s 后撤回键消失时工具栏少 37.6、气泡跳回 220.6；加载态也会再挤一次。
+/// 这正是用户实报的病态形态。
+///
+/// 现口径（两端同式，**宽度与键数量/发送态无关**）：
+/// 气泡宽 = min(比例上限, 行内宽 − reserve − 槽位)
+///   · reserve = 53（头像 37 + 2×gap 8）；
+///   · 槽位 = [kAylaMsgActionsSlotText] 155.2（文字档）/ [kAylaMsgActionsSlotIcon] 78（图标档）；
+///   · 比例上限 = 75%（宽屏）/ 84%（窄屏）；
+///   · 档位：行内宽 < [kAylaMsgActionsSlotTextBreakpoint] 832.8 ⇒ 图标档。
+///
+/// 保留下面这张表只为说明「旧值为什么不能再用」，它不再是断言目标：
 /// | 档 | peer-long 气泡 | 工具栏 | self-long 气泡 | 工具栏 |
 /// |---|---|---|---|---|
-/// | 375 | 220.6 | 69.6（2 键 32 + 4 + 33.6） | 183.0 | 107.2 |
+/// | 375 | 220.6 | 69.6（2 键） | 183.0 | 107.2 |
 /// | 480 | 325.4 | 69.6 | 287.8 | 107.2 |
-/// | 900 | 633.0 | 93.6（不收缩） | 633.0 | 155.2 |
+/// | 900 | 633.0 | 93.6 | 633.0 | 155.2 |
 /// | 1440 | 714.0 | 93.6 | 714.0 | 155.2 |
 library;
 
@@ -345,18 +358,21 @@ void main() {
       .widgetList<AylaCssFlexRow>(find.byType(AylaCssFlexRow))
       .firstWhere((AylaCssFlexRow r) => r.mainAxisSize == MainAxisSize.min);
 
-  // ---- 他人（peer）长消息：工具栏 2 键 ----
+  // ---- 他人（peer）长消息 ----
   //
-  // web 实测（`tool/web_bubble_measure.html`）：
-  //   375 → 气泡 220.6 / 工具栏 69.6
-  //   480 → 气泡 325.4 / 工具栏 69.6
-  //   900 → 气泡 633.0 / 工具栏 93.6（不收缩）
-  //   1440 → 气泡 714.0 / 工具栏 93.6（不收缩）
+  // 2026-11-12 口径：宽度 = min(比例上限, 行内宽 − 53 − 槽位)，**与键数量无关**。
+  // 375/480/768 走图标档（槽位 78）、900/1440 走文字档（槽位 155.2）：
+  //   320 → 288 − 53 − 78 = 157（84% = 241.9 ⇒ 取 157）
+  //   375 → 343 − 53 − 78 = 212
+  //   480 → 448 − 53 − 78 = 317
+  //   768 → 736 − 53 − 78 = 605
+  //   900 → 844 − 53 − 155.2 = 635.8 vs 75% = 633 ⇒ 取 633
+  //   1440 → 952 − 53 − 155.2 = 743.8 vs 75% = 714 ⇒ 取 714
   for (final List<double> c in <List<double>>[
-    <double>[375, 220.6],
-    // 480 档浏览器实测 325.4；Flutter 文本测量差 ⇒ 以 324.4 ± 1.5 表达
-    // （差值 1.07 来自 Nunito 在两端 0.02px 级的字宽累积，见文件头「字体已对齐」）。
-    <double>[480, 324.4],
+    <double>[320, 157.0],
+    <double>[375, 212.0],
+    <double>[480, 317.0],
+    <double>[768, 605.0],
     <double>[900, 633.0],
     <double>[1440, 714.0],
   ]) {
@@ -378,12 +394,16 @@ void main() {
     });
   }
 
-  // ---- 自己（self）长消息：工具栏 3 键 —— 收缩最激烈的一档 ----
+  // ---- 自己（self）长消息 —— **必须与 peer 同值** ----
   //
-  // web 实测：375 → 183.0 / 480 → 287.8 / 900 → 633.0 / 1440 → 714.0
+  // 这是本次修复的核心不变量：自己行有 3 键（含 120s 内才有的撤回键），
+  // 旧行为下 375 档被压到 183、撤回键消失后跳到 220.6。
+  // 现在工具栏用**固定槽位**（与键数量无关）且气泡上限已扣掉槽位 ⇒ 与 peer 同宽。
   for (final List<double> c in <List<double>>[
-    <double>[375, 183.0],
-    <double>[480, 287.8],
+    <double>[320, 157.0],
+    <double>[375, 212.0],
+    <double>[480, 317.0],
+    <double>[768, 605.0],
     <double>[900, 633.0],
     <double>[1440, 714.0],
   ]) {
@@ -407,7 +427,7 @@ void main() {
     });
   }
 
-  testWidgets('★ 窄屏 375：工具栏被压到 107.2（3 键各 33.6 + gap 4×2）', (
+  testWidgets('★ 窄屏 375：工具栏占**固定槽位 78**（不再被压缩、不随键数变化）', (
     WidgetTester tester,
   ) async {
     await _loadFonts();
@@ -423,10 +443,19 @@ void main() {
       ),
       const Size(375, 1400),
     );
-    // `.msg-actions` 是内层 flex 容器，被外层压到 107.2 后自身宽 = 子键之和。
+    // 2026-11-12：工具栏宽度 = **固定槽位**（图标档 78），与键数量无关。
+    // 旧行为是「被 flex-shrink 压到 107.2、按钮文字竖排」，正是用户裁决要消灭的形态。
+    final Rect slot = tester.getRect(
+        find.ancestor(
+          of: find.byWidget(actionsRow(tester)),
+          matching: find.byType(SizedBox),
+        ).first);
+    expect(slot.width, closeTo(kAylaMsgActionsSlotIcon, 0.01),
+        reason: '★ 375 档工具栏槽位 = 图标档常量（与 3 键/2 键无关）');
+    // 按钮组贴气泡一侧、不被拉伸：内层行宽 = 子键自然宽之和（3 个方键 + 2 gap）。
     expect(tester.getSize(find.byWidget(actionsRow(tester))).width,
-        closeTo(107.2, 1.0),
-        reason: '★ 375 档工具栏宽（web 实测 107.2）—— 不收缩时代这里是 155.2');
+        lessThan(kAylaMsgActionsSlotIcon + 0.01),
+        reason: '★ 按钮组不得撑满槽位（剩余宽度是留白，不是拉伸）');
   });
 
   // 这里断言的是 **Flutter 侧的自然宽 132**，不是 web 的 155.2：按钮宽 = 图标 16 +
@@ -498,11 +527,18 @@ void main() {
     expect(start, greaterThan(0));
     final int end = src.indexOf('static Widget? _actionIcon', start);
     final String body = src.substring(start, end < 0 ? src.length : end);
+    // 文字档仍用 Wrap（缩进随 iconOnly 三元分支变化，故只校验存在性）
     expect(
-      body.contains('child: Wrap('),
+      body.contains('Wrap('),
       isTrue,
-      reason: '★ Row 的 min-content 是「图标 + 一个字宽」，压不到 web 的 16px；'
+      reason: '★ 文字档的内容容器：Row 的 min-content 是「图标 + 一个字宽」，'
           'Wrap 取子项最大 ⇒ 与 CSS 行内盒同解',
+    );
+    expect(
+      body.contains('widget.iconOnly'),
+      isTrue,
+      reason: '★ 2026-11-12 追加图标档：窄行只渲染图标、不构建文字节点 '
+          '（用户裁决「空间不够则仅显示图标，不再出现竖排」）',
     );
     expect(
       body.contains('padding: const EdgeInsets.only(right: AylaSpacing.sp1)'),

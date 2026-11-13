@@ -209,6 +209,66 @@ const double kAylaMsgActionBtnMinContent = 33.6;
 /// `.favorite-toggle.is-compact` 的 `min-width`（`app.css:3334–3338`）。
 const double kAylaFavoriteCompactMinWidth = 32;
 
+/// 工具栏**固定槽位**（CSS px）—— 与当前有几个键**无关**的常量占位。
+///
+/// ## 为什么必须是常量（2026-11-12 用户裁决）
+///
+/// 用户实报：窄屏下自己的气泡被左侧工具栏挤得很窄，**120s 后撤回键消失时气泡变宽**
+/// （明显的跳动）。根因：`.msg-actions` 宽 = 子键自然宽之和 ⇒ 自己行 3 键 155.2 /
+/// 2 键 97.6，差额直接回流给气泡。
+///
+/// 反过来「不让工具栏挤气泡、让气泡挤工具栏」会把按钮压窄、文字竖排，且撤回键
+/// 消失后按钮又变宽 —— 仍是视觉跳变。
+///
+/// 裁决口径：**气泡宽度从发送瞬间到终态完全一致**，缺的宽度由工具栏的**固定槽位**
+/// 承担，与键数量无关：
+/// - 3 键时槽位刚好用完；
+/// - 2 键时槽位右端留白（self 行 `row-reverse` ⇒ 留白落在视觉外缘，按钮组仍紧贴气泡；
+///   peer 行 `justify-content:flex-start` ⇒ 按钮组贴头像侧，留白在靠气泡的外缘）；
+/// - 气泡侧把**同一常量**从 `max-width` 里扣掉（见 `build` 的 `bodyMaxWidth`）
+///   ⇒ 行在阈值以上永不溢出、气泡永不收缩 ⇒ 宽度恒定。
+///
+/// ## 两档（与 web `--msg-actions-slot` 同值）
+///
+/// | 档位 | 生效条件 | 值 | 组成 |
+/// |---|---|---|---|
+/// | 文字档 | 行内宽 ≥ [kAylaMsgActionsSlotTextBreakpoint] | 155.2 | 收藏 32 + 4 + 引用 57.6 + 4 + 撤回 57.6 |
+/// | 图标档 | 行内宽 < 该阈值 | 78 | 收藏 26 + 4 + 22 + 4 + 22 |
+const double kAylaMsgActionsSlotText = 155.2;
+
+/// 图标档固定槽位（窄屏/窄行）—— 见 [kAylaMsgActionsSlotText] 的表。
+const double kAylaMsgActionsSlotIcon = 78;
+
+/// 文字档阈值（**行内宽** = 行宽 − 2×sp1，即 `.msg-row` 的 content box）。
+///
+/// 文字档「不挤压气泡」的条件是 `reserve + F_text ≤ rowInner × 0.25`
+/// （气泡上限 75%），其中 `reserve` = 头像 37 + 2×gap 8 = 53：
+/// `(53 + 155.2) / 0.25 = 832.8`。
+///
+/// 低于该值仍用文字档，就必须压窄按钮（文字竖排）—— 正是用户 2026-11-12 追加裁决
+/// 禁止的形态：「空间够显示文字就显示文字，不够则仅显示图标，不再出现竖排」。
+///
+/// ## ⚠️ 判据是**行内宽**，不是窗口宽（2026-11-12 web 对账确认）
+///
+/// 气泡列宽比窗口窄得多 —— 宽屏私聊侧栏 356（`.wide-messages-sidebar` 332 +
+/// gutter 12×2）、群聊侧栏 380（ServerRail 96 + ChannelSidebar 284）：
+///
+/// | 窗口 | 私聊 rowInner（带侧栏） | rowInner（无侧栏） |
+/// |---|---|---|
+/// | 900 | **488** | 844 |
+/// | 1024 | **612** | 952 |
+/// | 1280 | **868** | 952 |
+///
+/// 窗口 1024 的真实 rowInner 只有 612 << 832.8 ⇒ 必须走图标档；
+/// 若按窗口宽判会被误判成文字档 ⇒ 工具栏压窄气泡，且与 web 在 900–1100 区间分叉。
+/// web 侧的等价物是容器查询（`@container msg-column (max-width: 844px)`，
+/// 844 ≈ 832.8 + 2×sp1 与 web 实测取整）；本件的等价物是 `LayoutBuilder`
+/// 拿到的整行约束 —— **不要**改成 `MediaQuery.sizeOf(context).width`。
+///
+/// 本文件实测（行宽 = 窗口宽，测试里没有侧栏）：320/375/414/480/768 走图标档，
+/// 900/1280/1440 走文字档 —— 与 `test/css_flex_row_test.dart` 的期望值一致。
+const double kAylaMsgActionsSlotTextBreakpoint = 832.8;
+
 /// 撤回时限（秒）—— `hooks/useChat.ts:26` `RECALL_SECONDS = 120`，
 /// 与后端 `MESSAGE_RECALL_SECONDS` 对齐。
 const int kAylaMessageRecallSeconds = 120;
@@ -647,29 +707,24 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
     final bool showRecall =
         widget.onRecall != null && aylaCanRecall(msg, widget.currentUserId);
 
-    final Widget? actions = (!recalled && !msg.isSystem)
-        ? _MsgActions(
-            msg: msg,
-            // 悬停档只在 **`@media (hover:hover) and (not (max-width:768px))`** 的形态生效
-            // （app.css:1317–1322）：窄屏 与 触屏档一律不因悬停展开，只走点行切换。
-            // `_focused` 两档都留 —— 对应 web `.msg-row:focus-within`
-            // （app.css:1304–1308，**无媒体查询**，键盘聚焦可达性）。
-            visible: (_hovered && !_tapMode) ||
-                _focused ||
-                widget.actionsOpen,
-            showRecall: showRecall,
-            favoriteState: widget.favoriteState,
-            favoriteBusy: widget.favoriteBusy,
-            favoriteError: widget.favoriteError,
-            onToggleFavorite: widget.onToggleFavorite,
-            onRetryFavoriteStatus: widget.onRetryFavoriteStatus,
-            favoriteTargetType: widget.favoriteTargetType,
-            favoriteTargetId: widget.favoriteTargetId,
-            favoriteController: widget.favoriteController,
-            onQuote: widget.onQuote,
-            onRecall: widget.onRecall,
-          )
-        : null;
+    // ⚠️ 工具栏槽位（文字档 / 图标档）**必须在 LayoutBuilder 里按真实行宽判定**，
+    // 不能用 `MediaQuery.sizeOf(context).width`（= 窗口宽）：
+    //
+    // web 侧（2026-11-12 实测，teammate 对账发现）气泡列宽比窗口窄得多 ——
+    // 宽屏私聊有 356px 侧栏（.wide-messages-sidebar 332 + gutter 12×2）、
+    // 群聊有 380px（ServerRail 96 + ChannelSidebar 284）。同一个 vw 下气泡列宽
+    // 差 356px 以上：**vw=1024 时真实 rowInner 只有 612**，远低于 836 的阈值。
+    // 若按窗口宽判档，1024 会被误判成文字档 ⇒ 工具栏把气泡压窄，且在 900~1100
+    // 区间与 web 分叉。web 已改用容器查询（`@container msg-column (max-width:844px)`）
+    // 直接吃列宽；Flutter 侧的等价物就是 `LayoutBuilder` 拿到的整行约束。
+    //
+    // ⇒ 槽位与档位都下沉到下面的 `LayoutBuilder` 里算（见 `iconActions` /
+    // `actionsSlot`），`actions` 也在那里构建（需要 iconOnly / slotWidth）。
+
+    // 工具栏**是否存在**只取决于消息状态（与宽度无关）。
+    // 具体 widget 下沉到 `LayoutBuilder` 里构建 —— 因为 iconOnly 与槽位宽
+    // 取决于**真实行宽**（窗口宽不可用，见上面侧栏那一段）。
+    final bool hasActions = !recalled && !msg.isSystem;
 
     // ⚠️ **气泡宽度 = 内容宽**（2026-10-21 用户实报「气泡太长了」）。
     //
@@ -703,9 +758,6 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
           msg: msg,
           isSelf: widget.isSelf,
           isElysia: widget.isElysia,
-          onCancel: widget.onCancel,
-          onRetry: widget.onRetry,
-          onRemove: widget.onRemove,
           quoteText: widget.quoteText,
           onQuoteJump: widget.onQuoteJump,
           jumpedRecalled: widget.jumpedRecalled,
@@ -753,34 +805,96 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
           0,
           c.maxWidth - 2 * AylaSpacing.sp1,
         );
-        final double bodyMaxWidth = rowInnerWidth * (narrow ? 0.84 : 0.75);
-        // `.msg-actions` 的 min-content = 各键 min-content 之和 + 键间 gap（app.css:1293）。
-        // 实测（Chrome）：他人行 32 + 4 + 33.6 = 69.6；自己行再加 4 + 33.6 = 107.2。
-        final int actionCount = 1 +
-            (widget.onQuote != null ? 1 : 0) +
-            (showRecall ? 1 : 0);
-        final double actionsMinContent = kAylaFavoriteCompactMinWidth +
-            (actionCount - 1) * AylaSpacing.sp1 +
-            (actionCount - 1) * kAylaMsgActionBtnMinContent;
-        // ⚠️ 主轴 = **CSS flex-shrink**（2026-10-22 补，见文件头「与 web 的偏差」3 已更新）。
+        // 工具栏**档位 + 槽位**在这里按**真实行宽**判定（不是窗口宽）。
+        // 事实源与推导见 [kAylaMsgActionsSlotTextBreakpoint] 与上面 build 顶层的注释。
+        final bool iconActions =
+            rowInnerWidth < kAylaMsgActionsSlotTextBreakpoint;
+        final double actionsSlot =
+            iconActions ? kAylaMsgActionsSlotIcon : kAylaMsgActionsSlotText;
+
+        // 工具栏 / 发送态的 widget 必须**在这里**构建：iconOnly 与槽位宽是本帧
+        // 才知道的（取决于真实行宽）。`hasActions` 只回答「该不该有工具栏」。
+        final Widget? actionsNow = hasActions
+            ? _MsgActions(
+                msg: msg,
+                visible: (_hovered && !_tapMode) ||
+                    _focused ||
+                    widget.actionsOpen,
+                showRecall: showRecall,
+                iconOnly: iconActions,
+                slotWidth: actionsSlot,
+                favoriteState: widget.favoriteState,
+                favoriteBusy: widget.favoriteBusy,
+                favoriteError: widget.favoriteError,
+                onToggleFavorite: widget.onToggleFavorite,
+                onRetryFavoriteStatus: widget.onRetryFavoriteStatus,
+                favoriteTargetType: widget.favoriteTargetType,
+                favoriteTargetId: widget.favoriteTargetId,
+                favoriteController: widget.favoriteController,
+                onQuote: widget.onQuote,
+                onRecall: widget.onRecall,
+              )
+            : null;
+
+        // 气泡上限 = min(75%（窄屏 84%）, 行内宽 − 头像/间距预留 − 工具栏槽位)。
         //
-        // 上一轮这里是 Flutter 的 `Row`（子项**不收缩**），宽屏 900/1440 恰好对齐
-        // （空间够，CSS 也不收缩），但窄屏 375 工具栏把气泡挤窄 —— web 的
-        // `.msg-actions`/其按钮都是 `flex-shrink: 1`（app.css:1290–1298 / 1324–1333
-        // **没有任何 flex-shrink:0 或 nowrap**），挤不下时按钮压窄 + 标签折行。
+        // **第二项是消除跳变的关键**（2026-11-12）：只固定槽位而不扣气泡上限的话，
+        // 行有可能不溢出 ⇒ 气泡吃满 75% 上限；溢出时又按 flex-shrink 收缩 ⇒
+        // 气泡宽度仍随键数量变化。扣掉后行在上限内**永不溢出**、气泡**永不收缩**。
         //
-        // Flutter 的 `Flexible` **不是**它的等价物（那是「分配空间」，空间够也会改宽，
-        // 实测 900 档气泡 633→395 腰斩），故用自写的 [AylaCssFlexRow] 表达规范 §9.7
-        // 的收缩分支：**只在真正溢出时**按 flex-basis 加权压缩，且各自不低于 min-width。
+        // 预留（`reserve`）= 头像 37（[AylaAvatarHalo] 外径 = size 32 + 环 5）
+        // + 2 × gap 8（`.msg-row { gap: var(--sp-2) }`）。
+        final bool hasHalo = halo != null;
+        final double reserve =
+            hasHalo ? 37 + 2 * AylaSpacing.sp2 : 0;
+
+        // 发送态（乐观消息 / 发送失败）：**占用工具栏的固定槽位**，不占气泡宽度。
         //
-        // 各件的 CSS 参数（逐条对账，实测值见 test/css_flex_row_test.dart）：
+        // 2026-11-12 用户裁决：加载态不得挤压气泡宽度（web 的
+        // `.msg-send-state` 是 `position:absolute`，本就不参与布局）。
+        // 旧实现把它放在气泡左侧的 `Row` 同级、并用 `Flexible` 包住气泡
+        // ⇒ 状态一出现气泡就被挤窄、上传结束又变宽（用户实报的跳动）。
+        //
+        // 现在它和工具栏**共用同一个槽位**（两者互斥：有发送态时不渲染工具栏，
+        // 因为 web 里发送态本就压在工具栏上方且工具栏默认 opacity:0）：
+        //   · 气泡宽度零影响 —— 槽位早已从 `bodyMaxWidth` 扣掉；
+        //   · 状态整体落在行内 ⇒ 「取消 / 重试 / 删除」可点（绝对定位会被祖先的
+        //     `RenderBox.hitTest` 丢弃 —— 这是不能用 CSS 那套的直接原因）。
+        // `compact` = 图标档：窄槽位里按钮也要收敛成方键，否则状态自己撑破槽位。
+        final Widget? sendState =
+            (widget.isSelf && !recalled && (msg.pending || msg.sendFailed))
+                ? _SendState(
+                    msg: msg,
+                    onCancel: widget.onCancel,
+                    onRetry: widget.onRetry,
+                    onRemove: widget.onRemove,
+                    compact: iconActions,
+                  )
+                : null;
+        final double bodyMaxWidth = math.max(
+          0,
+          math.min(
+            rowInnerWidth * (narrow ? 0.84 : 0.75),
+            rowInnerWidth - reserve - actionsSlot,
+          ),
+        );
+        // ⚠️ 主轴仍是 **CSS flex-shrink** 语义（[AylaCssFlexRow]）。
+        //
+        // 2026-11-12 起本行有一条**不变量**：三项之和（头像 37 + 气泡 ≤ bodyMaxWidth
+        // + 工具栏 = actionsSlot）≤ 行内宽 —— 因为 `bodyMaxWidth` 已经把
+        // `reserve + actionsSlot` 扣掉。⇒ 行**永不溢出** ⇒ flex-shrink 分支
+        // **永不触发** ⇒ 气泡宽度与键数量、发送态无关，恒定。
+        //
+        // 这不代表 [AylaCssFlexRow] 可以换回普通 `Row`：普通 Row 会**分配**主轴空间
+        // （loose/tight 语义差异，见 css_flex_row.dart 文件头），一旦有人改动上面的上限
+        // 算式就会退回「Flexible 腰斩气泡」（实测 900 档 633→395）。保留 CSS 语义件
+        // = 与 web 同一套算法，改动可逐条对账（见 test/css_flex_row_test.dart）。
+        //
+        // 各件的 CSS 参数（逐条对账）：
         // - 头像 `.msg-sender-halo { flex-shrink: 0 }`（app.css:1053）⇒ base 固定 37；
-        // - 气泡 `.msg-body { max-width:75%(窄屏 84%); min-width:0 }`（app.css:1073–1083 /
-        //   3217–3219）⇒ base 由自身 maxWidth 夹住，min-width 0；
-        // - 工具栏 `.msg-actions` 无 shrink 声明 ⇒ 默认 1，最小 = 子项 min 之和
-        //   （`.favorite-toggle.is-compact { min-width: 32px }`（app.css:3334–3338）；
-        //    `.msg-action-btn` 因 `overflow:hidden`（auroraqua.css:142–146）min-width:auto
-        //    解析为 0 ⇒ 能压到文本逐字折行，实测 375 档压到 33.6）。
+        // - 气泡 `.msg-body { max-width: min(75%|84%, 100% − reserve − slot) }`；
+        // - 工具栏 `.msg-actions { flex: 0 0 auto; width: var(--msg-actions-slot) }`
+        //   ⇒ 固定槽位、不参与收缩（[kAylaMsgActionsSlotText] / [kAylaMsgActionsSlotIcon]）。
         final List<Widget> children = <Widget>[
           if (halo != null)
             AylaCssFlexItem(flexShrink: 0, child: halo),
@@ -808,19 +922,37 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
               ),
             ),
           ),
-          if (actions != null)
-            // 工具栏的 **min-content**（规范 §4.5 automatic minimum size）：
-            // 每个按钮压到极限时的宽之和 + 按钮间 gap。
-            //   · `.favorite-toggle.is-compact` → 32（app.css:3334–3338 明写 min-width）
-            //   · `.msg-action-btn` → 16（图标盒）+ 16（padding 8×2）+ 2（border）= 34？
-            //     不是：web 实测该按钮的 min-content = **33.6**（css 像素），
-            //     与「图标 12 + margin-right 4 = 16」+ padding 16 + border 1.6 同源；
-            //     本件按同一算式给 [kAylaMsgActionBtnMinContent]（见常量注释）。
-            // 目标：375 档工具栏被压到 107.2（自己行 3 键）/ 69.6（他人行 2 键），
-            // 与浏览器实测逐像素一致（见 test/css_flex_row_test.dart）。
+          if (sendState != null)
+            // 发送态与工具栏**共用同一个固定槽位**（二者互斥，见 sendState 的注解）。
+            // 右对齐（self 行 `row-reverse` 后即贴气泡左缘）⇒ 视觉位置与 web 的
+            // `right: calc(100% + 8px)` 一致：状态右端停在气泡左侧 8px 的 gap 处。
             AylaCssFlexItem(
-              minContentWidth: actionsMinContent,
-              child: actions,
+              flexShrink: 0,
+              minWidth: actionsSlot,
+              child: SizedBox(
+                width: actionsSlot,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  widthFactor: 1.0,
+                  heightFactor: 1.0,
+                  child: sendState,
+                ),
+              ),
+            )
+          else if (actionsNow != null)
+            // 工具栏 = **固定槽位**（2026-11-12 用户裁决）：
+            //   flexShrink: 0（= `flex: 0 0 auto`）⇒ 永不被压缩、按钮永不竖排；
+            //   外层 SizedBox(width: actionsSlot) ⇒ 宽度与**键数量无关**
+            //   （撤回键 120s 后消失，槽位不变 ⇒ 气泡不变宽）。
+            //
+            // 为什么用 SizedBox 夹死而不是只给 minWidth：`AylaCssFlexRow` 的 flex base
+            // 是子项自然宽（3 键 155.2 / 2 键 97.6）——只给 minWidth 时 2 键仍按自然宽
+            // 97.6 摆放 ⇒ 槽位缩水、气泡变宽。夹成紧宽后，槽位内部由
+            // `_MsgActions` 的 `MainAxisAlignment` 决定满宽下的对齐（按钮组贴气泡）。
+            AylaCssFlexItem(
+              flexShrink: 0,
+              minWidth: actionsSlot,
+              child: SizedBox(width: actionsSlot, child: actionsNow),
             ),
         ];
         // web `.msg-row { display:flex; align-items:flex-end; gap:var(--sp-2) }`
@@ -941,15 +1073,15 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
   }
 }
 
-/// 气泡外层（`.msg-bubble-wrap`）：承载发送态与气泡本体（tsx 334–368）。
+/// 气泡外层（`.msg-bubble-wrap`）：只承载气泡本体（tsx 334–368）。
+///
+/// ⚠️ 2026-11-12 起**不再**承载发送态：发送态移入消息行的工具栏固定槽位，
+/// 因为流内占位会把气泡挤窄（用户实报的宽度跳变）。见 `AylaMessageBubble.build`。
 class _BubbleWrap extends StatelessWidget {
   const _BubbleWrap({
     required this.msg,
     required this.isSelf,
     required this.isElysia,
-    this.onCancel,
-    this.onRetry,
-    this.onRemove,
     this.quoteText,
     this.onQuoteJump,
     this.jumpedRecalled = false,
@@ -971,9 +1103,6 @@ class _BubbleWrap extends StatelessWidget {
   final AylaChatMessage msg;
   final bool isSelf;
   final bool isElysia;
-  final void Function(AylaChatMessage msg)? onCancel;
-  final void Function(AylaChatMessage msg)? onRetry;
-  final void Function(AylaChatMessage msg)? onRemove;
   final String? quoteText;
   final void Function(AylaChatMessage msg)? onQuoteJump;
   final bool jumpedRecalled;
@@ -995,17 +1124,6 @@ class _BubbleWrap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AylaChatMessage message = msg;
-    final bool recalled = message.recalled;
-
-    Widget? sendState;
-    if (isSelf && !recalled && (message.pending || message.sendFailed)) {
-      sendState = _SendState(
-        msg: message,
-        onCancel: onCancel,
-        onRetry: onRetry,
-        onRemove: onRemove,
-      );
-    }
 
     final Widget bubble = _BubbleFace(
       msg: message,
@@ -1029,25 +1147,18 @@ class _BubbleWrap extends StatelessWidget {
       onResolveShareTarget: onResolveShareTarget,
     );
 
-    if (sendState == null) return bubble;
-
-    // 发送态：web `.msg-send-state { position:absolute; right:calc(100% + 8px); top:50% }`
-    // （app.css 1336–1345）——即**贴在气泡左缘外 8px、垂直居中**。
+    // 发送态**不由本件承载**（2026-11-12 用户裁决：加载态不得挤压气泡宽度）。
     //
-    // ⚠️ Flutter 侧**不能**用「`Stack` + `Positioned.fill` + `FractionalTranslation(-1)`」
-    // 表达这条 CSS：溢出父边界的部分会被祖先的命中测试丢弃（`RenderBox.hitTest` 只在
-    // 自身 size 内接受）⇒ 取消/重试/删除三个键**点不到**（13 号 §6.4 同类现象）。
-    // 改为在气泡左侧**占位**：self 行的 `msg-body` 交叉轴是 `end`（app.css 1085–1087），
-    // body 变宽只向左扩展 ⇒ 右对齐的气泡**位置不变**，而状态整体落在 body 尺寸内、可点。
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.center, // = CSS 的 top:50% + translateY(-50%)
-      children: <Widget>[
-        sendState,
-        const SizedBox(width: AylaSpacing.sp2), // CSS `calc(100% + 8px)` 的 8px
-        Flexible(child: bubble),
-      ],
-    );
+    // 旧实现把 `_SendState` 放在气泡左侧的 `Row` 同级，气泡被 `Flexible` 包住
+    // ⇒ 状态一出现就把气泡挤窄，上传结束又变宽（用户实报的跳动之一）。
+    //
+    // 现在发送态**占用工具栏的固定槽位**（见 `AylaMessageBubble.build` 里
+    // `sendState` 的构建与 `_MsgActions` 的 `sendState` 参数）：那个槽位本就是
+    // 「气泡左侧、宽度与键数量无关」的常量区（[kAylaMsgActionsSlotText] /
+    // [kAylaMsgActionsSlotIcon]），且已从 `bodyMaxWidth` 扣掉 ⇒ 气泡宽度零影响；
+    // 状态整体落在行内 ⇒ 「取消 / 重试 / 删除」可点（不必用绝对定位，那会被祖先的
+    // `RenderBox.hitTest` 丢弃）。
+    return bubble;
   }
 }
 
@@ -1406,12 +1517,20 @@ class _SendState extends StatelessWidget {
     this.onCancel,
     this.onRetry,
     this.onRemove,
+    this.compact = false,
   });
 
   final AylaChatMessage msg;
   final void Function(AylaChatMessage msg)? onCancel;
   final void Function(AylaChatMessage msg)? onRetry;
   final void Function(AylaChatMessage msg)? onRemove;
+
+  /// 图标档（窄槽位）：状态内的按钮收敛成方键（[AylaMsgActionButton.iconOnly]），
+  /// 「上传中 N%」文案也只保留百分比，否则状态会撑破 78px 的槽位。
+  ///
+  /// web 侧窄屏把整块 `.msg-send-state` 放在气泡外侧的绝对定位区里、**不受槽位限制**；
+  /// Flutter 侧为了可点性把它放进行内槽位，因此需要在窄档收敛（登记为与 web 的差异）。
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -1424,7 +1543,9 @@ class _SendState extends StatelessWidget {
             Semantics(
               label: '上传中 ${progress.round()}%',
               child: Text(
-                '上传中 ${progress.round()}%',
+                // 图标档槽位只有 78px：完整文案「上传中 99%」+ 取消键放不下，
+                // 收敛为「99%」（Semantics 仍读完整语句，无障碍信息不丢）。
+                compact ? '${progress.round()}%' : '上传中 ${progress.round()}%',
                 style: const TextStyle(
                   fontFamily: AylaFonts.body,
                   fontFamilyFallback: AylaFonts.cjkFallback,
@@ -1438,6 +1559,8 @@ class _SendState extends StatelessWidget {
               AylaMsgActionButton(
                 label: '取消',
                 semanticLabel: '取消发送',
+                iconOnly: compact,
+                iconOnlySize: compact ? 22 : null,
                 onPressed: () => onCancel!(msg),
               ),
             ],
@@ -1450,6 +1573,40 @@ class _SendState extends StatelessWidget {
         child: AylaLoadingSpinner(
           size: 14,
           track: const Color(0x40465B92),
+        ),
+      );
+    }
+    // 发送失败：**图标档只有 78px 槽位**，文字「发送失败」+ 重试 + 删除 放不下。
+    //
+    // 按用户 2026-11-12 裁决「空间不够则仅显示图标」：图标档只留两个方键
+    // （重试 / 删除），文案退到 Semantics（无障碍仍读到「发送失败」）。
+    // 文字档保持 web 原样（文案 + 两个带字键）。
+    if (compact) {
+      return Semantics(
+        label: '发送失败',
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (onRetry != null)
+              AylaMsgActionButton(
+                label: '重试',
+                semanticLabel: '重试发送',
+                iconOnly: true,
+                iconOnlySize: 22,
+                onPressed: () => onRetry!(msg),
+              ),
+            if (onRetry != null && onRemove != null)
+              const SizedBox(width: AylaSpacing.sp1),
+            if (onRemove != null)
+              AylaMsgActionButton(
+                label: '删除',
+                semanticLabel: '删除消息',
+                iconOnly: true,
+                iconOnlySize: 22,
+                danger: true,
+                onPressed: () => onRemove!(msg),
+              ),
+          ],
         ),
       );
     }
@@ -1478,6 +1635,8 @@ class _SendState extends StatelessWidget {
           AylaMsgActionButton(
             label: '删除',
             semanticLabel: '删除消息',
+            iconOnly: compact,
+            iconOnlySize: compact ? 22 : null,
             onPressed: () => onRemove!(msg),
           ),
         ],
@@ -1492,6 +1651,8 @@ class _MsgActions extends StatelessWidget {
     required this.msg,
     required this.visible,
     required this.showRecall,
+    this.iconOnly = false,
+    this.slotWidth,
     this.favoriteState,
     required this.favoriteBusy,
     this.favoriteError,
@@ -1509,6 +1670,17 @@ class _MsgActions extends StatelessWidget {
 
   /// 是否显示「撤回」键（= 自己的消息且在 120s 窗口内，见 [AylaMessageBubble.build]）。
   final bool showRecall;
+
+  /// **仅图标档**（窄行/窄屏）：按钮不渲染文字标签、做成方键。
+  ///
+  /// 对应用户 2026-11-12 裁决「空间够显示文字就显示文字，不够则仅显示图标，
+  /// 不再出现竖排」。阈值判据见 [kAylaMsgActionsSlotTextBreakpoint]。
+  final bool iconOnly;
+
+  /// 本工具栏在消息行里占的**固定槽位宽**（[kAylaMsgActionsSlotText] /
+  /// [kAylaMsgActionsSlotIcon]）。按钮组按 [AylaMessageBubble.isSelf] 贴向气泡一侧，
+  /// 剩余宽度留白 —— 这样 2 键时按钮不会散开、也不会被拉伸。
+  final double? slotWidth;
 
   /// 注入档收藏状态；null 且 [onToggleFavorite] 也为 null ⇒ 自给自足档（web 语义）。
   final AylaFavoriteState? favoriteState;
@@ -1576,44 +1748,63 @@ class _MsgActions extends StatelessWidget {
             // `.msg-actions { display:flex; align-items:center; gap:var(--sp-1) }`
             // （app.css:1290–1298）；**没有 flex-wrap** ⇒ 单行。
             //
-            // 工具栏自身在消息行里是**可收缩项**（见 build 里的 [AylaCssFlexRow]），
-            // 被压窄后它的按钮也按 `flex-shrink: 1` 继续收缩、标签折行
-            // （375 档实测：`.msg-action-btn` 57.6×27.2 → 33.6×60.8，标签折两行）。
-            // 下界按 CSS 的 automatic minimum size 取（见文件头事实源）：
-            // - 收藏键 `.favorite-toggle.is-compact { min-width: 32px }`（app.css:3334–3338）；
-            // - `.msg-action-btn` 有 `overflow:hidden`（auroraqua.css:142–146）⇒ min 0。
-            child: AylaCssFlexRow(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              gap: AylaSpacing.sp1,
-              // 内层 flex 容器 ⇒ 宽度 = 子键之和（等价 CSS 里 `.msg-actions` 作为
-              // 行内 flex item 的收缩宽，而不是撑满整行）。
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                AylaCssFlexItem(minWidth: 32, child: _favorite),
-                // 引用键：web `MessageBubble.tsx:247` `{onQuote && (…)}` ——
-                // **未接线时根本不渲染**（不是渲染一个无副作用的假按钮），
-                // 与 `tsx:258` 的 `{onRecall && (…)}` 同一写法；
-                // 同时 gap 也不出现（`.msg-actions { gap: var(--sp-1) }` 只在有子项时生效
-                // ⇒ 交给容器 `gap`，左右各算一次会变成 8px）。
-                if (onQuote != null)
+            // 2026-11-12：本件现在拿的是**固定槽位**（[slotWidth]，由消息行按
+            // [kAylaMsgActionsSlotText] / [kAylaMsgActionsSlotIcon] 给出），且
+            // 消息行侧 `flexShrink: 0` ⇒ 槽位永不压缩，按钮永不竖排。
+            //
+            // 槽位内按钮组**贴向气泡一侧**（等价 CSS 的 `justify-content: flex-end`，
+            // 配合 self 行的 `row-reverse` 后就是「按钮组紧贴气泡、留白在外缘」）：
+            // 3 键时刚好占满槽位；2 键时剩 57.6（文字档）/ 26（图标档）的留白落在
+            // **远离气泡的一侧**，按钮自身位置与宽度都不动。
+            //
+            // `Align(widthFactor: 1.0)` 让内层行在外层紧宽槽位里**贴右**而不是被拉伸
+            // （内层 `AylaCssFlexRow(mainAxisSize: min)` 自己按内容收缩）。
+            child: Align(
+              alignment: Alignment.centerRight,
+              widthFactor: 1.0,
+              heightFactor: 1.0,
+              child: AylaCssFlexRow(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                gap: AylaSpacing.sp1,
+                // 内层 flex 容器 ⇒ 宽度 = 子键之和（不撑满槽位）。
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
                   AylaCssFlexItem(
-                    child: AylaMsgActionButton(
-                      label: '引用',
-                      semanticLabel: '引用回复',
-                      icon: _actionIcon('iconQuote', 12),
-                      onPressed: () => onQuote!.call(msg),
-                    ),
+                    flexShrink: 0,
+                    minWidth: iconOnly ? 26 : 32,
+                    child: _favorite,
                   ),
-                if (showRecall)
-                  AylaCssFlexItem(
-                    child: AylaMsgActionButton(
-                      label: '撤回',
-                      semanticLabel: '撤回消息',
-                      icon: _actionIcon('iconUndo', 12),
-                      onPressed: () => onRecall?.call(msg),
+                  // 引用键：web `MessageBubble.tsx:247` `{onQuote && (…)}` ——
+                  // **未接线时根本不渲染**（不是渲染一个无副作用的假按钮），
+                  // 与 `tsx:258` 的 `{onRecall && (…)}` 同一写法；
+                  // 同时 gap 也不出现（`.msg-actions { gap: var(--sp-1) }` 只在有子项时生效
+                  // ⇒ 交给容器 `gap`，左右各算一次会变成 8px）。
+                  if (onQuote != null)
+                    AylaCssFlexItem(
+                      flexShrink: 0,
+                      child: AylaMsgActionButton(
+                        label: '引用',
+                        semanticLabel: '引用回复',
+                        icon: _actionIcon('iconQuote', 12),
+                        iconOnly: iconOnly,
+                        iconOnlySize: iconOnly ? 22 : null,
+                        onPressed: () => onQuote!.call(msg),
+                      ),
                     ),
-                  ),
-              ],
+                  if (showRecall)
+                    AylaCssFlexItem(
+                      flexShrink: 0,
+                      child: AylaMsgActionButton(
+                        label: '撤回',
+                        semanticLabel: '撤回消息',
+                        icon: _actionIcon('iconUndo', 12),
+                        iconOnly: iconOnly,
+                        iconOnlySize: iconOnly ? 22 : null,
+                        onPressed: () => onRecall?.call(msg),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),

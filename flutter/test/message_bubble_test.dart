@@ -502,6 +502,8 @@ void main() {
           actionsOpen: true,
           onQuote: (AylaChatMessage m) => quoted = m,
         ),
+        // 2026-11-12：工具栏窄行为图标档（无文字标签），本用例锁文字档的键位。
+        viewport: const Size(1000, 300),
       ),
     );
     await tester.pumpAndSettle();
@@ -558,6 +560,7 @@ void main() {
           actionsOpen: true,
           onRecall: (AylaChatMessage m) => recalled = m,
         ),
+        viewport: const Size(1000, 300), // 图标档无文字标签，本用例锁文字档
       ),
     );
     await tester.pumpAndSettle();
@@ -580,6 +583,7 @@ void main() {
           onQuote: (_) {},
           onRecall: (_) {},
         ),
+        viewport: const Size(1000, 300), // 图标档无文字标签，本用例锁文字档
       ),
     );
     await tester.pumpAndSettle();
@@ -1198,7 +1202,9 @@ void main() {
             onToggleActions: () => toggles++,
             onQuote: (_) {},
           ),
-          viewport: const Size(420, 300),
+          // 2026-11-12：工具栏在窄行是**图标档**（不渲染文字标签），
+          // 本用例测的是「按钮命中优先于整行回调」，故用宽屏档让标签文字存在。
+          viewport: const Size(1000, 300),
         ),
       );
       await tester.pumpAndSettle();
@@ -1456,6 +1462,9 @@ void main() {
           currentUserId: 'me',
           onCancel: (_) => cancels++,
         ),
+        // 2026-11-12：图标档槽位只有 78px，文案收敛为「42%」、按钮收敛为方键。
+        // 本用例锁的是**完整文案档**（文字档）的行为，故用宽屏视口。
+        viewport: const Size(1000, 300),
       ),
     );
     await tester.pumpAndSettle();
@@ -1490,6 +1499,9 @@ void main() {
           onRetry: (_) => retries++,
           onRemove: (_) => removes++,
         ),
+        // 2026-11-12：图标档（78px 槽位）放不下「发送失败」文案 + 两个带字键，
+        // 按用户裁决「空间不够则仅显示图标」只留两个方键；本用例锁**文字档**。
+        viewport: const Size(1000, 300),
       ),
     );
     await tester.pumpAndSettle();
@@ -1585,8 +1597,17 @@ void main() {
           .ancestor(of: find.text(longText), matching: find.byType(ConstrainedBox))
           .first,
     );
-    // 同上：基数 = 行 content box（600 − 2×sp1）
-    expect(narrow.constraints.maxWidth, (600 - 2 * AylaSpacing.sp1) * 0.84, reason: '窄屏 84%');
+    // ⚠️ 2026-11-12：气泡上限不再是单纯的 84%，而是
+    //   min(84%, rowInner − reserve − 槽位)
+    // （工具栏定宽槽位的引入，见 kAylaMsgActionsSlotText 的注释）。
+    // 600 档：rowInner = 600 − 8 = 592 ⇒ 84% = 497.28，
+    // 扣槽位 = 592 − 53 − 78 = 461 ⇒ 取 **461**（图标档，槽位 78）。
+    const double rowInner = 600 - 2 * AylaSpacing.sp1;
+    expect(
+      narrow.constraints.maxWidth,
+      closeTo(rowInner - 53 - kAylaMsgActionsSlotIcon, 0.01),
+      reason: '窄屏气泡上限 = rowInner − reserve − 图标档槽位（84% 不再是约束）',
+    );
   });
 
   // ======================= 问题 13 ③：focus-within 覆盖整行 =======================
@@ -1610,6 +1631,7 @@ void main() {
           onQuoteJump: (_) => jumps++,
           onQuote: (_) {},
         ),
+        viewport: const Size(1000, 300), // 图标档无文字标签，本用例锁文字档
       ),
     );
     await tester.pumpAndSettle();

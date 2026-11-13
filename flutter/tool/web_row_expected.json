@@ -1,0 +1,1141 @@
+{
+ "READ_ME_FIRST": {
+  "unitsConvention": {
+   "viewport": "浏览器视口宽（window.innerWidth）。生产里它与列宽之间还隔着侧栏与 scroll padding，因此**不能**直接拿它当布局判据。",
+   "rowInner": "【核心量】.msg-row 的 **content box** 宽 = rowW - 行自身 padding(0 var(--sp-1)) 合计 8。**已扣除**：桌面侧栏(0/356/380) + .message-scroll padding(宽屏 sp6×2=48，窄屏 sp4+sp3=24) + .message-column 居中留白。",
+   "columnW": ".message-column 的 border box 宽（= 容器查询的查询对象）。因为 .message-column 自身 padding 为 0，所以 columnW = rowInner + 8，恒等。",
+   "halo": ".msg-sender-halo 宽（= 37：avatar 32 核 + 2×2.5 光环）。已撤回/系统消息行为 null 语义（无头像）。",
+   "gap": ".msg-row 的 column-gap（= 8 = --sp-2），行内出现 2 次（头像↔body↔actions）。",
+   "actionsSlot": ".msg-actions 的固定槽位宽，与该行当前有几键无关。",
+   "bubble": "气泡 .bubble 的 getBoundingClientRect().width。"
+  },
+  "reserve": {
+   "valuePx": 53,
+   "formula": "reserve = halo(37) + 2 × gap(8) = 53",
+   "explicitlyExcludes": "**不含** .message-scroll padding，**不含** .msg-row 自身的 padding(8)——因为 max-width 的百分比基准就是 .msg-row 的 content box。",
+   "warning": "把 scroll padding 或行 padding 混进 reserve 是本任务已经发生过的一次真实错误，不要再混。"
+  },
+  "bubbleCapFormula": {
+   "rowsWithToolbar": "min(75%, calc(100% - 53px - var(--msg-actions-slot)))",
+   "rowsWithToolbarNarrowLE768": "min(84%, calc(100% - 53px - var(--msg-actions-slot)))",
+   "rowsWithoutToolbar": "75% / 84%（不扣，:has(> .msg-actions) 门控；已撤回与系统消息属此类）",
+   "percentBase": "100% = .msg-row 的 content box（= rowInner）"
+  },
+  "slotValues": {
+   "text": {
+    "px": 156,
+    "breakdown": "收藏 32 + gap 4 + 引用 58 + gap 4 + 撤回 58"
+   },
+   "icon": {
+    "px": 78,
+    "breakdown": "收藏 26 + gap 4 + 方键 22 + gap 4 + 方键 22",
+    "squareButton": "22×22，图标 16 居中（实测左右各 5px）"
+   }
+  },
+  "modeSwitch": {
+   "implementation": "纯 CSS 容器查询：.message-column { container-type: inline-size; container-name: msg-column } + @container msg-column (max-width: 844px)",
+   "comparesAgainst": "columnW（不是 rowInner、更不是 viewport）",
+   "thresholdColumnW": 844,
+   "equivalentRowInner": 836,
+   "rule": "columnW ≤ 844（rowInner ≤ 836）⇒ 图标档；columnW ≥ 845（rowInner ≥ 837）⇒ 文字档",
+   "measuredBoundary": {
+    "columnW": [
+     843,
+     844,
+     845
+    ],
+    "rowInner": [
+     835,
+     836,
+     837
+    ],
+    "mode": [
+     "icon",
+     "icon",
+     "text"
+    ]
+   },
+   "rationale": "文字档「不吃掉气泡」⇔ rowInner − reserve − slot ≥ 0.75 × rowInner ⇔ 0.25 × rowInner ≥ 53 + 156 = 209 ⇔ rowInner ≥ 836。",
+   "whyNotViewport": "同一个 vw 下列宽差 356px 以上（私聊侧栏 356 / 群聊侧栏 380 / 窄屏 0）。例：vw=1024 带私聊侧栏时 rowInner 仅 612（图标档），无侧栏时 952（文字档）。按 vw 判会在 1024 档误判。",
+   "crossImplNote": "Flutter 侧按 LayoutBuilder 的 c.maxWidth - 2×sp1 得 rowInner 判档，与本文件的 columnW 判据在边界上等价（差 8px = 行 padding）。"
+  },
+  "sectionsGuide": {
+   "chromeMessages": "【主口径】宽屏私聊/消息中心真实外壳（.wide-messages-sidebar 356 = 332 宽 + gutter 12×2）。Flutter 侧对账请读这一节。",
+   "chromeGroup": "宽屏群聊真实外壳（ServerRail 96 + ChannelSidebar 284 = 380）。",
+   "noChrome": "无侧栏裸列（历史探针口径）。**只有 ≤768 窄屏与生产一致**（窄屏侧栏不渲染）；≥769 这一节不代表生产，仅供回归对比。"
+  },
+  "scenarios": {
+   "self3key": "自己 + 3 键工具栏（收藏/引用/撤回）+ 长文本",
+   "self2key": "自己 + 2 键（撤回键 120s 后消失）+ 长文本",
+   "self3keyPending": "自己 + 3 键 + 上传中（.msg-send-state，absolute 不占布局宽）+ 短文本",
+   "self2keyPending": "自己 + 2 键 + 上传中 + 短文本",
+   "selfShort": "自己 + 3 键 + 短文本（\"Hi\"）",
+   "selfImage": "自己 + 3 键 + 320×240 图片气泡",
+   "peerLong": "他人 + 2 键 + 长文本",
+   "peerImage": "他人 + 2 键 + 图片",
+   "recalled": "已撤回行（无工具栏、无头像，走 75%/84% 不扣槽位）"
+  },
+  "tooling": {
+   "harness": "Ayla/flutter/tool/web_row_measure.html（真实 tokens/base/app/auroraqua CSS + 真实 TTF，DOM 与 MessageBubble.tsx 逐节点同构）",
+   "runner": "Ayla/flutter/tool/web_row_measure.mjs（Playwright chromium headless）",
+   "usage": "/e/nodejs/node.exe web_row_measure.mjs <out.json> <label> '{\"chrome\":\"messages|group|none\",\"appcss\":\"file:///../app.css 基线覆盖\",\"viewports\":[...]}'",
+   "rawFiles": [
+    "web_row_chrome.json（真实私聊外壳）",
+    "web_row_chrome_group.json（真实群聊外壳）",
+    "web_row_none.json（无侧栏）",
+    "web_row_baseline_chrome.json（HEAD 版 app.css 的同口径基线，供改动前后对比）"
+   ]
+  },
+  "generatedAt": "2026-11-12T09:29:36.904Z"
+ },
+ "chromeMessages": {
+  "320": {
+   "viewport": 320,
+   "columnW": 296,
+   "rowInner": 288,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 157,
+    "self2key": 157,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 157,
+    "peerLong": 157,
+    "peerImage": 157,
+    "recalled": 150
+   },
+   "before": {
+    "actionsSlot": 108,
+    "mode": "text",
+    "bubble": {
+     "self3key": 127,
+     "self2key": 165,
+     "selfImage": 127,
+     "peerLong": 165
+    }
+   }
+  },
+  "360": {
+   "viewport": 360,
+   "columnW": 336,
+   "rowInner": 328,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 197,
+    "self2key": 197,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 197,
+    "peerLong": 197,
+    "peerImage": 197,
+    "recalled": 150
+   },
+   "before": {
+    "actionsSlot": 108,
+    "mode": "text",
+    "bubble": {
+     "self3key": 167,
+     "self2key": 205,
+     "selfImage": 167,
+     "peerLong": 205
+    }
+   }
+  },
+  "375": {
+   "viewport": 375,
+   "columnW": 351,
+   "rowInner": 343,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 212,
+    "self2key": 212,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 212,
+    "peerLong": 212,
+    "peerImage": 212,
+    "recalled": 150
+   },
+   "before": {
+    "actionsSlot": 108,
+    "mode": "text",
+    "bubble": {
+     "self3key": 182,
+     "self2key": 220,
+     "selfImage": 182,
+     "peerLong": 220
+    }
+   }
+  },
+  "414": {
+   "viewport": 414,
+   "columnW": 390,
+   "rowInner": 382,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 251,
+    "self2key": 251,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 251,
+    "peerLong": 251,
+    "peerImage": 251,
+    "recalled": 150
+   },
+   "before": {
+    "actionsSlot": 108,
+    "mode": "text",
+    "bubble": {
+     "self3key": 221,
+     "self2key": 259,
+     "selfImage": 221,
+     "peerLong": 259
+    }
+   }
+  },
+  "480": {
+   "viewport": 480,
+   "columnW": 456,
+   "rowInner": 448,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 317,
+    "self2key": 317,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 317,
+    "peerLong": 317,
+    "peerImage": 317,
+    "recalled": 150
+   },
+   "before": {
+    "actionsSlot": 108,
+    "mode": "text",
+    "bubble": {
+     "self3key": 287,
+     "self2key": 325,
+     "selfImage": 267.69,
+     "peerLong": 325
+    }
+   }
+  },
+  "600": {
+   "viewport": 600,
+   "columnW": 576,
+   "rowInner": 568,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 437,
+    "self2key": 437,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 437,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": {
+    "actionsSlot": 108,
+    "mode": "text",
+    "bubble": {
+     "self3key": 407,
+     "self2key": 445,
+     "selfImage": 328,
+     "peerLong": 445
+    }
+   }
+  },
+  "768": {
+   "viewport": 768,
+   "columnW": 744,
+   "rowInner": 736,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 605,
+    "self2key": 605,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 605,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": {
+    "actionsSlot": 108,
+    "mode": "text",
+    "bubble": {
+     "self3key": 575,
+     "self2key": 613,
+     "selfImage": 328,
+     "peerLong": 613
+    }
+   }
+  },
+  "900": {
+   "viewport": 900,
+   "columnW": 496,
+   "rowInner": 488,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 357,
+    "self2key": 357,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 357,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": {
+    "actionsSlot": 108,
+    "mode": "text",
+    "bubble": {
+     "self3key": 327,
+     "self2key": 365,
+     "selfImage": 294.8,
+     "peerLong": 365
+    }
+   }
+  },
+  "1024": {
+   "viewport": 1024,
+   "columnW": 620,
+   "rowInner": 612,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 459,
+    "self2key": 459,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 459,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": {
+    "actionsSlot": 108,
+    "mode": "text",
+    "bubble": {
+     "self3key": 451,
+     "self2key": 459,
+     "selfImage": 328,
+     "peerLong": 459
+    }
+   }
+  },
+  "1280": {
+   "viewport": 1280,
+   "columnW": 876,
+   "rowInner": 868,
+   "halo": 37,
+   "gap": 8,
+   "mode": "text",
+   "actionsSlot": 156,
+   "buttonW": [
+    32,
+    58,
+    58
+   ],
+   "bubble": {
+    "self3key": 651,
+    "self2key": 651,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 651,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": {
+    "actionsSlot": 156,
+    "mode": "text",
+    "bubble": {
+     "self3key": 651,
+     "self2key": 651,
+     "selfImage": 328,
+     "peerLong": 651
+    }
+   }
+  },
+  "1440": {
+   "viewport": 1440,
+   "columnW": 960,
+   "rowInner": 952,
+   "halo": 37,
+   "gap": 8,
+   "mode": "text",
+   "actionsSlot": 156,
+   "buttonW": [
+    32,
+    58,
+    58
+   ],
+   "bubble": {
+    "self3key": 714,
+    "self2key": 714,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 714,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": {
+    "actionsSlot": 156,
+    "mode": "text",
+    "bubble": {
+     "self3key": 714,
+     "self2key": 714,
+     "selfImage": 328,
+     "peerLong": 714
+    }
+   }
+  },
+  "1600": {
+   "viewport": 1600,
+   "columnW": 960,
+   "rowInner": 952,
+   "halo": 37,
+   "gap": 8,
+   "mode": "text",
+   "actionsSlot": 156,
+   "buttonW": [
+    32,
+    58,
+    58
+   ],
+   "bubble": {
+    "self3key": 714,
+    "self2key": 714,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 714,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": {
+    "actionsSlot": 156,
+    "mode": "text",
+    "bubble": {
+     "self3key": 714,
+     "self2key": 714,
+     "selfImage": 328,
+     "peerLong": 714
+    }
+   }
+  }
+ },
+ "chromeGroup": {
+  "320": {
+   "viewport": 320,
+   "columnW": 296,
+   "rowInner": 288,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 157,
+    "self2key": 157,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 157,
+    "peerLong": 157,
+    "peerImage": 157,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "360": {
+   "viewport": 360,
+   "columnW": 336,
+   "rowInner": 328,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 197,
+    "self2key": 197,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 197,
+    "peerLong": 197,
+    "peerImage": 197,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "375": {
+   "viewport": 375,
+   "columnW": 351,
+   "rowInner": 343,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 212,
+    "self2key": 212,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 212,
+    "peerLong": 212,
+    "peerImage": 212,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "414": {
+   "viewport": 414,
+   "columnW": 390,
+   "rowInner": 382,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 251,
+    "self2key": 251,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 251,
+    "peerLong": 251,
+    "peerImage": 251,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "480": {
+   "viewport": 480,
+   "columnW": 456,
+   "rowInner": 448,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 317,
+    "self2key": 317,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 317,
+    "peerLong": 317,
+    "peerImage": 317,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "600": {
+   "viewport": 600,
+   "columnW": 576,
+   "rowInner": 568,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 437,
+    "self2key": 437,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 437,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "768": {
+   "viewport": 768,
+   "columnW": 744,
+   "rowInner": 736,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 605,
+    "self2key": 605,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 605,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "900": {
+   "viewport": 900,
+   "columnW": 472,
+   "rowInner": 464,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 333,
+    "self2key": 333,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 333,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "1024": {
+   "viewport": 1024,
+   "columnW": 596,
+   "rowInner": 588,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 441,
+    "self2key": 441,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 441,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "1280": {
+   "viewport": 1280,
+   "columnW": 852,
+   "rowInner": 844,
+   "halo": 37,
+   "gap": 8,
+   "mode": "text",
+   "actionsSlot": 156,
+   "buttonW": [
+    32,
+    58,
+    58
+   ],
+   "bubble": {
+    "self3key": 633,
+    "self2key": 633,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 633,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "1440": {
+   "viewport": 1440,
+   "columnW": 960,
+   "rowInner": 952,
+   "halo": 37,
+   "gap": 8,
+   "mode": "text",
+   "actionsSlot": 156,
+   "buttonW": [
+    32,
+    58,
+    58
+   ],
+   "bubble": {
+    "self3key": 714,
+    "self2key": 714,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 714,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "1600": {
+   "viewport": 1600,
+   "columnW": 960,
+   "rowInner": 952,
+   "halo": 37,
+   "gap": 8,
+   "mode": "text",
+   "actionsSlot": 156,
+   "buttonW": [
+    32,
+    58,
+    58
+   ],
+   "bubble": {
+    "self3key": 714,
+    "self2key": 714,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 714,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  }
+ },
+ "noChrome": {
+  "320": {
+   "viewport": 320,
+   "columnW": 296,
+   "rowInner": 288,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 157,
+    "self2key": 157,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 157,
+    "peerLong": 157,
+    "peerImage": 157,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "360": {
+   "viewport": 360,
+   "columnW": 336,
+   "rowInner": 328,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 197,
+    "self2key": 197,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 197,
+    "peerLong": 197,
+    "peerImage": 197,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "375": {
+   "viewport": 375,
+   "columnW": 351,
+   "rowInner": 343,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 212,
+    "self2key": 212,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 212,
+    "peerLong": 212,
+    "peerImage": 212,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "414": {
+   "viewport": 414,
+   "columnW": 390,
+   "rowInner": 382,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 251,
+    "self2key": 251,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 251,
+    "peerLong": 251,
+    "peerImage": 251,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "480": {
+   "viewport": 480,
+   "columnW": 456,
+   "rowInner": 448,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 317,
+    "self2key": 317,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 317,
+    "peerLong": 317,
+    "peerImage": 317,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "600": {
+   "viewport": 600,
+   "columnW": 576,
+   "rowInner": 568,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 437,
+    "self2key": 437,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 437,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "768": {
+   "viewport": 768,
+   "columnW": 744,
+   "rowInner": 736,
+   "halo": 37,
+   "gap": 8,
+   "mode": "icon",
+   "actionsSlot": 78,
+   "buttonW": [
+    26,
+    22,
+    22
+   ],
+   "bubble": {
+    "self3key": 605,
+    "self2key": 605,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 605,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "900": {
+   "viewport": 900,
+   "columnW": 852,
+   "rowInner": 844,
+   "halo": 37,
+   "gap": 8,
+   "mode": "text",
+   "actionsSlot": 156,
+   "buttonW": [
+    32,
+    58,
+    58
+   ],
+   "bubble": {
+    "self3key": 633,
+    "self2key": 633,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 633,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "1024": {
+   "viewport": 1024,
+   "columnW": 960,
+   "rowInner": 952,
+   "halo": 37,
+   "gap": 8,
+   "mode": "text",
+   "actionsSlot": 156,
+   "buttonW": [
+    32,
+    58,
+    58
+   ],
+   "bubble": {
+    "self3key": 714,
+    "self2key": 714,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 714,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "1280": {
+   "viewport": 1280,
+   "columnW": 960,
+   "rowInner": 952,
+   "halo": 37,
+   "gap": 8,
+   "mode": "text",
+   "actionsSlot": 156,
+   "buttonW": [
+    32,
+    58,
+    58
+   ],
+   "bubble": {
+    "self3key": 714,
+    "self2key": 714,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 714,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "1440": {
+   "viewport": 1440,
+   "columnW": 960,
+   "rowInner": 952,
+   "halo": 37,
+   "gap": 8,
+   "mode": "text",
+   "actionsSlot": 156,
+   "buttonW": [
+    32,
+    58,
+    58
+   ],
+   "bubble": {
+    "self3key": 714,
+    "self2key": 714,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 714,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  },
+  "1600": {
+   "viewport": 1600,
+   "columnW": 960,
+   "rowInner": 952,
+   "halo": 37,
+   "gap": 8,
+   "mode": "text",
+   "actionsSlot": 156,
+   "buttonW": [
+    32,
+    58,
+    58
+   ],
+   "bubble": {
+    "self3key": 714,
+    "self2key": 714,
+    "self3keyPending": 42.91,
+    "self2keyPending": 42.91,
+    "selfShort": 42.91,
+    "selfImage": 328,
+    "peerLong": 714,
+    "peerImage": 330,
+    "recalled": 150
+   },
+   "before": null
+  }
+ }
+}

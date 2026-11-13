@@ -353,16 +353,19 @@ void main() {
       const Size(375, 700),
     );
     final Rect bubble = bubbleRect(tester, _kLong);
-    // web 实测（375 档，`tool/web_bubble_measure.html` + Playwright）：
-    //  · self-long（渲染 收藏+引用+撤回）= **183**
-    //  · self-long（不渲染操作栏）= 288.29
-    // `.msg-actions` 被 `flex-shrink:1` 压到 107.2（3 键各 33.6 + gap 4×2）。
+    // ⚠️ **2026-11-12 口径变更（用户裁决）**：此前的基线 `183` 是「工具栏挤压气泡」
+    // 时代的产物 —— 那正是用户实报的病态形态：工具栏 3 键（收藏/引用/撤回）把气泡压到
+    // 183，而撤回键 120s 后消失时工具栏少一截、气泡跳回 220.6。
     //
-    // 2026-10-22 补：Flutter 侧改走自写的 [AylaCssFlexRow]（CSS flex-shrink
-    // 语义）后，本档实测 **182.80**（Δ 0.20，来自文本测量差）—— 该用例原来锁的
-    // 158 是「不收缩」时代的旧基线，随实现更新为与 web 同值。
-    expect(bubble.width, closeTo(183, 2),
-        reason: '★ 窄屏长消息气泡宽须与 web 同值（flex-shrink 语义已对齐）');
+    // 现在的口径是**气泡优先、工具栏让位**：
+    //   气泡宽 = min(84%, 行内宽 − reserve(53) − 槽位(78)) = 343 − 53 − 78 = **212**。
+    // 375 档走图标档（[kAylaMsgActionsSlotIcon]），按钮方键化、文字隐藏 ——
+    // 对应用户追加裁决「空间不够则仅显示图标，不再出现竖排」。
+    //
+    // 该值必须与**键数量无关**：3 键 / 2 键 / 有发送态 / 无发送态 全部 212
+    // （由下面「宽度恒定」用例逐条锁死）。
+    expect(bubble.width, closeTo(212, 2),
+        reason: '★ 窄屏长消息气泡宽 = 行内宽 − reserve − 槽位（工具栏不再挤压气泡）');
     expect(bubble.width, lessThan(rowInnerLimit(tester, 375, 0.84) + 1),
         reason: '★ 不得超过 84% 上限（app.css:3217–3219）');
     expect(tester.takeException(), isNull,
