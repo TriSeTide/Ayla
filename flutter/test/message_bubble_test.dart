@@ -1577,7 +1577,17 @@ void main() {
     );
     // ⚠️ 2026-10-02 订正：web 的百分比基数是 **`.msg-row` 的 content box**
     // （`app.css:1045` 的 `padding: 0 sp1` 已扣掉 8px）⇒ 可分配宽 = 800 − 8。
-    expect(wide.constraints.maxWidth, (800 - 2 * AylaSpacing.sp1) * 0.75, reason: '宽屏 75%');
+    //
+    // ⚠️ 2026-11-13：气泡上限还要**扣掉工具栏的固定槽位**（否则 3 键/2 键宽度会跳变）：
+    //   min(75%, rowInner − reserve − 槽位)
+    // 800 档是宽屏 ⇒ 文字档槽位 [kAylaMsgActionsSlotText]；reserve = 37 + 16 = 53。
+    // rowInner = 792 ⇒ 75% = 594，扣槽位 = 792 − 53 − 155.2 = 583.8 ⇒ 取 **583.8**。
+    const double rowInner = 800 - 2 * AylaSpacing.sp1;
+    expect(
+      wide.constraints.maxWidth,
+      closeTo(rowInner - 53 - kAylaMsgActionsSlotText, 0.01),
+      reason: '宽屏气泡上限 = rowInner − reserve − 文字档槽位（75% 不再是最紧的约束）',
+    );
   });
 
   testWidgets('主体 max-width：窄屏 84%（app.css 3217–3219）', (WidgetTester tester) async {

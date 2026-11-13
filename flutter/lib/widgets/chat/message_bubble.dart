@@ -805,10 +805,23 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
           0,
           c.maxWidth - 2 * AylaSpacing.sp1,
         );
-        // 工具栏**档位 + 槽位**在这里按**真实行宽**判定（不是窗口宽）。
-        // 事实源与推导见 [kAylaMsgActionsSlotTextBreakpoint] 与上面 build 顶层的注释。
-        final bool iconActions =
-            rowInnerWidth < kAylaMsgActionsSlotTextBreakpoint;
+        // 工具栏「文字档 / 图标档」判定（2026-11-13 用户订正口径）。
+        //
+        // ## 口径订正（用户原话）
+        // 「我说空间不够才不显示文字，意思是没有显示文字的空间，如图二是宽屏足够
+        //  显示文字的状态。改为**只有窄屏**才不显示文字。」
+        //
+        // 旧实现按「列宽 < 836」判档 —— 那是「文字档会不会挤压气泡」的阈值，
+        // 不是「放不放得下文字」的阈值。后果：**宽屏但带侧栏**时列宽也会 < 836
+        // （如 1024 视口 + 私聊侧栏 ⇒ 列宽 668），于是桌面也退化成图标档 ——
+        // 明明有空间显示文字，却只给了图标。
+        //
+        // 现口径：**只有窄屏（[AylaBreakpoints.isNarrow]，即视口 ≤ 768）才用图标档**；
+        // 宽屏一律显示文字。这与 web 侧 `@media (max-width: 768px)` 同一判据。
+        //
+        // 槽位仍按档位取值（窄屏 78 / 宽屏 155.2），气泡上限照旧扣槽位
+        // ⇒ 「宽度不跳变」这个不变量完全不受影响（见 `bodyMaxWidth`）。
+        final bool iconActions = narrow;
         final double actionsSlot =
             iconActions ? kAylaMsgActionsSlotIcon : kAylaMsgActionsSlotText;
 
@@ -822,6 +835,7 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
                     widget.actionsOpen,
                 showRecall: showRecall,
                 iconOnly: iconActions,
+                isSelf: widget.isSelf,
                 slotWidth: actionsSlot,
                 favoriteState: widget.favoriteState,
                 favoriteBusy: widget.favoriteBusy,
@@ -1511,6 +1525,16 @@ class _QuoteStripState extends State<_QuoteStrip> {
 }
 
 /// 乐观发送状态（`.msg-send-state`，app.css 1336–1360 + tsx 276–322）。
+/// 按名字取图标（`app_icons_data.dart` 里的 `iconXxx`）。
+///
+/// 文件级私有函数（2026-11-13 从 `_MsgActions._actionIcon` 提升）：
+/// 发送态（`_SendState` 的取消 / 重试 / 删除）与工具栏都需要它 ——
+/// 图标档（`iconOnly`）不渲染 label，**没有图标就是空方键**。
+Widget? _actionIcon(String name, double size) {
+  final AylaIconData? data = aylaIconByName(name);
+  return data == null ? null : AylaIcon(data, size: size);
+}
+
 class _SendState extends StatelessWidget {
   const _SendState({
     required this.msg,
@@ -1559,6 +1583,10 @@ class _SendState extends StatelessWidget {
               AylaMsgActionButton(
                 label: '取消',
                 semanticLabel: '取消发送',
+                // 2026-11-13 用户实报「取消键的文字没有了，这个键如果不显示文字的话
+                // 至少得显示一个叉叉吧」：图标档不渲染文字标签，**必须给图标**，
+                // 否则方键里空无一物。取消 = 叉（iconClose，与 web 语义一致）。
+                icon: _actionIcon('iconClose', 12),
                 iconOnly: compact,
                 iconOnlySize: compact ? 22 : null,
                 onPressed: () => onCancel!(msg),
@@ -1587,10 +1615,14 @@ class _SendState extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
+            // ⚠️ 图标档不渲染 label ⇒ **必须给 icon**，否则方键里空无一物
+            // （2026-11-13 用户实报「取消键的文字没有了…至少得显示一个叉叉」，
+            //   同一类问题：凡是 iconOnly 的按钮都必须有图标）。
             if (onRetry != null)
               AylaMsgActionButton(
                 label: '重试',
                 semanticLabel: '重试发送',
+                icon: _actionIcon('iconRetry', 12),
                 iconOnly: true,
                 iconOnlySize: 22,
                 onPressed: () => onRetry!(msg),
@@ -1601,6 +1633,7 @@ class _SendState extends StatelessWidget {
               AylaMsgActionButton(
                 label: '删除',
                 semanticLabel: '删除消息',
+                icon: _actionIcon('iconClose', 12),
                 iconOnly: true,
                 iconOnlySize: 22,
                 danger: true,
@@ -1652,6 +1685,7 @@ class _MsgActions extends StatelessWidget {
     required this.visible,
     required this.showRecall,
     this.iconOnly = false,
+    this.isSelf = false,
     this.slotWidth,
     this.favoriteState,
     required this.favoriteBusy,
@@ -1671,11 +1705,18 @@ class _MsgActions extends StatelessWidget {
   /// 是否显示「撤回」键（= 自己的消息且在 120s 窗口内，见 [AylaMessageBubble.build]）。
   final bool showRecall;
 
-  /// **仅图标档**（窄行/窄屏）：按钮不渲染文字标签、做成方键。
+  /// **仅图标档**（用户订正后的口径 = 只有窄屏）：按钮不渲染文字标签、做成方键。
   ///
-  /// 对应用户 2026-11-12 裁决「空间够显示文字就显示文字，不够则仅显示图标，
-  /// 不再出现竖排」。阈值判据见 [kAylaMsgActionsSlotTextBreakpoint]。
+  /// 对应用户 2026-11-13 订正：「我说空间不够才不显示文字，意思是没有显示文字的空间，
+  /// 如图二是宽屏足够显示文字的状态。改为**只有窄屏**才不显示文字」。
   final bool iconOnly;
+
+  /// 是否自己的消息行。
+  ///
+  /// 用来决定槽位内按钮组的贴边方向：peer 行气泡在槽位左侧 ⇒ 按钮贴左缘；
+  /// self 行（`row-reverse`）气泡在槽位右侧 ⇒ 按钮贴右缘。
+  /// 写死一侧会让另一侧的气泡与工具栏之间多出一段空隙（用户 2026-11-13 实报）。
+  final bool isSelf;
 
   /// 本工具栏在消息行里占的**固定槽位宽**（[kAylaMsgActionsSlotText] /
   /// [kAylaMsgActionsSlotIcon]）。按钮组按 [AylaMessageBubble.isSelf] 贴向气泡一侧，
@@ -1757,10 +1798,21 @@ class _MsgActions extends StatelessWidget {
             // 3 键时刚好占满槽位；2 键时剩 57.6（文字档）/ 26（图标档）的留白落在
             // **远离气泡的一侧**，按钮自身位置与宽度都不动。
             //
-            // `Align(widthFactor: 1.0)` 让内层行在外层紧宽槽位里**贴右**而不是被拉伸
-            // （内层 `AylaCssFlexRow(mainAxisSize: min)` 自己按内容收缩）。
+            // `Align(widthFactor: 1.0)` 让内层行在外层紧宽槽位里**贴向气泡一侧**、
+            // 而不是被拉伸（内层 `AylaCssFlexRow(mainAxisSize: min)` 自己按内容收缩）。
+            //
+            // ⚠️ 方向必须按 isSelf 翻转（2026-11-13 用户实报「对面发送的消息，工具栏和
+            // 气泡之间隔了一段距离，而不是原本恰到好处的位置」）：
+            //   · peer 行 = [头像][气泡][工具栏/槽位]，气泡在槽位**左**侧 ⇒ 按钮贴左缘；
+            //   · self 行 `row-reverse` ⇒ [槽位][气泡][头像]，气泡在槽位**右**侧 ⇒ 按钮贴右缘。
+            // 写死 `centerRight` 时 peer 行的按钮被推到槽位右端，中间留出 78px 的空隙。
+            //
+            // 同理，**发送态**（下面那个 Align）永远是「气泡左侧外 8px」⇒ 恒贴右缘：
+            // peer 行没有发送态（只有自己发的消息才有），所以它不需要翻转。
             child: Align(
-              alignment: Alignment.centerRight,
+              alignment: isSelf
+                  ? Alignment.centerRight
+                  : Alignment.centerLeft,
               widthFactor: 1.0,
               heightFactor: 1.0,
               child: AylaCssFlexRow(
@@ -1811,10 +1863,6 @@ class _MsgActions extends StatelessWidget {
     );
   }
 
-  static Widget? _actionIcon(String name, double size) {
-    final AylaIconData? data = aylaIconByName(name);
-    return data == null ? null : AylaIcon(data, size: size);
-  }
 }
 
 // ======================= 样张 =======================
